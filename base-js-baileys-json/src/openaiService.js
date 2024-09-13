@@ -5,7 +5,7 @@ import Logger from './logger.js';
 import fs from 'fs';
 
 const logger = new Logger();
-const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25 MB en bytes
+const MAX_AUDIO_SIZE = 2000 * 1024 * 1024; // 25 MB en bytes
 
 class OpenAIService {
   constructor(apiKey) {

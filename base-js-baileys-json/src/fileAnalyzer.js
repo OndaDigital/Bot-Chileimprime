@@ -78,7 +78,7 @@ class FileAnalyzer {
     }
 
     const minDPI = requirements.requiredDPI || 150;
-    const maxFileSize = 25 * 1024 * 1024; // 25 MB por defecto
+    const maxFileSize = 2048 * 1024 * 1024; // 25 MB por defecto
 
     if (fileInfo.size > maxFileSize) {
       fileInfo.errorMessage = `El archivo excede el tamaño máximo permitido de ${maxFileSize / (1024 * 1024)} MB`;

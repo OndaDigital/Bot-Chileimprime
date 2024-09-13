@@ -1,15 +1,15 @@
 [
   {
-    "ref": "be30a5e9-a454-4fd9-9d9b-f59023073ae0",
-    "keyword": "1bcf398c87a357d4e401f245cb175cc8",
-    "answer": "_event_voice_note__7ccf03bf-362d-4ae5-8ffa-9c06feb66f87",
+    "ref": "a7afd038-f1c9-48bc-a080-3c89013dd430",
+    "keyword": "09f8c78b36a0fb691b920e1a2f8498f3",
+    "answer": "Hola",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "96b14b8be7efa18e5c6075686bd0b5a9"
+    "refSerialize": "c22e4066d61d81721def9b25d8a397e8"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
+    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -19,13 +19,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
     "from": "56937782810"
   },
   {
-    "ref": "68b77702-ef50-4edc-b799-2f2422d86c60",
+    "ref": "126f1bbf-a09e-4a02-9654-6125819a020b",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\nولا ولا ولا ولا ولا ولا ولا",
+    "answer": "¡Hola! 😊 ¿En qué puedo ayudarte hoy? ¿Qué servicio de impresión deseas cotizar?",
     "options": {
       "media": null,
       "buttons": [],
@@ -33,32 +33,19 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "a5746392f79b328986568e5299c31dcf"
+    "refSerialize": "4693bca9ed3919528917c0ee420280c4"
   },
   {
-    "ref": "a5e386d3-cae8-4b51-a5d2-9fb017b7ca9f",
-    "keyword": null,
-    "answer": "¡Hola! 😊 ¿En qué servicio de impresión puedo ayudarte hoy?",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "c265c1b6167d463786fb5eb1f6aa6128"
-  },
-  {
-    "ref": "c0bddc71-2fd6-4fb8-bb82-a22022d80a74",
-    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
-    "answer": "_event_voice_note__5ad85182-4113-49c6-be55-04ef13374931",
+    "ref": "1563fdf1-d3a7-4f10-8e80-a73d80c93a4f",
+    "keyword": "8d33779cf6b1514c33a547daad34523d",
+    "answer": "Dame un PVC de alta definición,  con 20 m de alto y 2m de ancho. Solo 1 y sin terminaciones",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "7b9a8208b7473a3548b482b49c917343"
+    "refSerialize": "d1d419bae9605a22ea28746e6d5c0379"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
+    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -68,13 +55,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
     "from": "56937782810"
   },
   {
-    "ref": "9435886a-63e4-42c6-bf1d-d370271bb6f3",
+    "ref": "d9717f74-a3ca-4387-af80-55f1a74de544",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\nHola, hola, hola, kital?",
+    "answer": "¡Perfecto! Para el PVC Alta Definición, tienes una medida de 2 m de ancho y 20 m de alto. La cantidad será 1 y sin terminaciones.\n\nPor favor, envíame el diseño en formato PDF o JPG (máximo 16MB) para proceder con la cotización. \n\n¿Te gustaría cotizar algo más o finalizar la cotización? 😊",
     "options": {
       "media": null,
       "buttons": [],
@@ -82,32 +69,19 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "bb520138a37b96d5016620d34bc1648c"
+    "refSerialize": "abc46e0a7f87c58194917453911fe9db"
   },
   {
-    "ref": "dcd56a0b-5039-4d25-b20d-5db4e9f76035",
-    "keyword": null,
-    "answer": "¡Hola! 😊 ¿En qué servicio de impresión puedo ayudarte hoy?",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "c265c1b6167d463786fb5eb1f6aa6128"
-  },
-  {
-    "ref": "28e5aa58-b19f-4871-b78b-084d4f612a79",
-    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
-    "answer": "_event_voice_note__ae944866-ae7c-413f-8939-bae074f92750",
+    "ref": "4bdbd4a1-bcf7-42b5-9a9e-9ec49bc9c3d7",
+    "keyword": "8d33779cf6b1514c33a547daad34523d",
+    "answer": "_event_document__72ec78f5-8a7a-430f-9a55-2a96876392a4",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "62c85f7b1b8a5ff0c29507f52b1e1f3e"
+    "refSerialize": "83c7436e0830fad8224cf884f6d49196"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
+    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -117,13 +91,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
     "from": "56937782810"
   },
   {
-    "ref": "2a64f64f-13da-4aeb-b3f5-bb4c616e7994",
+    "ref": "6cdf4b46-9d79-41d9-be4b-3158d7c3c06b",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\ndame el listado de servicios",
+    "answer": "⚠️ El archivo no es compatible: La resolución del archivo (25 DPI) es menor que la mínima requerida (72 DPI)\nTe quedan 2 intentos.",
     "options": {
       "media": null,
       "buttons": [],
@@ -131,32 +105,98 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "1d1b9dacdba10357d8bce9d205e7de7c"
+    "refSerialize": "29a319a62f448612acbdd3b83450ff2d"
   },
   {
-    "ref": "8628445f-b13b-49fa-814c-bd14a5b858f8",
-    "keyword": null,
-    "answer": "¡Hola! 😊 Aquí tienes un resumen de los servicios de impresión que ofrecemos:\n\n### Servicios Disponibles:\n1. **Telas PVC**\n   - PVC Alta Definición\n   - PVC 11 Oz mt2\n   - PVC 13 Oz mt2 - Promoción solo Local\n   - PVC 13 Oz mt2\n   - PVC Blackout\n\n2. **Banderas**\n   - Tela de bandera Translúcido genero\n   - Tela de bandera Textil (agotado)\n   - Tela de bandera Sintética\n\n3. **Adhesivos**\n   - Windows One Vision\n   - Adhesivo Láminado y Tronquelado\n   - Adhesivo Láminado\n   - Adhesivo troquelado\n   - Vinilo Adhesivo Reflectante\n   - Vinilo Adhesivo Transparente\n   - Adhesivo Brillantes\n   - Adhesivo Mate\n   - Adhesivo Empavonado\n   - Adhesivo Laminado Floor Graphic\n   - Rotulación semicurvas\n\n4. **Adhesivo Vehicular**\n   - Laminado para Rotulación Semi Curvas\n   - Rotulación para fundido\n\n5. **Back Light**\n   - Back Light Textil\n   - Back Light Film (agotado)\n   - Back Light Banner\n   - Tela Canvas\n\n6. **Otros**\n   - Tela Mesh\n   - Stand Publicitario\n   - Floor Graphic\n   - Papel de sublimación\n   - Comprinter Troquelado\n   - Imantados 60cm ancho\n   - Servicio de Troquelado\n   - Comprinter\n   - Papel sintético\n\n7. **Imprenta**\n   - Flyer 15×22 cms 1000 Unid\n   - Flyer 11×15 cms 1000 Unid\n   - Tarjetas presentación 1000 U. Tiro y Retiro\n   - Flyer 10x14 cm 1000 u. Tiro y Retiro\n   - Flyer 14x20cm 1000u tiro y retiro\n   - Tarjetas de presentación 1000 Unid\n   - Pendon Roller 90x200 cms\n   - Pendon Roller 80x200 cms\n   - Mini Roller escritorio papel sintético\n   - Paloma 2 caras 80x150 cms\n   - Paloma 2 caras 70x120 cms\n   - Paloma 2 Caras 0.5x1 mts\n   - Paloma 2 Caras 0.6 x 1 mts\n   - Paloma 1 cara 1x2 Mts\n   - Paloma 1 Cara 1x1 Mts\n   - Paloma 1 Cara 1x0.6 mts\n\n8. **Figuras**\n   - Sintra Laminado\n   - Sintra\n   - Foam Laminado\n   - Foam\n\n9. **Extras**\n   - Pack Candy Bar\n   - Modificación Diseño\n   - Figuras Foam en Promocion\n   - Diseño estandar\n   - Plataforma Floorgrafic y Troquelado\n\nSi deseas cotizar algún servicio en particular, ¡házmelo saber! 😊",
+    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
+    "answer": "¿Qué deseas hacer?",
     "options": {
-      "media": null,
       "buttons": [],
       "capture": false,
-      "delay": 0
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
     },
-    "from": "56937782810",
-    "refSerialize": "c85c5be3b7399121c41cd151f6895538"
+    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
+    "from": "56937782810"
   },
   {
-    "ref": "bfa82997-6a14-4150-b524-22603ebf3eaf",
-    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
-    "answer": "_event_voice_note__3faba749-c81c-4429-a360-6a70b16c8b7a",
+    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
+    },
+    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
+    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "answer": "__capture_only_intended__",
+    "options": {
+      "buttons": [],
+      "capture": true,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
+    "from": "56937782810"
+  },
+  {
+    "ref": "584b3bf4-16a0-4f5c-9c39-8c9933ba51a7",
+    "keyword": "2280047b99b4e76e91f0353cc2b0ea64",
+    "answer": "1",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "1abafdaa9a332d830710fd829ebbc55b"
+    "refSerialize": "290236b1d481a790a200ea6e94b2122a"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "cc9918a5-2951-4c62-b471-5c97b9925b49",
+    "keyword": null,
+    "answer": "Por favor, sube el nuevo archivo.",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "eb39109e4f2451f4a14c0e131a0dbbe1"
+  },
+  {
+    "ref": "50126415-15e8-4e1d-8bcf-3d83e0533a4a",
+    "keyword": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
+    "answer": "__end_flow__",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "a07e48655d1eb1adf63c1b74c6ee668e"
+  },
+  {
+    "ref": "b045ca9c-8446-4d24-b1dc-aec90557dfb3",
+    "keyword": "a07e48655d1eb1adf63c1b74c6ee668e",
+    "answer": "_event_document__62a5835e-88e2-4396-bdd4-99993228ead6",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "27a7d7eef817a6e7d3293872fac6b13b"
+  },
+  {
+    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
+    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -166,13 +206,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
     "from": "56937782810"
   },
   {
-    "ref": "2a45bfcf-60d8-4e48-b43a-af52e824b985",
+    "ref": "4c90b71c-b5ff-4967-b18f-9716a495b588",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\nun pvc de alta definición",
+    "answer": "⚠️ El archivo no es compatible: La resolución del archivo (16 DPI) es menor que la mínima requerida (72 DPI)\nTe quedan 1 intento.",
     "options": {
       "media": null,
       "buttons": [],
@@ -180,12 +220,57 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "7897d21033c56a421c768b615824c547"
+    "refSerialize": "e2f87b67a6aa3d92a38b2612ab3df050"
   },
   {
-    "ref": "5df4ec2d-bfc1-47c6-8b5b-0588ccb128be",
+    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
+    "answer": "¿Qué deseas hacer?",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
+    },
+    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
+    },
+    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
+    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "answer": "__capture_only_intended__",
+    "options": {
+      "buttons": [],
+      "capture": true,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
+    "from": "56937782810"
+  },
+  {
+    "ref": "40850731-4c15-4027-8050-d24041cee3c6",
     "keyword": null,
-    "answer": "¡Perfecto! 😊 Para cotizar el **PVC Alta Definición**, necesito que me indiques el **ancho**, **alto** y **cantidad** que deseas. \n\nAdemás, puedes elegir las siguientes terminaciones: \n- Sellado\n- Ojetillos\n- Bolsillo\n\n¡Espero tu respuesta!",
+    "answer": "*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*",
     "options": {
       "media": null,
       "buttons": [],
@@ -193,19 +278,32 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "518a957b1b46121a154f9f569166633c"
+    "refSerialize": "0b379522443448c14b16dc629dcf4f6f"
   },
   {
-    "ref": "525b83cd-43a7-42d3-824f-7b3797825d0b",
-    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
-    "answer": "_event_voice_note__82ffb503-5bde-4d89-b3de-64d2af3cb02b",
+    "ref": "dacdef8f-fb6d-4ae9-8637-5a4525ffd541",
+    "keyword": "2280047b99b4e76e91f0353cc2b0ea64",
+    "answer": "2",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "06ee961a883683badcf31f2b7fde0889"
+    "refSerialize": "2294c3d08b53a6effa5df696a15b9d30"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "9c5dc7f8-4598-49bc-82aa-ce7943a5876c",
+    "keyword": null,
+    "answer": "Servicio cancelado. ¿Deseas agregar otro servicio?",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "343c260e4024ecfb99d532de36f9d37d"
+  },
+  {
+    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
+    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -215,13 +313,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
     "from": "56937782810"
   },
   {
-    "ref": "eaacae40-d190-4631-b670-224af96357b2",
+    "ref": "d39b5258-cd1d-4421-a133-7f2e2c4a14f0",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\nPerfecto, perfecto. Con sellado, ojetillo y bolsillo.",
+    "answer": "Vendedor: ¡Claro! 😊 ¿Podrías indicarme qué servicio deseas cotizar como \"2\"? Recuerda que puedes cotizar hasta 5 servicios por conversación.",
     "options": {
       "media": null,
       "buttons": [],
@@ -229,32 +327,19 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "1188122a8d96104e5c384524a8322e82"
+    "refSerialize": "959045ed440422b7696db558180cd282"
   },
   {
-    "ref": "fbee6ed4-e85e-49d6-b78d-e05544ac93c7",
-    "keyword": null,
-    "answer": "¡Genial! 😊 Entonces, para tu pedido de **PVC Alta Definición** con terminaciones de sellado, ojetillos y bolsillo, solo necesito el **ancho**, **alto** y la **cantidad** que deseas. \n\n¡Espero tu respuesta para continuar! 📏📐",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "840fc2863e4c8e22d405a9f7ea338abe"
-  },
-  {
-    "ref": "68868ecd-4b57-4e76-8f50-58a12d27ecd8",
-    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
-    "answer": "_event_voice_note__6884630a-2e07-44d2-a7f5-6a285a5f19bb",
+    "ref": "bd79ffce-b5b7-4c74-853e-dd07f3d3f975",
+    "keyword": "8d33779cf6b1514c33a547daad34523d",
+    "answer": "Que tengo en mi carrito?",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "704a5eee3a13eb1359761c60239be8c5"
+    "refSerialize": "3bd595aed9b0b2c026bcda2dc7be4a7c"
   },
   {
-    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
-    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
+    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -264,13 +349,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
     "from": "56937782810"
   },
   {
-    "ref": "11c3e575-af2b-4959-aaca-ccf57f8a201f",
+    "ref": "1cbf2cd3-316f-4435-9871-fa5a87bc8cb8",
     "keyword": null,
-    "answer": "*📝 Transcripción:*\nancho 200 metros y de alto 500 metros y cantidad a 3",
+    "answer": "¡Claro! Actualmente tienes un PVC Alta Definición de 2 m de ancho y 20 m de alto, con una cantidad de 1 y sin terminaciones. 😊 \n\n¿Te gustaría cotizar otro servicio o finalizar la cotización?",
     "options": {
       "media": null,
       "buttons": [],
@@ -278,12 +363,50 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "c912ef268a56a55c5723c12137be4966"
+    "refSerialize": "f24537c80abb1c810723ad9a741b9c40"
   },
   {
-    "ref": "f73cf81c-f6e8-45b0-b292-d1fe0709f7a5",
+    "ref": "22c89a95-759a-433a-9d84-db65d9b9b191",
+    "keyword": "8d33779cf6b1514c33a547daad34523d",
+    "answer": "Que servicios tienes disponibles?",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "02a78a448394277910e8c7763fbe02f3"
+  },
+  {
+    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
+    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
+    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
+    "from": "56937782810"
+  },
+  {
+    "ref": "cd354f92-8afd-45aa-bb3b-dbf67e1e562e",
     "keyword": null,
-    "answer": "¡Gracias por la información! 😊 \n\n### Detalles de tu pedido:\n- **Producto**: PVC Alta Definición\n- **Ancho**: 200 metros\n- **Alto**: 500 metros\n- **Cantidad**: 3\n- **Terminaciones**: Sellado, Ojetillos, Bolsillo\n\nPor favor, envíame el diseño para este servicio, asegurándote de que el tamaño no supere los 16MB. \n\n¿Te gustaría cotizar algo más o deseas finalizar la cotización? 😊",
+    "answer": "Hubo un error al procesar tu archivo. Te quedan 2 intentos. Por favor, intenta nuevamente.",
     "options": {
       "media": null,
       "buttons": [],
@@ -291,6 +414,51 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "792517b8726cebae094c72e1274e5369"
+    "refSerialize": "79ff38a7a720708e1e35b96e753900d2"
+  },
+  {
+    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
+    "answer": "¿Qué deseas hacer?",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
+    },
+    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": false
+    },
+    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
+    "from": "56937782810"
+  },
+  {
+    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
+    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "answer": "__capture_only_intended__",
+    "options": {
+      "buttons": [],
+      "capture": true,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
+    "from": "56937782810"
   }
 ]

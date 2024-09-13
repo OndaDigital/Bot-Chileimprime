@@ -1,5 +1,3 @@
-// app.js - Bot imprenta mejorado
-
 import "dotenv/config";
 import { createBot, createProvider, createFlow, addKeyword, EVENTS } from '@builderbot/bot';
 import { JsonFileDB } from '@builderbot/database-json';
@@ -38,13 +36,15 @@ const IDLE_WARNING_TIME = 5 * 60 * 1000; // 5 minutos
 const IDLE_TIMEOUT_TIME = 10 * 60 * 1000; // 10 minutos
 const MAX_SERVICES_PER_CONVERSATION = 5;
 const SERVICE_COOLDOWN_TIME = 10 * 60 * 1000; // 10 minutos
+const MAX_RETRIES = 3;
+
 
 class ImprovedPrintingBot {
   constructor() {
     this.userContexts = new Map();
     this.services = {};
-    this.idleTimers = new Map();
     this.additionalInfo = null;
+    this.idleTimers = new Map();
     this.initialize().catch(error => {
       logger.error(`Error en la inicialización inicial: ${error.message}`);
     });
@@ -59,8 +59,39 @@ class ImprovedPrintingBot {
       logger.debug(`Info adicional: ${JSON.stringify(this.additionalInfo)}`);
     } catch (error) {
       logger.error(`Error al inicializar: ${error.message}`);
-      this.services = this.services || {};
-      this.additionalInfo = this.additionalInfo || {};
+      this.services = {};
+      this.additionalInfo = {};
+    }
+  }
+
+  getUserContext(userId) {
+    if (!this.userContexts.has(userId)) {
+      this.userContexts.set(userId, {
+        context: "",
+        currentOrder: { items: [] },
+        currentService: null,
+        serviceCount: 0,
+        lastServiceTime: 0,
+        awaitingFile: false
+      });
+    }
+    return this.userContexts.get(userId);
+  }
+
+  setCurrentService(userId, serviceName) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentService = serviceName;
+    userContext.awaitingFile = true;
+    userContext.fileUploadRetries = 0;  // Reiniciar el contador de intentos
+    logger.info(`Servicio actual establecido para ${userId}: ${serviceName}`);
+  }
+
+  cancelCurrentService(userId) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentService = null;
+    userContext.awaitingFile = false;
+    if (userContext.currentOrder.items.length > 0) {
+      userContext.currentOrder.items.pop();
     }
   }
 
@@ -80,6 +111,11 @@ class ImprovedPrintingBot {
       return endFlow();
     }
 
+    if (userContext.awaitingFile) {
+      await flowDynamic('Parece que aún no has subido un archivo para el servicio actual. Por favor, sube el archivo antes de continuar.');
+      return gotoFlow(fileManagementFlow);
+    }
+
     this.startIdleTimer(ctx, flowDynamic, gotoFlow);
 
     try {
@@ -87,22 +123,30 @@ class ImprovedPrintingBot {
       logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
       const { action, response, order } = await this.updateOrder(userId, aiResponse);
 
+    // Actualizar el servicio actual
+    if (order && order.items.length > 0) {
+      const currentService = order.items[order.items.length - 1].nombre;
+      this.setCurrentService(userId, currentService);
+      logger.info(`Servicio actual actualizado para ${userId}: ${currentService}`);
+    }
+
       switch (action) {
         case "CONFIRMAR_PEDIDO":
-          const { confirmationMessage, orderSummary, promoMessage, endConversation } = await this.finalizeOrder(ctx);
-          await flowDynamic(orderSummary);
-          await flowDynamic(confirmationMessage);
-          logger.info(`Pedido confirmado para ${userId}. Finalizando flujo.`);
-          
-          blacklistManager.addToBlacklist(userId, BLACKLIST_DURATION);
-          this.clearIdleTimer(userId);
-          
-          setTimeout(() => {
-            gotoFlow(flowPromo);
-          }, 15000);
-          
-          if (endConversation) {
-            return endFlow();
+          if (this.allServicesHaveFiles(userContext)) {
+            const { confirmationMessage, orderSummary, promoMessage } = await this.finalizeOrder(ctx);
+            await flowDynamic(orderSummary);
+            await flowDynamic(confirmationMessage);
+            logger.info(`Pedido confirmado para ${userId}. Finalizando flujo.`);
+            
+            blacklistManager.addToBlacklist(userId, BLACKLIST_DURATION);
+            this.clearIdleTimer(userId);
+            
+            setTimeout(() => {
+              gotoFlow(flowPromo);
+            }, 15000);
+          } else {
+            await flowDynamic('Aún hay servicios sin archivos asociados. Por favor, sube los archivos faltantes.');
+            return gotoFlow(fileManagementFlow);
           }
           break;
         case "SOLICITUD_HUMANO":
@@ -126,18 +170,6 @@ class ImprovedPrintingBot {
       logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
       await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
-  }
-
-  getUserContext(userId) {
-    if (!this.userContexts.has(userId)) {
-      this.userContexts.set(userId, {
-        context: "",
-        currentOrder: { items: [] },
-        serviceCount: 0,
-        lastServiceTime: 0
-      });
-    }
-    return this.userContexts.get(userId);
   }
 
   updateContext(userId, message, role) {
@@ -223,8 +255,12 @@ class ImprovedPrintingBot {
         userContext.currentOrder = extractedOrder;
         userContext.serviceCount += extractedOrder.items.length;
         userContext.lastServiceTime = Date.now();
+        
+        // Actualizar el servicio actual
+        const currentService = extractedOrder.items[extractedOrder.items.length - 1].nombre;
+        this.setCurrentService(userId, currentService);
+        logger.info(`Servicio actual actualizado para ${userId}: ${currentService}`);
       }
-  
       if (aiResponse.includes("CONFIRMAR_PEDIDO")) {
         logger.info(`Pedido confirmado para usuario ${userId}`);
         return { action: "CONFIRMAR_PEDIDO", order: userContext.currentOrder };
@@ -325,16 +361,12 @@ class ImprovedPrintingBot {
       const audioFileName = `audio_${Date.now()}.oga`;
       const audioPath = path.join(TMP_DIR, audioFileName);
       
-      // Usar el método correcto para guardar el archivo
       const savedFile = await provider.saveFile(ctx);
       
       if (typeof savedFile === 'string' || (savedFile && savedFile.path)) {
         const sourcePath = typeof savedFile === 'string' ? savedFile : savedFile.path;
         
-        // Copiar el archivo en lugar de moverlo
         await fs.copyFile(sourcePath, audioPath);
-        
-        // Eliminar el archivo original
         await fs.unlink(sourcePath);
         
         const transcription = await openaiService.transcribeAudio(audioPath);
@@ -351,34 +383,77 @@ class ImprovedPrintingBot {
     }
   }
 
-  async analyzeFile(ctx, filePath) {
+  async analyzeFile(filePath, userInfo) {
     try {
-      logger.info(`Analizando archivo para usuario ${ctx.from}: ${filePath}`);
-      const userContext = this.getUserContext(ctx.from);
-      const currentItem = userContext.currentOrder.items[userContext.currentOrder.items.length - 1];
+      logger.info(`Analizando archivo: ${filePath}`);
+      const currentItem = userInfo.currentOrder.items[userInfo.currentOrder.items.length - 1];
       
       if (!currentItem) {
         throw new Error('No hay un item actual en el pedido');
       }
-
+  
       const serviceInfo = this.services[currentItem.nombre];
       if (!serviceInfo) {
         throw new Error(`No se encontró información del servicio: ${currentItem.nombre}`);
       }
-
+  
       const requiredWidth = currentItem.ancho || serviceInfo.anchoImprimible;
       const requiredHeight = currentItem.alto || serviceInfo.altoImprimible;
-      const requiredDPI = serviceInfo.dpi || 300; // DPI por defecto si no se especifica
-
+      const requiredDPI = serviceInfo.dpi || 300;
+  
       const analysisResult = await fileAnalyzer.analyzeFile(filePath, requiredWidth, requiredHeight, requiredDPI);
       
-      logger.info(`Resultado del análisis para usuario ${ctx.from}: ${JSON.stringify(analysisResult)}`);
+      logger.info(`Resultado del análisis: ${JSON.stringify(analysisResult)}`);
       
       return analysisResult;
     } catch (error) {
-      logger.error(`Error analizando archivo para usuario ${ctx.from}: ${error.message}`);
+      logger.error(`Error analizando archivo: ${error.message}`);
       throw error;
     }
+  }
+
+  
+  async saveUploadedFile(ctx, provider) {
+    try {
+      const savedFile = await provider.saveFile(ctx, { path: TMP_DIR });
+      logger.info(`Archivo guardado exitosamente: ${savedFile}`);
+      return savedFile;
+    } catch (error) {
+      logger.error(`Error al guardar el archivo: ${error.message}`);
+      throw error;
+    }
+  }
+  allServicesHaveFiles(userContext) {
+    return userContext.currentOrder.items.every(item => item.fileUploaded);
+  }
+
+  async finalizeOrder(ctx) {
+    const userContext = this.getUserContext(ctx.from);
+    const calculatedOrder = printingCalculator.calculateOrder(userContext.currentOrder, this.services);
+    const orderSummary = printingCalculator.formatOrderSummary(calculatedOrder);
+    
+    const orderForSheet = this.formatOrderForSheet(calculatedOrder);
+    const saveResult = await sheetService.saveOrder({
+      fecha: new Date().toISOString(),
+      telefono: ctx.from,
+      nombre: ctx.pushName || 'No disponible',
+      correo: 'No disponible', // Puedes agregar lógica para obtener el correo si lo necesitas
+      pedido: orderForSheet.details,
+      archivos: 'No disponible', // Puedes agregar lógica para manejar los archivos si es necesario
+      total: orderForSheet.total,
+      estado: 'Pendiente'
+    });
+
+    let confirmationMessage = '';
+    if (saveResult.success) {
+      confirmationMessage = `¡Gracias por tu pedido! Ha sido registrado con el número de orden: ${saveResult.rowIndex}. Nos pondremos en contacto contigo pronto para confirmar los detalles y el pago.`;
+    } else {
+      confirmationMessage = 'Gracias por tu pedido. Hemos tenido un problema al registrarlo, pero no te preocupes, nos pondremos en contacto contigo pronto para confirmar los detalles.';
+    }
+
+    const promoMessage = this.getPromoMessage();
+
+    return { confirmationMessage, orderSummary, promoMessage };
   }
 }
 
@@ -390,6 +465,11 @@ const flowPrincipal = addKeyword(EVENTS.WELCOME)
 
     if (Object.keys(printingBot.services).length === 0) {
       await printingBot.initialize();
+    }
+
+    const userContext = printingBot.getUserContext(userId);
+    if (userContext.awaitingFile) {
+      return gotoFlow(fileManagementFlow);
     }
 
     await printingBot.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, ctx.body);
@@ -405,7 +485,91 @@ const flowRestartBot = addKeyword(['bot', 'Bot', 'BOT'])
     return gotoFlow(flowPrincipal);
   });
 
-  const voiceNoteFlow = addKeyword(EVENTS.VOICE_NOTE)
+  const fileManagementFlow = addKeyword(EVENTS.DOCUMENT)
+  .addAction(async (ctx, { flowDynamic, gotoFlow, provider, endFlow }) => {
+    const userContext = printingBot.getUserContext(ctx.from);
+    logger.info(`Estado actual del usuario ${ctx.from}: ${JSON.stringify(userContext)}`);
+    
+    if (!userContext.currentService) {
+      logger.warn(`Usuario ${ctx.from} intentó subir un archivo sin servicio seleccionado.`);
+      await flowDynamic('Por favor, selecciona un servicio antes de subir un archivo.');
+      return gotoFlow(flowPrincipal);
+    }
+
+    logger.info(`Procesando archivo para servicio: ${userContext.currentService}`);
+    return handleFileUpload(ctx, { flowDynamic, gotoFlow, provider, endFlow });
+  });
+
+  const handleFileUpload = async (ctx, { flowDynamic, gotoFlow, provider }) => {
+    const userContext = printingBot.getUserContext(ctx.from);
+    let retries = userContext.fileUploadRetries || 0;
+  
+    try {
+      logger.info(`Intentando procesar archivo para usuario ${ctx.from}. Intento ${retries + 1}`);
+      const savedFile = await printingBot.saveUploadedFile(ctx, provider);
+      
+      const userInfo = {
+        currentOrder: userContext.currentOrder,
+        currentService: userContext.currentService
+      };
+      
+      const fileAnalysisResult = await printingBot.analyzeFile(savedFile, userInfo);
+      
+      if (fileAnalysisResult.isCompatible) {
+        userContext.currentOrder.items[userContext.currentOrder.items.length - 1].fileUploaded = true;
+        await flowDynamic('✅ El archivo es compatible y ha sido asociado al servicio actual.');
+        userContext.fileUploadRetries = 0;
+        return gotoFlow(flowConfirmOrder);
+      } else {
+        retries++;
+        userContext.fileUploadRetries = retries;
+        const remainingAttempts = MAX_RETRIES - retries;
+        await flowDynamic(`⚠️ El archivo no es compatible: ${fileAnalysisResult.errorMessage}\nTe quedan ${remainingAttempts} ${remainingAttempts === 1 ? 'intento' : 'intentos'}.`);
+        return gotoFlow(fileRetryFlow);
+      }
+    } catch (error) {
+      logger.error(`Error al procesar archivo para ${ctx.from}: ${error.message}`);
+      retries++;
+      userContext.fileUploadRetries = retries;
+      const remainingAttempts = MAX_RETRIES - retries;
+  
+      if (retries >= MAX_RETRIES) {
+        await flowDynamic('Se ha alcanzado el número máximo de intentos. Por favor, intenta más tarde o contacta con soporte.');
+        return gotoFlow(flowPrincipal);
+      }
+  
+      await flowDynamic(`Hubo un error al procesar tu archivo. Te quedan ${remainingAttempts} ${remainingAttempts === 1 ? 'intento' : 'intentos'}. Por favor, intenta nuevamente.`);
+      return gotoFlow(fileRetryFlow);
+    }
+  }
+
+  const fileRetryFlow = addKeyword(EVENTS.ACTION)
+  .addAnswer('¿Qué deseas hacer?')
+  .addAnswer(
+    ['1. Subir otro archivo', '2. Cancelar este servicio', '3. Finalizar el pedido'],
+    { capture: true },
+    async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
+      const option = ctx.body;
+      switch (option) {
+        case '1':
+          await flowDynamic('Por favor, sube el nuevo archivo.');
+          const userContext = printingBot.getUserContext(ctx.from);
+          userContext.awaitingFile = true;
+          return endFlow();
+        case '2':
+          printingBot.cancelCurrentService(ctx.from);
+          await flowDynamic('Servicio cancelado. ¿Deseas agregar otro servicio?');
+          return gotoFlow(flowPrincipal);
+        case '3':
+          return gotoFlow(flowConfirmOrder);
+        default:
+          await flowDynamic('Opción no válida. Por favor, elige 1, 2 o 3.');
+          return gotoFlow(fileRetryFlow);
+      }
+    }
+  );
+
+const voiceNoteFlow = addKeyword(EVENTS.VOICE_NOTE)
   .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow, provider }) => {
     try {
       const transcription = await printingBot.processVoiceNote(ctx, provider);
@@ -418,35 +582,6 @@ const flowRestartBot = addKeyword(['bot', 'Bot', 'BOT'])
     } catch (error) {
       logger.error(`Error al procesar la nota de voz: ${error.message}`);
       await flowDynamic('Hubo un error al procesar la nota de voz. Por favor, intenta enviar un mensaje de texto.');
-    }
-  });
-
-const fileFlow = addKeyword(EVENTS.DOCUMENT)
-  .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-    const fileFileName = `file_${Date.now()}_${ctx.filename}`;
-    const filePath = path.join(TMP_DIR, fileFileName);
-    
-    try {
-      const mediaData = await ctx.downloadMedia();
-      await fs.writeFile(filePath, mediaData.data, 'base64');
-      logger.info(`Archivo guardado: ${filePath}`);
-
-      const analysisResult = await printingBot.analyzeFile(ctx, filePath);
-      
-      if (analysisResult.isCompatible) {
-        await flowDynamic('*✅ El archivo es compatible con los requisitos del servicio.*');
-      } else {
-        await flowDynamic('*⚠️ El archivo no cumple con los requisitos del servicio. Por favor, ajusta el archivo según las especificaciones y vuelve a enviarlo.*');
-      }
-
-      await fs.unlink(filePath);
-      logger.info(`Archivo analizado y eliminado: ${filePath}`);
-
-      await printingBot.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, 'Archivo recibido y analizado');
-
-    } catch (error) {
-      logger.error(`Error al procesar el archivo: ${error.message}`);
-      await flowDynamic('Hubo un error al procesar el archivo. Por favor, intenta enviarlo nuevamente o contacta con soporte.');
     }
   });
 
@@ -469,15 +604,31 @@ const flowPromo = addKeyword(EVENTS.ACTION)
     return endFlow();
   });
 
+  const flowConfirmOrder = addKeyword(EVENTS.ACTION)
+  .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
+    const userContext = printingBot.getUserContext(ctx.from);
+    if (!printingBot.allServicesHaveFiles(userContext)) {
+      await flowDynamic('Aún hay servicios sin archivos asociados. Por favor, sube los archivos faltantes.');
+      return gotoFlow(fileManagementFlow);
+    }
+    const { confirmationMessage, orderSummary } = await printingBot.finalizeOrder(ctx);
+    await flowDynamic(orderSummary);
+    await flowDynamic(confirmationMessage);
+    return gotoFlow(flowPromo);
+  });
+
+
 const main = async () => {
   try {
     const adapterFlow = createFlow([
       flowPrincipal,
       flowRestartBot,
       voiceNoteFlow,
-      fileFlow,
+      fileManagementFlow,
+      fileRetryFlow,
       idleTimeoutFlow,
-      flowPromo
+      flowPromo,
+      flowConfirmOrder
     ])
     
     const adapterProvider = createProvider(BaileysProvider)
@@ -490,7 +641,6 @@ const main = async () => {
       database: adapterDB,
     })
 
-    // Aquí van las rutas del servidor
     adapterProvider.server.post('/v1/messages', handleCtx(async (bot, req, res) => {
         const { number, message, urlMedia } = req.body
         await bot.sendMessage(number, message, { media: urlMedia ?? null })
@@ -504,7 +654,6 @@ const main = async () => {
         return res.json({ status: 'ok', number, intent })
     }))
 
-    // Iniciar el servidor HTTP
     httpServer(+PORT)
     console.log(`Bot iniciado en el puerto ${PORT}`)
   } catch (error) {
