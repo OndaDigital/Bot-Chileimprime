@@ -1,0 +1,74 @@
+[
+  {
+    "ref": "5a10f571-526f-47f4-b972-34fb44d503c6",
+    "keyword": "a07e48655d1eb1adf63c1b74c6ee668e",
+    "answer": "Hola",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "c22e4066d61d81721def9b25d8a397e8"
+  },
+  {
+    "ref": "ans_8dbb24c0-10fd-4f74-9acc-4704ea00fc85",
+    "keyword": "key_6c2d2ac8-0543-455c-80ce-956be6aedc11",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "e8918b33b3c60a62ee962b684f4adbf8",
+    "from": "56937782810"
+  },
+  {
+    "ref": "47fbdd5a-ef2f-4828-8700-87577b1d1998",
+    "keyword": null,
+    "answer": "¡Hola! 😊 ¿En qué servicio de impresión te gustaría que te ayude a cotizar hoy?",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "b4ad921d5232be796623bfd14f0e3440"
+  },
+  {
+    "ref": "a66e3d95-c840-4c25-8d12-b3ccad8a5b7d",
+    "keyword": "e8918b33b3c60a62ee962b684f4adbf8",
+    "answer": "Que productos tienes?",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "ba3067ff219aaa9a63954c9b1a7264bc"
+  },
+  {
+    "ref": "ans_8dbb24c0-10fd-4f74-9acc-4704ea00fc85",
+    "keyword": "key_6c2d2ac8-0543-455c-80ce-956be6aedc11",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "e8918b33b3c60a62ee962b684f4adbf8",
+    "from": "56937782810"
+  },
+  {
+    "ref": "f134c722-dce8-463e-8179-a876ae7b5345",
+    "keyword": null,
+    "answer": "¡Claro! Aquí tienes una lista de nuestros servicios de impresión:\n\n**Telas PVC:**\n- PVC Alta Definición\n- PVC 11 Oz mt2\n- PVC 13 Oz mt2 - Promoción solo Local\n- PVC 13 Oz mt2\n- PVC Blackout\n\n**Banderas:**\n- Tela de bandera Translúcido genero\n- Tela de bandera Textil (agotado)\n- Tela de bandera Sintética\n\n**Adhesivos:**\n- Windows One Vision\n- Adhesivo Láminado y Tronquelado\n- Adhesivo Láminado\n- Adhesivo troquelado\n- Vinilo Adhesivo Reflectante\n- Vinilo Adhesivo Transparente\n- Adhesivo Brillantes\n- Adhesivo Mate\n- Adhesivo Empavonado\n- Adhesivo Laminado Floor Graphic\n- Rotulación semicurvas\n\n**Adhesivo Vehicular:**\n- Laminado para Rotulación Semi Curvas\n- Rotulación para fundido\n- Back Light Textil\n- Back Light Film (agotado)\n- Back Light Banner\n- Tela Canvas\n\n**Otros:**\n- Tela Mesh\n- Stand Publicitario\n- Floor Graphic\n- Papel de sublimación\n- Comprinter Troquelado\n- Imantados 60cm ancho\n- Servicio de Troquelado\n- Comprinter\n- Papel sintético\n- Flyer 15×22 cms 1000 Unid\n- Flyer 11×15 cms 1000 Unid\n- Tarjetas presentación 1000 U. Tiro y Retiro\n- Flyer 10x14 cm 1000 u. Tiro y Retiro\n- Flyer 14x20cm 1000u tiro y retiro\n- Tarjetas de presentación 1000 Unid\n\n**Pendon Roller:**\n- Pendon Roller 90x200 cms\n- Pendon Roller 80x200 cms\n- Mini Roller escritorio papel sintético\n\n**Palomas:**\n- Paloma 2 caras 80x150 cms\n- Paloma 2 caras 70x120 cms\n- Paloma 2 Caras 0.5x1 mts\n- Paloma 2 Caras 0.6 x 1 mts\n- Paloma 1 cara 1x2 Mts\n- Paloma 1 Cara 1x1 Mts\n- Paloma 1 Cara 1x0.6 mts\n\n**Figuras:**\n- Sintra Laminado\n- Sintra\n- Foam Laminado\n- Foam\n\n**Extras:**\n- Pack Candy Bar\n- Modificación Diseño\n- Figuras Foam en Promocion\n- Diseño estandar\n- Plataforma Floorgrafic y Troquelado\n\n¿Te gustaría cotizar algún servicio en particular? 😊",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "c6c989bcb78872b234e9ca0f2bcd5fde"
+  }
+]

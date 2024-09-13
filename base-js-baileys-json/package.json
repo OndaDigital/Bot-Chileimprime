@@ -1,0 +1,35 @@
+{
+  "name": "base-bailey-json",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint . --no-ignore",
+    "dev": "npm run lint && nodemon ./src/app.js",
+    "start": "node ./src/app.js"
+  },
+  "keywords": [],
+  "dependencies": {
+    "@builderbot/bot": "1.2.2",
+    "@builderbot/database-json": "1.2.2",
+    "@builderbot/provider-baileys": "1.2.2",
+    "dotenv": "^16.4.5",
+    "fs-extra": "^11.2.0",
+    "google-auth-library": "^9.14.1",
+    "google-spreadsheet": "^4.1.4",
+    "image-size": "^1.1.1",
+    "moment-timezone": "^0.5.45",
+    "openai": "^4.60.0",
+    "path": "^0.12.7",
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-plugin-builderbot": "latest",
+    "nodemon": "^3.1.4"
+  },
+  "author": "",
+  "license": "ISC"
+}
