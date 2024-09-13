@@ -1,15 +1,15 @@
 [
   {
-    "ref": "5a10f571-526f-47f4-b972-34fb44d503c6",
-    "keyword": "a07e48655d1eb1adf63c1b74c6ee668e",
-    "answer": "Hola",
+    "ref": "be30a5e9-a454-4fd9-9d9b-f59023073ae0",
+    "keyword": "1bcf398c87a357d4e401f245cb175cc8",
+    "answer": "_event_voice_note__7ccf03bf-362d-4ae5-8ffa-9c06feb66f87",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "c22e4066d61d81721def9b25d8a397e8"
+    "refSerialize": "96b14b8be7efa18e5c6075686bd0b5a9"
   },
   {
-    "ref": "ans_8dbb24c0-10fd-4f74-9acc-4704ea00fc85",
-    "keyword": "key_6c2d2ac8-0543-455c-80ce-956be6aedc11",
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -19,13 +19,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "e8918b33b3c60a62ee962b684f4adbf8",
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
     "from": "56937782810"
   },
   {
-    "ref": "47fbdd5a-ef2f-4828-8700-87577b1d1998",
+    "ref": "68b77702-ef50-4edc-b799-2f2422d86c60",
     "keyword": null,
-    "answer": "¡Hola! 😊 ¿En qué servicio de impresión te gustaría que te ayude a cotizar hoy?",
+    "answer": "*📝 Transcripción:*\nولا ولا ولا ولا ولا ولا ولا",
     "options": {
       "media": null,
       "buttons": [],
@@ -33,19 +33,32 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "b4ad921d5232be796623bfd14f0e3440"
+    "refSerialize": "a5746392f79b328986568e5299c31dcf"
   },
   {
-    "ref": "a66e3d95-c840-4c25-8d12-b3ccad8a5b7d",
-    "keyword": "e8918b33b3c60a62ee962b684f4adbf8",
-    "answer": "Que productos tienes?",
+    "ref": "a5e386d3-cae8-4b51-a5d2-9fb017b7ca9f",
+    "keyword": null,
+    "answer": "¡Hola! 😊 ¿En qué servicio de impresión puedo ayudarte hoy?",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "c265c1b6167d463786fb5eb1f6aa6128"
+  },
+  {
+    "ref": "c0bddc71-2fd6-4fb8-bb82-a22022d80a74",
+    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "answer": "_event_voice_note__5ad85182-4113-49c6-be55-04ef13374931",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "ba3067ff219aaa9a63954c9b1a7264bc"
+    "refSerialize": "7b9a8208b7473a3548b482b49c917343"
   },
   {
-    "ref": "ans_8dbb24c0-10fd-4f74-9acc-4704ea00fc85",
-    "keyword": "key_6c2d2ac8-0543-455c-80ce-956be6aedc11",
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -55,13 +68,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "e8918b33b3c60a62ee962b684f4adbf8",
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
     "from": "56937782810"
   },
   {
-    "ref": "f134c722-dce8-463e-8179-a876ae7b5345",
+    "ref": "9435886a-63e4-42c6-bf1d-d370271bb6f3",
     "keyword": null,
-    "answer": "¡Claro! Aquí tienes una lista de nuestros servicios de impresión:\n\n**Telas PVC:**\n- PVC Alta Definición\n- PVC 11 Oz mt2\n- PVC 13 Oz mt2 - Promoción solo Local\n- PVC 13 Oz mt2\n- PVC Blackout\n\n**Banderas:**\n- Tela de bandera Translúcido genero\n- Tela de bandera Textil (agotado)\n- Tela de bandera Sintética\n\n**Adhesivos:**\n- Windows One Vision\n- Adhesivo Láminado y Tronquelado\n- Adhesivo Láminado\n- Adhesivo troquelado\n- Vinilo Adhesivo Reflectante\n- Vinilo Adhesivo Transparente\n- Adhesivo Brillantes\n- Adhesivo Mate\n- Adhesivo Empavonado\n- Adhesivo Laminado Floor Graphic\n- Rotulación semicurvas\n\n**Adhesivo Vehicular:**\n- Laminado para Rotulación Semi Curvas\n- Rotulación para fundido\n- Back Light Textil\n- Back Light Film (agotado)\n- Back Light Banner\n- Tela Canvas\n\n**Otros:**\n- Tela Mesh\n- Stand Publicitario\n- Floor Graphic\n- Papel de sublimación\n- Comprinter Troquelado\n- Imantados 60cm ancho\n- Servicio de Troquelado\n- Comprinter\n- Papel sintético\n- Flyer 15×22 cms 1000 Unid\n- Flyer 11×15 cms 1000 Unid\n- Tarjetas presentación 1000 U. Tiro y Retiro\n- Flyer 10x14 cm 1000 u. Tiro y Retiro\n- Flyer 14x20cm 1000u tiro y retiro\n- Tarjetas de presentación 1000 Unid\n\n**Pendon Roller:**\n- Pendon Roller 90x200 cms\n- Pendon Roller 80x200 cms\n- Mini Roller escritorio papel sintético\n\n**Palomas:**\n- Paloma 2 caras 80x150 cms\n- Paloma 2 caras 70x120 cms\n- Paloma 2 Caras 0.5x1 mts\n- Paloma 2 Caras 0.6 x 1 mts\n- Paloma 1 cara 1x2 Mts\n- Paloma 1 Cara 1x1 Mts\n- Paloma 1 Cara 1x0.6 mts\n\n**Figuras:**\n- Sintra Laminado\n- Sintra\n- Foam Laminado\n- Foam\n\n**Extras:**\n- Pack Candy Bar\n- Modificación Diseño\n- Figuras Foam en Promocion\n- Diseño estandar\n- Plataforma Floorgrafic y Troquelado\n\n¿Te gustaría cotizar algún servicio en particular? 😊",
+    "answer": "*📝 Transcripción:*\nHola, hola, hola, kital?",
     "options": {
       "media": null,
       "buttons": [],
@@ -69,6 +82,215 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "c6c989bcb78872b234e9ca0f2bcd5fde"
+    "refSerialize": "bb520138a37b96d5016620d34bc1648c"
+  },
+  {
+    "ref": "dcd56a0b-5039-4d25-b20d-5db4e9f76035",
+    "keyword": null,
+    "answer": "¡Hola! 😊 ¿En qué servicio de impresión puedo ayudarte hoy?",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "c265c1b6167d463786fb5eb1f6aa6128"
+  },
+  {
+    "ref": "28e5aa58-b19f-4871-b78b-084d4f612a79",
+    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "answer": "_event_voice_note__ae944866-ae7c-413f-8939-bae074f92750",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "62c85f7b1b8a5ff0c29507f52b1e1f3e"
+  },
+  {
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "from": "56937782810"
+  },
+  {
+    "ref": "2a64f64f-13da-4aeb-b3f5-bb4c616e7994",
+    "keyword": null,
+    "answer": "*📝 Transcripción:*\ndame el listado de servicios",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "1d1b9dacdba10357d8bce9d205e7de7c"
+  },
+  {
+    "ref": "8628445f-b13b-49fa-814c-bd14a5b858f8",
+    "keyword": null,
+    "answer": "¡Hola! 😊 Aquí tienes un resumen de los servicios de impresión que ofrecemos:\n\n### Servicios Disponibles:\n1. **Telas PVC**\n   - PVC Alta Definición\n   - PVC 11 Oz mt2\n   - PVC 13 Oz mt2 - Promoción solo Local\n   - PVC 13 Oz mt2\n   - PVC Blackout\n\n2. **Banderas**\n   - Tela de bandera Translúcido genero\n   - Tela de bandera Textil (agotado)\n   - Tela de bandera Sintética\n\n3. **Adhesivos**\n   - Windows One Vision\n   - Adhesivo Láminado y Tronquelado\n   - Adhesivo Láminado\n   - Adhesivo troquelado\n   - Vinilo Adhesivo Reflectante\n   - Vinilo Adhesivo Transparente\n   - Adhesivo Brillantes\n   - Adhesivo Mate\n   - Adhesivo Empavonado\n   - Adhesivo Laminado Floor Graphic\n   - Rotulación semicurvas\n\n4. **Adhesivo Vehicular**\n   - Laminado para Rotulación Semi Curvas\n   - Rotulación para fundido\n\n5. **Back Light**\n   - Back Light Textil\n   - Back Light Film (agotado)\n   - Back Light Banner\n   - Tela Canvas\n\n6. **Otros**\n   - Tela Mesh\n   - Stand Publicitario\n   - Floor Graphic\n   - Papel de sublimación\n   - Comprinter Troquelado\n   - Imantados 60cm ancho\n   - Servicio de Troquelado\n   - Comprinter\n   - Papel sintético\n\n7. **Imprenta**\n   - Flyer 15×22 cms 1000 Unid\n   - Flyer 11×15 cms 1000 Unid\n   - Tarjetas presentación 1000 U. Tiro y Retiro\n   - Flyer 10x14 cm 1000 u. Tiro y Retiro\n   - Flyer 14x20cm 1000u tiro y retiro\n   - Tarjetas de presentación 1000 Unid\n   - Pendon Roller 90x200 cms\n   - Pendon Roller 80x200 cms\n   - Mini Roller escritorio papel sintético\n   - Paloma 2 caras 80x150 cms\n   - Paloma 2 caras 70x120 cms\n   - Paloma 2 Caras 0.5x1 mts\n   - Paloma 2 Caras 0.6 x 1 mts\n   - Paloma 1 cara 1x2 Mts\n   - Paloma 1 Cara 1x1 Mts\n   - Paloma 1 Cara 1x0.6 mts\n\n8. **Figuras**\n   - Sintra Laminado\n   - Sintra\n   - Foam Laminado\n   - Foam\n\n9. **Extras**\n   - Pack Candy Bar\n   - Modificación Diseño\n   - Figuras Foam en Promocion\n   - Diseño estandar\n   - Plataforma Floorgrafic y Troquelado\n\nSi deseas cotizar algún servicio en particular, ¡házmelo saber! 😊",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "c85c5be3b7399121c41cd151f6895538"
+  },
+  {
+    "ref": "bfa82997-6a14-4150-b524-22603ebf3eaf",
+    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "answer": "_event_voice_note__3faba749-c81c-4429-a360-6a70b16c8b7a",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "1abafdaa9a332d830710fd829ebbc55b"
+  },
+  {
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "from": "56937782810"
+  },
+  {
+    "ref": "2a45bfcf-60d8-4e48-b43a-af52e824b985",
+    "keyword": null,
+    "answer": "*📝 Transcripción:*\nun pvc de alta definición",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "7897d21033c56a421c768b615824c547"
+  },
+  {
+    "ref": "5df4ec2d-bfc1-47c6-8b5b-0588ccb128be",
+    "keyword": null,
+    "answer": "¡Perfecto! 😊 Para cotizar el **PVC Alta Definición**, necesito que me indiques el **ancho**, **alto** y **cantidad** que deseas. \n\nAdemás, puedes elegir las siguientes terminaciones: \n- Sellado\n- Ojetillos\n- Bolsillo\n\n¡Espero tu respuesta!",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "518a957b1b46121a154f9f569166633c"
+  },
+  {
+    "ref": "525b83cd-43a7-42d3-824f-7b3797825d0b",
+    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "answer": "_event_voice_note__82ffb503-5bde-4d89-b3de-64d2af3cb02b",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "06ee961a883683badcf31f2b7fde0889"
+  },
+  {
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "from": "56937782810"
+  },
+  {
+    "ref": "eaacae40-d190-4631-b670-224af96357b2",
+    "keyword": null,
+    "answer": "*📝 Transcripción:*\nPerfecto, perfecto. Con sellado, ojetillo y bolsillo.",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "1188122a8d96104e5c384524a8322e82"
+  },
+  {
+    "ref": "fbee6ed4-e85e-49d6-b78d-e05544ac93c7",
+    "keyword": null,
+    "answer": "¡Genial! 😊 Entonces, para tu pedido de **PVC Alta Definición** con terminaciones de sellado, ojetillos y bolsillo, solo necesito el **ancho**, **alto** y la **cantidad** que deseas. \n\n¡Espero tu respuesta para continuar! 📏📐",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "840fc2863e4c8e22d405a9f7ea338abe"
+  },
+  {
+    "ref": "68868ecd-4b57-4e76-8f50-58a12d27ecd8",
+    "keyword": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "answer": "_event_voice_note__6884630a-2e07-44d2-a7f5-6a285a5f19bb",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "704a5eee3a13eb1359761c60239be8c5"
+  },
+  {
+    "ref": "ans_36d1d4d0-91e8-4008-8e85-281a01a7bcfe",
+    "keyword": "key_835fb4a3-77a8-4166-bd99-325dd23e2c55",
+    "answer": "__call_action__",
+    "options": {
+      "buttons": [],
+      "capture": false,
+      "delay": 0,
+      "nested": [],
+      "keyword": {},
+      "callback": true
+    },
+    "refSerialize": "30be03b2e7d6c97a0dba9a81d6fb24a5",
+    "from": "56937782810"
+  },
+  {
+    "ref": "11c3e575-af2b-4959-aaca-ccf57f8a201f",
+    "keyword": null,
+    "answer": "*📝 Transcripción:*\nancho 200 metros y de alto 500 metros y cantidad a 3",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "c912ef268a56a55c5723c12137be4966"
+  },
+  {
+    "ref": "f73cf81c-f6e8-45b0-b292-d1fe0709f7a5",
+    "keyword": null,
+    "answer": "¡Gracias por la información! 😊 \n\n### Detalles de tu pedido:\n- **Producto**: PVC Alta Definición\n- **Ancho**: 200 metros\n- **Alto**: 500 metros\n- **Cantidad**: 3\n- **Terminaciones**: Sellado, Ojetillos, Bolsillo\n\nPor favor, envíame el diseño para este servicio, asegurándote de que el tamaño no supere los 16MB. \n\n¿Te gustaría cotizar algo más o deseas finalizar la cotización? 😊",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "792517b8726cebae094c72e1274e5369"
   }
 ]

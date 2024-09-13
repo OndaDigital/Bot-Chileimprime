@@ -319,17 +319,32 @@ class ImprovedPrintingBot {
     logger.info(`Conversación reiniciada para usuario ${userId}`);
   }
 
-  async processVoiceNote(ctx, audioPath) {
+  async processVoiceNote(ctx, provider) {
     try {
       logger.info(`Procesando nota de voz para usuario ${ctx.from}`);
-      const transcription = await openaiService.transcribeAudio(audioPath);
-      await fs.unlink(audioPath);
-      logger.info(`Nota de voz procesada y archivo eliminado: ${audioPath}`);
+      const audioFileName = `audio_${Date.now()}.oga`;
+      const audioPath = path.join(TMP_DIR, audioFileName);
       
-      const userContext = this.getUserContext(ctx.from);
-      userContext.lastTranscription = transcription;
+      // Usar el método correcto para guardar el archivo
+      const savedFile = await provider.saveFile(ctx);
       
-      return transcription;
+      if (typeof savedFile === 'string' || (savedFile && savedFile.path)) {
+        const sourcePath = typeof savedFile === 'string' ? savedFile : savedFile.path;
+        
+        // Copiar el archivo en lugar de moverlo
+        await fs.copyFile(sourcePath, audioPath);
+        
+        // Eliminar el archivo original
+        await fs.unlink(sourcePath);
+        
+        const transcription = await openaiService.transcribeAudio(audioPath);
+        await fs.unlink(audioPath);
+        logger.info(`Nota de voz procesada y archivo eliminado: ${audioPath}`);
+        
+        return transcription;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo de audio');
+      }
     } catch (error) {
       logger.error(`Error procesando nota de voz: ${error.message}`);
       throw error;
@@ -390,17 +405,10 @@ const flowRestartBot = addKeyword(['bot', 'Bot', 'BOT'])
     return gotoFlow(flowPrincipal);
   });
 
-const voiceNoteFlow = addKeyword(EVENTS.VOICE_NOTE)
-  .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-    const audioFileName = `audio_${Date.now()}.oga`;
-    const audioPath = path.join(TMP_DIR, audioFileName);
-    
+  const voiceNoteFlow = addKeyword(EVENTS.VOICE_NOTE)
+  .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow, provider }) => {
     try {
-      const mediaData = await ctx.downloadMedia();
-      await fs.writeFile(audioPath, mediaData.data, 'base64');
-      logger.info(`Audio guardado: ${audioPath}`);
-
-      const transcription = await printingBot.processVoiceNote(ctx, audioPath);
+      const transcription = await printingBot.processVoiceNote(ctx, provider);
       logger.info(`Transcripción del audio: ${transcription}`);
       
       await flowDynamic(`*📝 Transcripción:*\n${transcription}`);
