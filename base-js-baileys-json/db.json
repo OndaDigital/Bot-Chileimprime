@@ -1,15 +1,15 @@
 [
   {
-    "ref": "a7afd038-f1c9-48bc-a080-3c89013dd430",
-    "keyword": "09f8c78b36a0fb691b920e1a2f8498f3",
+    "ref": "4f322ea4-51c9-4aae-982a-78d8d97c3899",
+    "keyword": "a07e48655d1eb1adf63c1b74c6ee668e",
     "answer": "Hola",
     "options": {},
     "from": "56937782810",
     "refSerialize": "c22e4066d61d81721def9b25d8a397e8"
   },
   {
-    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
-    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
+    "ref": "ans_801f5b12-be45-4404-9e52-ee3f43f4054d",
+    "keyword": "key_bbf6cfdd-2205-4f3f-947c-31ec9eb50349",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -19,13 +19,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
+    "refSerialize": "20e93bdaf2c67c26ad8c8821645765f1",
     "from": "56937782810"
   },
   {
-    "ref": "126f1bbf-a09e-4a02-9654-6125819a020b",
+    "ref": "cc025bc1-ac4f-4793-b219-73b5362df062",
     "keyword": null,
-    "answer": "¡Hola! 😊 ¿En qué puedo ayudarte hoy? ¿Qué servicio de impresión deseas cotizar?",
+    "answer": "¡Hola! 😊 ¿En qué servicio de impresión puedo ayudarte hoy?",
     "options": {
       "media": null,
       "buttons": [],
@@ -33,19 +33,19 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "4693bca9ed3919528917c0ee420280c4"
+    "refSerialize": "c265c1b6167d463786fb5eb1f6aa6128"
   },
   {
-    "ref": "1563fdf1-d3a7-4f10-8e80-a73d80c93a4f",
-    "keyword": "8d33779cf6b1514c33a547daad34523d",
+    "ref": "3fd6c423-750a-4e81-84b2-eddb2db2315e",
+    "keyword": "20e93bdaf2c67c26ad8c8821645765f1",
     "answer": "Dame un PVC de alta definición,  con 20 m de alto y 2m de ancho. Solo 1 y sin terminaciones",
     "options": {},
     "from": "56937782810",
     "refSerialize": "d1d419bae9605a22ea28746e6d5c0379"
   },
   {
-    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
-    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
+    "ref": "ans_801f5b12-be45-4404-9e52-ee3f43f4054d",
+    "keyword": "key_bbf6cfdd-2205-4f3f-947c-31ec9eb50349",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -55,13 +55,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
+    "refSerialize": "20e93bdaf2c67c26ad8c8821645765f1",
     "from": "56937782810"
   },
   {
-    "ref": "d9717f74-a3ca-4387-af80-55f1a74de544",
+    "ref": "2e942799-f5ef-4a74-ae3a-abac02382746",
     "keyword": null,
-    "answer": "¡Perfecto! Para el PVC Alta Definición, tienes una medida de 2 m de ancho y 20 m de alto. La cantidad será 1 y sin terminaciones.\n\nPor favor, envíame el diseño en formato PDF o JPG (máximo 16MB) para proceder con la cotización. \n\n¿Te gustaría cotizar algo más o finalizar la cotización? 😊",
+    "answer": "¡Perfecto! 😊 Entonces, estás interesado en un PVC Alta Definición de 2m de ancho y 20m de alto, sin terminaciones. \n\nPor favor, envíame el diseño en formato PDF o JPG (máximo 16MB) para proceder. \n\n¿Deseas cotizar algo más o finalizar la cotización?",
     "options": {
       "media": null,
       "buttons": [],
@@ -69,19 +69,19 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "abc46e0a7f87c58194917453911fe9db"
+    "refSerialize": "9edfd1a19fb5b3bba3c25b2491b2494d"
   },
   {
-    "ref": "4bdbd4a1-bcf7-42b5-9a9e-9ec49bc9c3d7",
-    "keyword": "8d33779cf6b1514c33a547daad34523d",
-    "answer": "_event_document__72ec78f5-8a7a-430f-9a55-2a96876392a4",
+    "ref": "07faed31-79f2-4134-8cd5-743e21edaf9e",
+    "keyword": "20e93bdaf2c67c26ad8c8821645765f1",
+    "answer": "_event_document__89188595-bdb5-4794-83e8-a9f4a22c97b1",
     "options": {},
     "from": "56937782810",
-    "refSerialize": "83c7436e0830fad8224cf884f6d49196"
+    "refSerialize": "d2927c5e79760be978e1a9204159add7"
   },
   {
-    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
-    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
+    "ref": "ans_b845fb18-8f26-4cb6-b969-eb3f48a4a630",
+    "keyword": "key_f4bb892f-06a6-4275-bdc2-c019dc4ef9ee",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -91,11 +91,11 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
+    "refSerialize": "fc2a607d30dbf727aa9e2dc6d9ff5dfb",
     "from": "56937782810"
   },
   {
-    "ref": "6cdf4b46-9d79-41d9-be4b-3158d7c3c06b",
+    "ref": "aa4427e0-5979-4f8e-bb37-8c0b0ab243c8",
     "keyword": null,
     "answer": "⚠️ El archivo no es compatible: La resolución del archivo (25 DPI) es menor que la mínima requerida (72 DPI)\nTe quedan 2 intentos.",
     "options": {
@@ -108,8 +108,8 @@
     "refSerialize": "29a319a62f448612acbdd3b83450ff2d"
   },
   {
-    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
-    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
+    "ref": "ans_cf828bc4-f7fd-4fb6-b7c2-679a278b6c65",
+    "keyword": "key_843218bf-1335-4dc8-84a1-1f0950e72fba",
     "answer": "¿Qué deseas hacer?",
     "options": {
       "buttons": [],
@@ -119,12 +119,12 @@
       "keyword": {},
       "callback": false
     },
-    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
+    "refSerialize": "a5ec1ad5fd3dc31072e0bbd56524423c",
     "from": "56937782810"
   },
   {
-    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
-    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
+    "ref": "ans_253b9fac-b906-4ebd-84ec-ded7ec2a7c02",
+    "keyword": "ans_cf828bc4-f7fd-4fb6-b7c2-679a278b6c65",
     "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
     "options": {
       "buttons": [],
@@ -134,12 +134,12 @@
       "keyword": {},
       "callback": false
     },
-    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
+    "refSerialize": "34c415778ec55a2fe2f14b9c3818849a",
     "from": "56937782810"
   },
   {
-    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
-    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
+    "ref": "ans_52a25933-eb77-45ff-926d-183705aa163a",
+    "keyword": "ans_253b9fac-b906-4ebd-84ec-ded7ec2a7c02",
     "answer": "__capture_only_intended__",
     "options": {
       "buttons": [],
@@ -149,54 +149,12 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
+    "refSerialize": "6a639a0a0e72f51ad4736a5837c10436",
     "from": "56937782810"
   },
   {
-    "ref": "584b3bf4-16a0-4f5c-9c39-8c9933ba51a7",
-    "keyword": "2280047b99b4e76e91f0353cc2b0ea64",
-    "answer": "1",
-    "options": {},
-    "from": "56937782810",
-    "refSerialize": "290236b1d481a790a200ea6e94b2122a"
-  },
-  {
-    "ref": "cc9918a5-2951-4c62-b471-5c97b9925b49",
-    "keyword": null,
-    "answer": "Por favor, sube el nuevo archivo.",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "eb39109e4f2451f4a14c0e131a0dbbe1"
-  },
-  {
-    "ref": "50126415-15e8-4e1d-8bcf-3d83e0533a4a",
-    "keyword": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
-    "answer": "__end_flow__",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "a07e48655d1eb1adf63c1b74c6ee668e"
-  },
-  {
-    "ref": "b045ca9c-8446-4d24-b1dc-aec90557dfb3",
-    "keyword": "a07e48655d1eb1adf63c1b74c6ee668e",
-    "answer": "_event_document__62a5835e-88e2-4396-bdd4-99993228ead6",
-    "options": {},
-    "from": "56937782810",
-    "refSerialize": "27a7d7eef817a6e7d3293872fac6b13b"
-  },
-  {
-    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
-    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
+    "ref": "ans_801f5b12-be45-4404-9e52-ee3f43f4054d",
+    "keyword": "key_bbf6cfdd-2205-4f3f-947c-31ec9eb50349",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -206,13 +164,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
+    "refSerialize": "20e93bdaf2c67c26ad8c8821645765f1",
     "from": "56937782810"
   },
   {
-    "ref": "4c90b71c-b5ff-4967-b18f-9716a495b588",
+    "ref": "d5ae6475-6a07-468d-9dab-79a9ea89ea8f",
     "keyword": null,
-    "answer": "⚠️ El archivo no es compatible: La resolución del archivo (16 DPI) es menor que la mínima requerida (72 DPI)\nTe quedan 1 intento.",
+    "answer": "He recibido tu diseño. Será analizado para verificar su compatibilidad. \n\n¿Te gustaría cotizar algo más o finalizar la cotización? 😊",
     "options": {
       "media": null,
       "buttons": [],
@@ -220,55 +178,46 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "e2f87b67a6aa3d92a38b2612ab3df050"
+    "refSerialize": "66985478da87112501a1b5b5dfade015"
   },
   {
-    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
-    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
-    "answer": "¿Qué deseas hacer?",
+    "ref": "7b782f1d-09a8-42b6-9e14-21a6f19fc0dc",
+    "keyword": "20e93bdaf2c67c26ad8c8821645765f1",
+    "answer": "1",
+    "options": {},
+    "from": "56937782810",
+    "refSerialize": "290236b1d481a790a200ea6e94b2122a"
+  },
+  {
+    "ref": "ans_801f5b12-be45-4404-9e52-ee3f43f4054d",
+    "keyword": "key_bbf6cfdd-2205-4f3f-947c-31ec9eb50349",
+    "answer": "__call_action__",
     "options": {
       "buttons": [],
       "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": false
-    },
-    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
-    "from": "56937782810"
-  },
-  {
-    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
-    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
-    "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": false
-    },
-    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
-    "from": "56937782810"
-  },
-  {
-    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
-    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
-    "answer": "__capture_only_intended__",
-    "options": {
-      "buttons": [],
-      "capture": true,
       "delay": 0,
       "nested": [],
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
+    "refSerialize": "20e93bdaf2c67c26ad8c8821645765f1",
     "from": "56937782810"
   },
   {
-    "ref": "40850731-4c15-4027-8050-d24041cee3c6",
+    "ref": "ccfb5f6d-1daa-4344-b6a1-18785c39ffb1",
+    "keyword": null,
+    "answer": "¡Genial! 😊 ¿Qué servicio de impresión deseas cotizar ahora? Recuerda que puedes cotizar hasta 5 servicios en esta conversación.",
+    "options": {
+      "media": null,
+      "buttons": [],
+      "capture": false,
+      "delay": 0
+    },
+    "from": "56937782810",
+    "refSerialize": "78a696a1c2d21f458e0322fd4328c7ed"
+  },
+  {
+    "ref": "78566736-290f-48c4-8656-9fc5b829e170",
     "keyword": null,
     "answer": "*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*",
     "options": {
@@ -281,29 +230,8 @@
     "refSerialize": "0b379522443448c14b16dc629dcf4f6f"
   },
   {
-    "ref": "dacdef8f-fb6d-4ae9-8637-5a4525ffd541",
-    "keyword": "2280047b99b4e76e91f0353cc2b0ea64",
-    "answer": "2",
-    "options": {},
-    "from": "56937782810",
-    "refSerialize": "2294c3d08b53a6effa5df696a15b9d30"
-  },
-  {
-    "ref": "9c5dc7f8-4598-49bc-82aa-ce7943a5876c",
-    "keyword": null,
-    "answer": "Servicio cancelado. ¿Deseas agregar otro servicio?",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "343c260e4024ecfb99d532de36f9d37d"
-  },
-  {
-    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
-    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
+    "ref": "ans_39e39db3-5314-4aaf-bc2f-cf46c6ed3d92",
+    "keyword": "key_1f87be29-fb94-4536-98b0-78b2eebbb8f6",
     "answer": "__call_action__",
     "options": {
       "buttons": [],
@@ -313,13 +241,13 @@
       "keyword": {},
       "callback": true
     },
-    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
+    "refSerialize": "3f8afa66a42a857aa4b6a617b9212929",
     "from": "56937782810"
   },
   {
-    "ref": "d39b5258-cd1d-4421-a133-7f2e2c4a14f0",
+    "ref": "361f3b2e-26c7-43d4-93b3-dc8b1239c8ff",
     "keyword": null,
-    "answer": "Vendedor: ¡Claro! 😊 ¿Podrías indicarme qué servicio deseas cotizar como \"2\"? Recuerda que puedes cotizar hasta 5 servicios por conversación.",
+    "answer": "*😴 Lo siento, el tiempo de espera ha expirado. Tu pedido ha sido cancelado. Si deseas hacer un nuevo pedido, por favor envía un mensaje.*",
     "options": {
       "media": null,
       "buttons": [],
@@ -327,35 +255,12 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "959045ed440422b7696db558180cd282"
+    "refSerialize": "d4fe00f5c987302907c1adbd3dffc72f"
   },
   {
-    "ref": "bd79ffce-b5b7-4c74-853e-dd07f3d3f975",
-    "keyword": "8d33779cf6b1514c33a547daad34523d",
-    "answer": "Que tengo en mi carrito?",
-    "options": {},
-    "from": "56937782810",
-    "refSerialize": "3bd595aed9b0b2c026bcda2dc7be4a7c"
-  },
-  {
-    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
-    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
-    "answer": "__call_action__",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": true
-    },
-    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
-    "from": "56937782810"
-  },
-  {
-    "ref": "1cbf2cd3-316f-4435-9871-fa5a87bc8cb8",
-    "keyword": null,
-    "answer": "¡Claro! Actualmente tienes un PVC Alta Definición de 2 m de ancho y 20 m de alto, con una cantidad de 1 y sin terminaciones. 😊 \n\n¿Te gustaría cotizar otro servicio o finalizar la cotización?",
+    "ref": "39bf455e-fbd3-444a-926f-13d0887a785f",
+    "keyword": "ans_39e39db3-5314-4aaf-bc2f-cf46c6ed3d92",
+    "answer": "__end_flow__",
     "options": {
       "media": null,
       "buttons": [],
@@ -363,102 +268,6 @@
       "delay": 0
     },
     "from": "56937782810",
-    "refSerialize": "f24537c80abb1c810723ad9a741b9c40"
-  },
-  {
-    "ref": "22c89a95-759a-433a-9d84-db65d9b9b191",
-    "keyword": "8d33779cf6b1514c33a547daad34523d",
-    "answer": "Que servicios tienes disponibles?",
-    "options": {},
-    "from": "56937782810",
-    "refSerialize": "02a78a448394277910e8c7763fbe02f3"
-  },
-  {
-    "ref": "ans_3d2006f9-3f42-4f9f-a8fb-de9381d209c4",
-    "keyword": "key_c31e3537-649e-475b-9e63-7caa77f406be",
-    "answer": "__call_action__",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": true
-    },
-    "refSerialize": "8d33779cf6b1514c33a547daad34523d",
-    "from": "56937782810"
-  },
-  {
-    "ref": "ans_229729e2-5f04-43b3-bf6b-48cf60b9ec6e",
-    "keyword": "key_75f3c1c6-c897-446f-866f-d8f0dd8fc40f",
-    "answer": "__call_action__",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": true
-    },
-    "refSerialize": "a5b4948d8fd49ca3aa9f1db885cf155d",
-    "from": "56937782810"
-  },
-  {
-    "ref": "cd354f92-8afd-45aa-bb3b-dbf67e1e562e",
-    "keyword": null,
-    "answer": "Hubo un error al procesar tu archivo. Te quedan 2 intentos. Por favor, intenta nuevamente.",
-    "options": {
-      "media": null,
-      "buttons": [],
-      "capture": false,
-      "delay": 0
-    },
-    "from": "56937782810",
-    "refSerialize": "79ff38a7a720708e1e35b96e753900d2"
-  },
-  {
-    "ref": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
-    "keyword": "key_7dc3075a-e708-408c-b113-0b7dc889a759",
-    "answer": "¿Qué deseas hacer?",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": false
-    },
-    "refSerialize": "75c15b837fd2de2a1d76b59020528334",
-    "from": "56937782810"
-  },
-  {
-    "ref": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
-    "keyword": "ans_e41ce72e-4a8b-4745-a4f0-b6ea4cb70584",
-    "answer": "1. Subir otro archivo\n2. Cancelar este servicio\n3. Finalizar el pedido",
-    "options": {
-      "buttons": [],
-      "capture": false,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": false
-    },
-    "refSerialize": "959251ccf4f2af4c079f852b16457d87",
-    "from": "56937782810"
-  },
-  {
-    "ref": "ans_8e01cdc5-c55a-48b8-a2ed-c1c9702ea1a1",
-    "keyword": "ans_a3fb18f0-4e2c-4798-a79a-784666642f5b",
-    "answer": "__capture_only_intended__",
-    "options": {
-      "buttons": [],
-      "capture": true,
-      "delay": 0,
-      "nested": [],
-      "keyword": {},
-      "callback": true
-    },
-    "refSerialize": "2280047b99b4e76e91f0353cc2b0ea64",
-    "from": "56937782810"
+    "refSerialize": "a07e48655d1eb1adf63c1b74c6ee668e"
   }
 ]

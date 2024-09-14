@@ -1,111 +1,120 @@
 // fileAnalyzer.js - Bot imprenta
 
-import { promises as fs } from 'fs';
-import sizeOf from 'image-size';
+import fs from 'fs/promises';
+import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import Logger from './logger.js';
 
 const logger = new Logger();
 
 class FileAnalyzer {
-  constructor() {
-    this.supportedImageFormats = ['jpg', 'jpeg', 'png', 'gif', 'tiff'];
-    this.supportedVectorFormats = ['pdf', 'ai', 'eps', 'svg'];
-  }
-
-  async analyzeFile(filePath, requiredWidth, requiredHeight, requiredDPI) {
+  async analyzeFile(filePath, productInfo) {
     try {
       const stats = await fs.stat(filePath);
       const fileSize = stats.size;
       const fileExtension = filePath.split('.').pop().toLowerCase();
 
-      let fileInfo = {
-        size: fileSize,
-        format: fileExtension,
-        width: null,
-        height: null,
-        dpi: null,
-        isVector: this.supportedVectorFormats.includes(fileExtension),
-        isCompatible: false,
-        errorMessage: null
-      };
-
-      if (this.supportedImageFormats.includes(fileExtension)) {
-        const dimensions = sizeOf(filePath);
-        fileInfo.width = dimensions.width;
-        fileInfo.height = dimensions.height;
-        fileInfo.dpi = this.estimateDPI(fileInfo.width, fileInfo.height, fileSize);
+      if (this.isImage(fileExtension)) {
+        return await this.analyzeImage(filePath, fileSize, productInfo);
       } else if (fileExtension === 'pdf') {
-        const pdfInfo = await this.analyzePDF(filePath);
-        Object.assign(fileInfo, pdfInfo);
-      } else if (this.supportedVectorFormats.includes(fileExtension)) {
-        fileInfo.dpi = 'N/A (Vector)';
+        return await this.analyzePDF(filePath, fileSize, productInfo);
       } else {
-        throw new Error('Formato de archivo no soportado');
+        return this.analyzeGenericFile(filePath, fileSize, fileExtension);
       }
-
-      fileInfo.isCompatible = this.checkCompatibility(fileInfo, { requiredWidth, requiredHeight, requiredDPI });
-
-      logger.info(`Análisis de archivo completado: ${filePath}`);
-      logger.debug(`Resultados: ${JSON.stringify(fileInfo)}`);
-
-      return fileInfo;
     } catch (error) {
       logger.error(`Error al analizar el archivo: ${error.message}`);
       throw error;
     }
   }
 
-  async analyzePDF(filePath) {
-    const pdfDoc = await PDFDocument.load(await fs.readFile(filePath));
-    const page = pdfDoc.getPages()[0];
+
+  isImage(extension) {
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'];
+    return imageExtensions.includes(extension);
+  }
+
+  async analyzeImage(filePath, fileSize, productInfo) {
+    try {
+      const metadata = await sharp(filePath).metadata();
+      const dpi = metadata.density || 'No disponible';
+      const imageDimensions = { width: metadata.width, height: metadata.height };
+      const requiredDPI = this.calculateRequiredDPI(productInfo.medidas);
+      
+      return {
+        tipo: 'Imagen',
+        formato: metadata.format,
+        ancho: metadata.width,
+        alto: metadata.height,
+        dpi: dpi,
+        tamaño: this.formatFileSize(fileSize),
+        esAptaParaImpresion: this.isFileSuitableForPrinting(imageDimensions, dpi, productInfo),
+        dpiRequerido: requiredDPI
+      };
+    } catch (error) {
+      logger.error(`Error al analizar la imagen: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async analyzePDF(filePath, fileSize, productInfo) {
+    try {
+      const pdfBytes = await fs.readFile(filePath);
+      const pdfDoc = await PDFDocument.load(pdfBytes);
+      const page = pdfDoc.getPages()[0];
+      const { width, height } = page.getSize();
+      const pdfDimensions = { width, height };
+      const requiredDPI = this.calculateRequiredDPI(productInfo.medidas);
+
+      return {
+        tipo: 'PDF',
+        ancho: width,
+        alto: height,
+        tamaño: this.formatFileSize(fileSize),
+        esAptaParaImpresion: this.isFileSuitableForPrinting(pdfDimensions, 300, productInfo), // Asumimos 300 DPI para PDFs
+        dpiRequerido: requiredDPI
+      };
+    } catch (error) {
+      logger.error(`Error al analizar el PDF: ${error.message}`);
+      throw error;
+    }
+  }
+
+  analyzeGenericFile(filePath, fileSize, fileExtension) {
     return {
-      width: page.getWidth(),
-      height: page.getHeight(),
-      dpi: 72 // PDF default DPI
+      tipo: 'Archivo genérico',
+      formato: fileExtension,
+      tamaño: this.formatFileSize(fileSize),
+      esAptaParaImpresion: false,
+      mensaje: 'Este tipo de archivo no es compatible con nuestro sistema de impresión.'
     };
   }
 
-  estimateDPI(width, height, fileSize) {
-    const pixelCount = width * height;
-    const bitsPerPixel = (fileSize * 8) / pixelCount;
-    return Math.round(Math.sqrt(bitsPerPixel) * 10);
+  isFileSuitableForPrinting(fileDimensions, fileDPI, productInfo) {
+    const requiredDPI = productInfo.dpi || this.calculateRequiredDPI(productInfo.medidas);
+    const minDimension = Math.min(fileDimensions.width, fileDimensions.height);
+    const maxDimension = Math.max(fileDimensions.width, fileDimensions.height);
+    
+    const productMinDimension = Math.min(productInfo.medidas.ancho, productInfo.medidas.alto) * 100; // Convertir a cm
+    const productMaxDimension = Math.max(productInfo.medidas.ancho, productInfo.medidas.alto) * 100; // Convertir a cm
+    
+    const isResolutionSufficient = (minDimension >= productMinDimension * requiredDPI / 2.54) &&
+                                   (maxDimension >= productMaxDimension * requiredDPI / 2.54);
+    
+    return fileDPI >= requiredDPI && isResolutionSufficient;
   }
 
-  checkCompatibility(fileInfo, requirements) {
-    if (fileInfo.isVector) {
-      return true; // Los archivos vectoriales son siempre compatibles
-    }
+  calculateRequiredDPI(productDimensions) {
+    const maxDimension = Math.max(productDimensions.ancho, productDimensions.alto);
+    if (maxDimension <= 1) return 300; // Para productos pequeños (hasta 1m)
+    if (maxDimension <= 3) return 150; // Para productos medianos (hasta 3m)
+    return Math.max(72, Math.round(300 / maxDimension)); // Para productos grandes, mínimo 72 DPI
+  }
 
-    const minDPI = requirements.requiredDPI || 150;
-    const maxFileSize = 2048 * 1024 * 1024; // 25 MB por defecto
-
-    if (fileInfo.size > maxFileSize) {
-      fileInfo.errorMessage = `El archivo excede el tamaño máximo permitido de ${maxFileSize / (1024 * 1024)} MB`;
-      return false;
-    }
-
-    if (fileInfo.dpi < minDPI) {
-      fileInfo.errorMessage = `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la mínima requerida (${minDPI} DPI)`;
-      return false;
-    }
-
-    if (requirements.requiredWidth && requirements.requiredHeight) {
-      const aspectRatio = requirements.requiredWidth / requirements.requiredHeight;
-      const fileAspectRatio = fileInfo.width / fileInfo.height;
-
-      if (Math.abs(aspectRatio - fileAspectRatio) > 0.01) { // Permitimos una pequeña variación
-        fileInfo.errorMessage = `Las proporciones del archivo (${fileAspectRatio.toFixed(2)}) no coinciden con las requeridas (${aspectRatio.toFixed(2)})`;
-        return false;
-      }
-
-      if (fileInfo.width < requirements.requiredWidth || fileInfo.height < requirements.requiredHeight) {
-        fileInfo.errorMessage = `Las dimensiones del archivo (${fileInfo.width}x${fileInfo.height}) son menores que las requeridas (${requirements.requiredWidth}x${requirements.requiredHeight})`;
-        return false;
-      }
-    }
-
-    return true;
+  formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+    else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+    else return (bytes / 1073741824).toFixed(2) + ' GB';
   }
 }
 

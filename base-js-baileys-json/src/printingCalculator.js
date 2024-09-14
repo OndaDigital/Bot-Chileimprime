@@ -1,41 +1,36 @@
 // printingCalculator.js - Bot imprenta
+
+
 import Logger from './logger.js';
 
 const logger = new Logger();
 
 class PrintingCalculator {
-  calculateOrder(order, services) {
+  calculateOrder(order) {
     try {
-      let total = 0;
-      const calculatedItems = order.items.map(item => {
-        let subtotal = 0;
-        const serviceInfo = services[item.nombre];
+      const calculatedServices = order.services.map(service => {
+        let precioUnitario = 0;
         
-        if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.categoria)) {
-          const area = (item.ancho / 100) * (item.alto / 100); // Convertir a metros cuadrados
-          subtotal = area * item.cantidad * serviceInfo.precio;
-          
-          if (item.terminaciones) {
-            if (item.terminaciones.includes('sellado')) subtotal += area * serviceInfo.precioSellado;
-            if (item.terminaciones.includes('ojetillos')) subtotal += area * serviceInfo.precioOjetillo;
-            if (item.terminaciones.includes('bolsillo')) subtotal += area * serviceInfo.precioBolsillo;
-          }
+        if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(service.categoria)) {
+          const areaCm2 = service.ancho * service.alto;
+          precioUnitario = areaCm2 * service.precioBase;
+
+          if (service.sellado) precioUnitario += service.precioSellado;
+          if (service.bolsillo) precioUnitario += service.precioBolsillo;
+          if (service.ojetillos) precioUnitario += service.precioOjetillo;
         } else {
-          subtotal = item.cantidad * serviceInfo.precio;
-          
-          if (item.terminaciones) {
-            if (item.terminaciones.includes('sellado')) subtotal += serviceInfo.precioSellado * item.cantidad;
-            if (item.terminaciones.includes('ojetillos')) subtotal += serviceInfo.precioOjetillo * item.cantidad;
-            if (item.terminaciones.includes('bolsillo')) subtotal += serviceInfo.precioBolsillo * item.cantidad;
-          }
+          precioUnitario = service.precioBase;
         }
 
-        total += subtotal;
-        return { ...item, subtotal };
+        const subtotal = precioUnitario * service.cantidad;
+
+        return { ...service, precioUnitario, subtotal };
       });
 
+      const total = calculatedServices.reduce((sum, service) => sum + service.subtotal, 0);
+
       return {
-        items: calculatedItems,
+        services: calculatedServices,
         total,
         observaciones: order.observaciones
       };
@@ -48,16 +43,13 @@ class PrintingCalculator {
   formatOrderSummary(order) {
     let summary = "📋 Resumen final de tu pedido:\n\n";
 
-    order.items.forEach(item => {
-      summary += `*${item.nombre}*\n`;
-      summary += `Cantidad: ${item.cantidad}\n`;
-      if (item.ancho && item.alto) {
-        summary += `Medidas: ${item.ancho}cm x ${item.alto}cm\n`;
+    order.services.forEach(service => {
+      summary += `*${service.categoria} - ${service.tipo} - ${service.nombre}*\n`;
+      summary += `Cantidad: ${service.cantidad} - Precio unitario: $${this.formatPrice(service.precioUnitario)}\n`;
+      if (service.ancho && service.alto) {
+        summary += `Medidas: ${service.ancho}x${service.alto} cm\n`;
       }
-      if (item.terminaciones && item.terminaciones.length > 0) {
-        summary += `Terminaciones: ${item.terminaciones.join(', ')}\n`;
-      }
-      summary += `Subtotal: $${this.formatPrice(item.subtotal)}\n\n`;
+      summary += `Subtotal: $${this.formatPrice(service.subtotal)}\n\n`;
     });
 
     summary += `💰 Total: $${this.formatPrice(order.total)}\n`;
@@ -70,7 +62,7 @@ class PrintingCalculator {
   }
 
   formatPrice(price) {
-    return price.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   }
 }
 
