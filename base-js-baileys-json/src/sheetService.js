@@ -51,8 +51,8 @@ class GoogleSheetService {
           sellado: sheet.getCell(row, 4).value,
           ojetillos: sheet.getCell(row, 5).value,
           bolsillo: sheet.getCell(row, 6).value,
-          formato: sheet.getCell(row, 7).value,
-          dpi: sheet.getCell(row, 8).value,
+          formato: sheet.getCell(row, 7).value || 'PDF, JPG', // Valor por defecto si no se especifica
+          dpi: 72, // Usamos 72 como valor por defecto
           stock: sheet.getCell(row, 9).value,
           estado: sheet.getCell(row, 10).value,
           precio: sheet.getCell(row, 11).value,

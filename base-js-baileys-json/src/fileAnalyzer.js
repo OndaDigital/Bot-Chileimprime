@@ -27,7 +27,6 @@ class FileAnalyzer {
     }
   }
 
-
   isImage(extension) {
     const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'];
     return imageExtensions.includes(extension);
@@ -37,8 +36,7 @@ class FileAnalyzer {
     try {
       const metadata = await sharp(filePath).metadata();
       const dpi = metadata.density || 'No disponible';
-      const imageDimensions = { width: metadata.width, height: metadata.height };
-      const requiredDPI = this.calculateRequiredDPI(productInfo.medidas);
+      const imageDimensions = { width: metadata.width, height: metadata.height, format: metadata.format || 'Desconocido' };
       
       return {
         tipo: 'Imagen',
@@ -48,7 +46,7 @@ class FileAnalyzer {
         dpi: dpi,
         tamaño: this.formatFileSize(fileSize),
         esAptaParaImpresion: this.isFileSuitableForPrinting(imageDimensions, dpi, productInfo),
-        dpiRequerido: requiredDPI
+        dpiRequerido: productInfo.dpi
       };
     } catch (error) {
       logger.error(`Error al analizar la imagen: ${error.message}`);
@@ -62,16 +60,15 @@ class FileAnalyzer {
       const pdfDoc = await PDFDocument.load(pdfBytes);
       const page = pdfDoc.getPages()[0];
       const { width, height } = page.getSize();
-      const pdfDimensions = { width, height };
-      const requiredDPI = this.calculateRequiredDPI(productInfo.medidas);
+      const pdfDimensions = { width, height, format: 'PDF' };
 
       return {
         tipo: 'PDF',
         ancho: width,
         alto: height,
         tamaño: this.formatFileSize(fileSize),
-        esAptaParaImpresion: this.isFileSuitableForPrinting(pdfDimensions, 300, productInfo), // Asumimos 300 DPI para PDFs
-        dpiRequerido: requiredDPI
+        esAptaParaImpresion: this.isFileSuitableForPrinting(pdfDimensions, productInfo.dpi, productInfo),
+        dpiRequerido: productInfo.dpi
       };
     } catch (error) {
       logger.error(`Error al analizar el PDF: ${error.message}`);
@@ -90,17 +87,17 @@ class FileAnalyzer {
   }
 
   isFileSuitableForPrinting(fileDimensions, fileDPI, productInfo) {
-    const requiredDPI = productInfo.dpi || this.calculateRequiredDPI(productInfo.medidas);
-    const minDimension = Math.min(fileDimensions.width, fileDimensions.height);
-    const maxDimension = Math.max(fileDimensions.width, fileDimensions.height);
+    const requiredDPI = productInfo.dpi;
     
-    const productMinDimension = Math.min(productInfo.medidas.ancho, productInfo.medidas.alto) * 100; // Convertir a cm
-    const productMaxDimension = Math.max(productInfo.medidas.ancho, productInfo.medidas.alto) * 100; // Convertir a cm
+    let isFormatValid = true; // Por defecto, asumimos que el formato es válido
+    if (productInfo.formato) {
+      const validFormats = productInfo.formato.split(', ');
+      isFormatValid = validFormats.includes(fileDimensions.format.toUpperCase());
+    }
     
-    const isResolutionSufficient = (minDimension >= productMinDimension * requiredDPI / 2.54) &&
-                                   (maxDimension >= productMaxDimension * requiredDPI / 2.54);
+    logger.info(`Analizando archivo - DPI: ${fileDPI}, Requerido: ${requiredDPI}, Formato válido: ${isFormatValid}, Formato del producto: ${productInfo.formato || 'No especificado'}`);
     
-    return fileDPI >= requiredDPI && isResolutionSufficient;
+    return fileDPI >= requiredDPI && isFormatValid;
   }
 
   calculateRequiredDPI(productDimensions) {

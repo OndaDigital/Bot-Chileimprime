@@ -33,11 +33,11 @@ class OpenAIService {
   }
 
   async extractOrder(products, aiResponse) {
-    const systemPrompt = `
+      const systemPrompt = `
       Eres un asistente especializado en extraer información de pedidos de imprenta.
       Tu tarea es extraer los detalles del pedido de la respuesta del asistente.
       Debes proporcionar un resumen del pedido en el siguiente formato JSON:
-  
+    
       {
         "items": [
           {
@@ -49,12 +49,14 @@ class OpenAIService {
               "alto": número
             },
             "terminaciones": ["sellado", "ojetillos", "bolsillo"],
-            "precio": número
+            "precio": número,
+            "dpi": número,
+            "formatos": ["PDF", "JPG"]
           }
         ],
         "observaciones": "Observaciones del pedido"
       }
-  
+    
       Si no hay un pedido específico o la información es insuficiente, devuelve un objeto JSON con un array de items vacío y una observación explicativa.
       NO incluyas ningún texto adicional, solo el JSON.
     `;
@@ -78,6 +80,17 @@ class OpenAIService {
         if (!parsedResponse.observaciones) {
           parsedResponse.observaciones = "No se proporcionaron observaciones.";
         }
+  
+        // Verificar y asignar valores por defecto para DPI y formatos si no están presentes
+        parsedResponse.items.forEach(item => {
+          if (!item.dpi) {
+            item.dpi = 72; // Valor por defecto si no se especifica
+          }
+          if (!item.formatos) {
+            item.formatos = ['PDF', 'JPG']; // Formatos por defecto si no se especifican
+          }
+        });
+  
       } catch (parseError) {
         logger.error("Error al analizar la respuesta JSON:", parseError);
         logger.info("Respuesta recibida:", response);

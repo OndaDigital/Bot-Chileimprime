@@ -145,9 +145,10 @@ class PrintingBot {
           case "SOLICITUD_HUMANO":
             this.addToBlacklist(userId, BLACKLIST_DURATION);
             this.resetConversation(userId);
-            this.clearIdleTimer(userId);
+            this.clearIdleTimer(userId); // Agregamos esta línea
             await flowDynamic("*Entendido* 👍. Un representante humano se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
             logger.info(`Solicitud de humano para ${userId}. Añadido a la lista negra por ${BLACKLIST_DURATION/1000} segundos.`);
+            logger.info(`Temporizador de inactividad detenido para ${userId} debido a solicitud de atención humana.`);
             return endFlow();
           default:
             await flowDynamic(response);
@@ -260,6 +261,8 @@ class PrintingBot {
             medidas: item.medidas,
             terminaciones: item.terminaciones,
             precio: item.precio,
+            dpi: item.dpi, // Agregar DPI del item extraído
+            formato: item.formatos.join(', '), // Agregar formatos aceptados del item extraído
             archivo: null,
             archivoValido: false
           };
@@ -300,13 +303,14 @@ class PrintingBot {
     try {
       const analysis = await fileAnalyzer.analyzeFile(fileUrl, {
         medidas: service.medidas,
-        dpi: service.dpi || 300 // Asumimos un DPI por defecto si no está especificado
+        dpi: service.dpi,
+        formato: service.formato || 'PDF, JPG' // Valor por defecto si no está especificado
       });
-      logger.info(`Análisis de archivo: ${JSON.stringify(analysis)}`);
+      logger.info(`Análisis de archivo para servicio ${service.nombre}: ${JSON.stringify(analysis)}`);
       
       return analysis.esAptaParaImpresion;
     } catch (error) {
-      logger.error(`Error al validar archivo: ${error.message}`);
+      logger.error(`Error al validar archivo para servicio ${service.nombre}: ${error.message}`);
       return false;
     }
   }
@@ -551,7 +555,10 @@ const idleTimeoutFlow = addKeyword(EVENTS.ACTION)
       const localPath = await provider.saveFile(ctx, {path: TMP_DIR});
       logger.info(`Documento guardado en ${localPath}`);
 
-      if (await printingBot.validateFile(localPath, currentService)) {
+      const fileAnalysis = await fileAnalyzer.analyzeFile(localPath, currentService);
+      logger.info(`Análisis de archivo: ${JSON.stringify(fileAnalysis)}`);
+
+      if (fileAnalysis.esAptaParaImpresion) {
         currentService.archivo = localPath;
         currentService.archivoValido = true;
         printingBot.resetFileUploadAttempts(userId);
@@ -565,7 +572,29 @@ const idleTimeoutFlow = addKeyword(EVENTS.ACTION)
           return gotoFlow(flowConfirmed);
         } else {
           logger.warn(`Archivo inválido para usuario ${userId}. Intento ${attempts}`);
-          await flowDynamic(`*El archivo no cumple con los requisitos necesarios para el servicio ${currentService.nombre}.* 😕 Por favor, intenta subir otro archivo. Intento ${attempts} de ${printingBot.MAX_FILE_UPLOAD_ATTEMPTS}`);
+          
+          let errorMessage = `*El archivo no cumple con los requisitos necesarios para el servicio ${currentService.nombre}.* 😕\n\n`;
+          errorMessage += `Detalles del archivo:\n`;
+          errorMessage += `- Tipo: ${fileAnalysis.tipo}\n`;
+          errorMessage += `- Formato: ${fileAnalysis.formato}\n`;
+          errorMessage += `- Dimensiones: ${fileAnalysis.ancho}x${fileAnalysis.alto} píxeles\n`;
+          errorMessage += `- DPI: ${fileAnalysis.dpi}\n`;
+          errorMessage += `- Tamaño: ${fileAnalysis.tamaño}\n\n`;
+          
+          errorMessage += `Para que el archivo sea válido, necesitas:\n`;
+          errorMessage += `- DPI mínimo requerido: ${fileAnalysis.dpiRequerido}\n`;
+          
+          if (fileAnalysis.dpi < fileAnalysis.dpiRequerido) {
+            errorMessage += `- Aumentar la resolución (DPI) de tu archivo\n`;
+          }
+          
+          if (!fileAnalysis.esAptaParaImpresion && !fileAnalysis.formato.toUpperCase().includes(currentService.formato.toUpperCase())) {
+            errorMessage += `- Usar un formato de archivo válido (${currentService.formato})\n`;
+          }
+          
+          errorMessage += `\nPor favor, ajusta tu archivo según estas recomendaciones y vuelve a intentarlo. Intento ${attempts} de ${printingBot.MAX_FILE_UPLOAD_ATTEMPTS}`;
+          
+          await flowDynamic(errorMessage);
         }
       }
     } catch (error) {
