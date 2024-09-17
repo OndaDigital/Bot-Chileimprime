@@ -1,5 +1,3 @@
-// app.js - Bot de imprenta
-
 // app.js
 import 'dotenv/config';
 import { createBot, createProvider, createFlow, addKeyword, EVENTS } from '@builderbot/bot';
@@ -45,28 +43,28 @@ const initializeBot = async () => {
 
 const handleMessage = async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
   const userId = ctx.from;
-  logger.info(`[App] Mensaje recibido de usuario ${userId}: ${ctx.body}`);
+  logger.info(`Mensaje recibido de usuario ${userId}: ${ctx.body}`);
 
   if (blacklistManager.isBlacklisted(userId)) {
-    logger.info(`[App] Usuario ${userId} en lista negra. Finalizando flujo.`);
+    logger.info(`Usuario ${userId} en lista negra. Finalizando flujo.`);
     return endFlow('Lo siento, tu acceso está temporalmente restringido.');
   }
 
   try {
     await messageQueue.enqueue(userId, async () => {
-      logger.info(`[App] Procesando mensaje para usuario ${userId}`);
+      logger.info(`Procesando mensaje para usuario ${userId}`);
       const response = await conversationManager.handleMessage(ctx);
       await flowDynamic(response);
-      logger.info(`[App] Respuesta enviada a usuario ${userId}: ${response}`);
+      logger.info(`Respuesta enviada a usuario ${userId}: ${response}`);
 
       if (response.includes('{FINALIZAR_CONVERSACION}')) {
-        logger.info(`[App] Finalizando conversación para usuario ${userId}`);
-        blacklistManager.addToBlacklist(userId, 10 * 60 * 1000);
+        logger.info(`Finalizando conversación para usuario ${userId}`);
+        blacklistManager.addToBlacklist(userId, 10 * 60 * 1000); // 10 minutos
         return endFlow('Gracias por tu cotización. Un representante se pondrá en contacto contigo pronto.');
       }
     });
   } catch (error) {
-    logger.error(`[App] Error al procesar mensaje para usuario ${userId}: ${error.message}`);
+    logger.error(`Error al procesar mensaje para usuario ${userId}: ${error.message}`);
     await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta nuevamente.');
   }
 };
@@ -77,7 +75,9 @@ const flowPrincipal = addKeyword(EVENTS.WELCOME)
 const flowDocument = addKeyword(EVENTS.DOCUMENT)
   .addAction(async (ctx, { flowDynamic, provider }) => {
     const userId = ctx.from;
+    logger.info(`Documento recibido de usuario ${userId}`);
     const filePath = await provider.saveFile(ctx, { path: TMP_DIR });
+    logger.info(`Archivo guardado en ${filePath}`);
     const response = await conversationManager.handleFileUpload(userId, filePath);
     await flowDynamic(response);
   });
@@ -85,9 +85,12 @@ const flowDocument = addKeyword(EVENTS.DOCUMENT)
 const flowVoiceNote = addKeyword(EVENTS.VOICE_NOTE)
   .addAction(async (ctx, { flowDynamic, provider }) => {
     const userId = ctx.from;
+    logger.info(`Nota de voz recibida de usuario ${userId}`);
     const audioPath = await provider.saveFile(ctx, { path: TMP_DIR });
+    logger.info(`Audio guardado en ${audioPath}`);
     const transcription = await openaiService.transcribeAudio(audioPath);
     await fs.unlink(audioPath);
+    logger.info(`Transcripción completada: ${transcription}`);
     const response = await conversationManager.handleMessage({ ...ctx, body: transcription });
     await flowDynamic(response);
   });
@@ -95,34 +98,35 @@ const flowVoiceNote = addKeyword(EVENTS.VOICE_NOTE)
 const flowRestart = addKeyword(['bot', 'Bot', 'BOT'])
   .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
     const userId = ctx.from;
+    logger.info(`Reinicio de bot solicitado por usuario ${userId}`);
     conversationManager.resetConversation(userId);
     await flowDynamic('Bot reiniciado. ¿En qué puedo ayudarte?');
     return gotoFlow(flowPrincipal);
   });
 
-  const main = async () => {
-    try {
-      await initializeBot();
-  
-      const adapterDB = new MemoryDB();
-      const adapterFlow = createFlow([flowPrincipal, flowDocument, flowVoiceNote, flowRestart]);
-      const adapterProvider = createProvider(BaileysProvider, { 
-        groupsIgnore: true,
-      });
-  
-      const { httpServer } = await createBot({
-        flow: adapterFlow,
-        provider: adapterProvider,
-        database: adapterDB,
-      });
-  
-      httpServer(PORT);
-      logger.info(`Bot iniciado en el puerto ${PORT}`);
-    } catch (error) {
-      logger.error('Error in main:', error);
-      console.error(error);
-    }
-  };
+const main = async () => {
+  try {
+    await initializeBot();
+
+    const adapterDB = new MemoryDB();
+    const adapterFlow = createFlow([flowPrincipal, flowDocument, flowVoiceNote, flowRestart]);
+    const adapterProvider = createProvider(BaileysProvider, { 
+      groupsIgnore: true,
+    });
+
+    const { httpServer } = await createBot({
+      flow: adapterFlow,
+      provider: adapterProvider,
+      database: adapterDB,
+    });
+
+    httpServer(PORT);
+    logger.info(`Bot iniciado en el puerto ${PORT}`);
+  } catch (error) {
+    logger.error('Error in main:', error);
+    console.error(error);
+  }
+};
 
 main().catch(err => {
   logger.error('Error in main:', err);

@@ -1,5 +1,5 @@
 // openaiService.js - bot de la imprenta
-
+// openaiService.js
 import OpenAI from 'openai';
 import Logger from './logger.js';
 import fs from 'fs/promises';
@@ -24,42 +24,87 @@ class OpenAIService {
       throw error;
     }
   }
-
-  async handleInitialConversation(context, userMessage) {
-    const messages = [
-      { role: "system", content: "Eres un asistente de imprenta amigable y eficiente. Tu objetivo es ayudar a los clientes a cotizar servicios de impresión. Debes detectar cuando el cliente pide el menú y responder con {MENU_SOLICITADO}. Si el cliente está listo para seleccionar un servicio, responde con {LISTO_PARA_SELECCIONAR_SERVICIO}. Si el cliente quiere finalizar, responde con {FINALIZAR_CONVERSACION}." },
-      ...context,
-      { role: "user", content: userMessage }
-    ];
-    return await this.getChatCompletion(messages);
-  }
-
-  async selectService(services, userMessage) {
-    const messages = [
-      { role: "system", content: "Tu tarea es identificar si el usuario ha seleccionado un servicio válido de la lista proporcionada. Si el usuario selecciona un servicio válido, responde con {SERVICIO_CONFIRMADO} seguido del nombre exacto del servicio. Si no, pide más detalles." },
-      { role: "user", content: `Servicios disponibles: ${JSON.stringify(services)}. Mensaje del usuario: ${userMessage}` }
-    ];
+  async analyzeIntent(message, context, services, currentState) {
+    const serviceList = Object.values(services).flat().map(s => s.nombre).join(', ');
+    const prompt = `
+    Eres un asistente de una imprenta. Analiza el siguiente mensaje considerando el estado actual: ${currentState}.
     
-    const response = await this.getChatCompletion(messages);
-    
-    if (response.includes("{SERVICIO_CONFIRMADO}")) {
-      return response;
-    } else {
-      return "No pude identificar el servicio. ¿Podrías proporcionar más detalles?";
+    Estados posibles: INITIAL, SERVICE_SELECTION, MEASUREMENTS_AND_FINISHES, FILE_UPLOAD, SUMMARY, CONFIRMATION
+
+    Servicios disponibles: ${serviceList}
+
+    Responde con un JSON:
+    {
+      "intencion": "SALUDAR" | "SOLICITAR_INFO" | "SELECCIONAR_SERVICIO" | "PROPORCIONAR_MEDIDAS" | "CONFIRMAR_ARCHIVO" | "CONFIRMAR_COTIZACION" | "AGREGAR_SERVICIO" | "SOLICITAR_AGENTE" | "OTRO",
+      "servicioMencionado": string | null,
+      "medidas": { "ancho": number, "alto": number } | null,
+      "terminaciones": string[] | null,
+      "respuestaSugerida": string
+    }
+
+    Contexto de la conversación:
+    ${context.map(msg => `${msg.role}: ${msg.content}`).join('\n')}
+
+    Mensaje del cliente: "${message}"
+    `;
+
+    try {
+      const response = await this.getChatCompletion([
+        { role: "system", content: prompt },
+        { role: "user", content: message }
+      ]);
+      
+      const parsedResponse = JSON.parse(response);
+      this.logger.info("Análisis de intención completado", { input: message, output: parsedResponse });
+      return parsedResponse;
+    } catch (error) {
+      this.logger.error("Error al analizar la intención:", error);
+      return {
+        intencion: "OTRO",
+        servicioMencionado: null,
+        medidas: null,
+        terminaciones: null,
+        respuestaSugerida: "Lo siento, no pude entender tu mensaje. ¿Podrías reformularlo?"
+      };
     }
   }
 
-  async getMeasurementsAndFinishes(service, userMessage) {
-    const messages = [
-      { role: "system", content: `Tu objetivo es analizar si el usuario ha proporcionado medidas válidas para el servicio: ${JSON.stringify(service)}. Las medidas deben estar dentro del rango: ${service.medidas}. Si las medidas son válidas, pregunta por las terminaciones disponibles: ${service.sellado ? 'sellado' : ''} ${service.ojetillos ? 'ojetillos' : ''} ${service.bolsillo ? 'bolsillo' : ''}. Cuando toda la información esté completa, responde con {TERMINACIONES_MEDIDAS_SELECCIONADAS} seguido de un JSON con la información.` },
-      { role: "user", content: userMessage }
-    ];
-    const response = await this.getChatCompletion(messages);
-    
-    if (response.includes("{TERMINACIONES_MEDIDAS_SELECCIONADAS}")) {
-      return response;
-    } else {
-      return response + "\n\nPor favor, proporciona las medidas o selecciona las terminaciones.";
+  async validateMeasurementsAndFinishes(service, message) {
+    const prompt = `
+    Valida si las medidas y terminaciones proporcionadas son correctas para el servicio: ${JSON.stringify(service)}.
+    Medidas válidas: ${service.medidas}
+    Terminaciones disponibles: ${service.sellado ? 'sellado,' : ''} ${service.ojetillos ? 'ojetillos,' : ''} ${service.bolsillo ? 'bolsillo' : ''}
+
+    Responde con un JSON:
+    {
+      "medidasValidas": boolean,
+      "terminacionesValidas": boolean,
+      "medidas": { "ancho": number, "alto": number } | null,
+      "terminaciones": string[] | null,
+      "respuestaSugerida": string
+    }
+
+    Mensaje del cliente: "${message}"
+    `;
+
+    try {
+      const response = await this.getChatCompletion([
+        { role: "system", content: prompt },
+        { role: "user", content: message }
+      ]);
+
+      const parsedResponse = JSON.parse(response);
+      this.logger.info("Validación de medidas y terminaciones completada", { input: message, output: parsedResponse });
+      return parsedResponse;
+    } catch (error) {
+      this.logger.error("Error al validar medidas y terminaciones:", error);
+      return {
+        medidasValidas: false,
+        terminacionesValidas: false,
+        medidas: null,
+        terminaciones: null,
+        respuestaSugerida: "No pude procesar las medidas y terminaciones. Por favor, proporciónalas en un formato claro, por ejemplo: '100x150 cm, con sellado y ojetillos'."
+      };
     }
   }
 
@@ -70,6 +115,7 @@ class OpenAIService {
         file: audioFile,
         model: "whisper-1",
       });
+      this.logger.info("Transcripción de audio completada", { filePath: audioFilePath });
       return response.text;
     } catch (error) {
       this.logger.error("Error al transcribir audio:", error);
@@ -77,11 +123,10 @@ class OpenAIService {
     }
   }
 
-estimateTokens(messages) {
-  // Estimación aproximada, 1 token ≈ 4 caracteres
-  return messages.reduce((total, message) => total + message.content.length / 4, 0).toFixed(0);
-}
-
+  estimateTokens(messages) {
+    // Estimación aproximada, 1 token ≈ 4 caracteres
+    return messages.reduce((total, message) => total + message.content.length / 4, 0).toFixed(0);
+  }
 }
 
 export default OpenAIService;
