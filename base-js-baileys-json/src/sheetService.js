@@ -1,5 +1,6 @@
 // sheetService.js - Bot imprenta
 
+
 import { JWT } from "google-auth-library";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import moment from 'moment-timezone';
@@ -27,9 +28,13 @@ class GoogleSheetService {
     moment.locale('es');
   }
 
+  async initialize() {
+    await this.doc.loadInfo();
+    logger.info('Google Sheet inicializado correctamente');
+  }
+
   async getServices() {
     try {
-      await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[0];
       await sheet.loadCells('A1:Q100');
   
@@ -48,18 +53,18 @@ class GoogleSheetService {
           categoria: currentCategory,
           tipo: sheet.getCell(row, 2).value,
           nombre: sheet.getCell(row, 3).value,
-          sellado: sheet.getCell(row, 4).value,
-          ojetillos: sheet.getCell(row, 5).value,
-          bolsillo: sheet.getCell(row, 6).value,
-          formato: sheet.getCell(row, 7).value || 'PDF, JPG', // Valor por defecto si no se especifica
-          dpi: 72, // Usamos 72 como valor por defecto
-          stock: sheet.getCell(row, 9).value,
+          sellado: sheet.getCell(row, 4).value === 'TRUE',
+          ojetillos: sheet.getCell(row, 5).value === 'TRUE',
+          bolsillo: sheet.getCell(row, 6).value === 'TRUE',
+          formato: sheet.getCell(row, 7).value || 'PDF, JPG',
+          dpi: parseInt(sheet.getCell(row, 8).value) || 72,
+          stock: parseInt(sheet.getCell(row, 9).value) || 0,
           estado: sheet.getCell(row, 10).value,
-          precio: sheet.getCell(row, 11).value,
+          precio: parseFloat(sheet.getCell(row, 11).value) || 0,
           medidas: sheet.getCell(row, 12).value,
-          precioSellado: sheet.getCell(row, 14).value,
-          precioBolsillo: sheet.getCell(row, 15).value,
-          precioOjetillo: sheet.getCell(row, 16).value
+          precioSellado: parseFloat(sheet.getCell(row, 14).value) || 0,
+          precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
+          precioOjetillo: parseFloat(sheet.getCell(row, 16).value) || 0
         };
 
         if (!services[currentCategory]) services[currentCategory] = [];
@@ -87,14 +92,8 @@ class GoogleSheetService {
   async saveOrder(data) {
     logger.info(`Iniciando guardado de pedido en Google Sheets: ${JSON.stringify(data)}`);
     try {
-      await this.doc.loadInfo();
-      logger.info('Información del documento cargada exitosamente');
-      
       const sheet = this.doc.sheetsByIndex[1];
-      logger.info(`Hoja seleccionada: ${sheet.title}`);
-      
       await sheet.loadCells();
-      logger.info('Celdas de la hoja cargadas exitosamente');
   
       const formattedDate = moment().tz('America/Santiago').format('DD-MM-YYYY HH:mm[hrs] - dddd');
       const censoredPhone = this.censorPhoneNumber(data.telefono);
@@ -111,28 +110,11 @@ class GoogleSheetService {
         "Nuevo pedido"
       ];
   
-      logger.info(`Datos de fila preparados para inserción: ${JSON.stringify(rowData)}`);
-  
       const result = await sheet.addRows([rowData]);
       
-      logger.info(`Tipo de resultado: ${typeof result}`);
-      logger.info(`¿Es un array? ${Array.isArray(result)}`);
-      logger.info(`Longitud del resultado: ${result.length}`);
-  
-      if (Array.isArray(result) && result.length > 0) {
-        const firstRow = result[0];
-        logger.info(`Tipo de la primera fila: ${typeof firstRow}`);
-        
-        const safeProperties = {
-          rowIndex: firstRow.rowIndex,
-          rowNumber: firstRow._rowNumber || firstRow.rowNumber,
-        };
-        
-        logger.info(`Propiedades seguras de la primera fila: ${JSON.stringify(safeProperties)}`);
-        
-        const rowIndex = safeProperties.rowIndex || safeProperties.rowNumber || sheet.rowCount;
+      if (result && result.length > 0) {
+        const rowIndex = result[0].rowIndex || sheet.rowCount;
         logger.info(`Fila añadida exitosamente. ID de la nueva fila: ${rowIndex}`);
-  
         return { success: true, message: "Pedido guardado exitosamente", rowIndex: rowIndex };
       } else {
         logger.warn("No se pudo obtener información de la fila añadida");
@@ -147,7 +129,6 @@ class GoogleSheetService {
 
   async getAdditionalInfo() {
     try {
-      await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
       await sheet.loadCells('A1:G11');
   
@@ -161,28 +142,18 @@ class GoogleSheetService {
       };
   
       ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-        const horario = sheet.getCell(index + 1, 0).value;
-        additionalInfo.horarios[dia] = horario || 'No disponible';
-        logger.info(`Horario cargado para ${dia}: ${additionalInfo.horarios[dia]}`);
+        additionalInfo.horarios[dia] = sheet.getCell(index + 1, 0).value || 'No disponible';
       });
   
       for (let row = 1; row <= 9; row++) {
         const comuna = sheet.getCell(row, 1).value;
         if (comuna && comuna.trim()) additionalInfo.comunasDespacho.push(comuna.trim());
       }
-      logger.info(`Comunas de despacho: ${additionalInfo.comunasDespacho.join(', ')}`);
   
       additionalInfo.direccionRetiro = sheet.getCell(1, 3).value || 'No disponible';
-      logger.info(`Dirección de retiro: ${additionalInfo.direccionRetiro}`);
-  
       additionalInfo.promocionDia = sheet.getCell(1, 4).value || 'No hay promociones actualmente';
-      logger.info(`Promoción del día: ${additionalInfo.promocionDia}`);
-  
       additionalInfo.metodosPago = sheet.getCell(1, 5).value || 'No especificado';
-      logger.info(`Métodos de pago: ${additionalInfo.metodosPago}`);
-  
       additionalInfo.tiempoPreparacion = sheet.getCell(1, 6).value || 'No especificado';
-      logger.info(`Tiempos de preparación: ${additionalInfo.tiempoPreparacion}`);
   
       logger.info("Información adicional cargada completamente:", JSON.stringify(additionalInfo, null, 2));
   
@@ -192,7 +163,6 @@ class GoogleSheetService {
       return null;
     }
   }
-
 }
 
 export default GoogleSheetService;

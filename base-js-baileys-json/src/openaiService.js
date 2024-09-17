@@ -1,132 +1,87 @@
-// openaiService.js - Bot imprenta
+// openaiService.js - bot de la imprenta
 
-import OpenAI from "openai";
+import OpenAI from 'openai';
 import Logger from './logger.js';
-import fs from 'fs';
-import { promises as fsPromises } from 'fs';
-
-const logger = new Logger();
-const MAX_AUDIO_SIZE = 25 * 1024 * 1024; // 25 MB en bytes
+import fs from 'fs/promises';
 
 class OpenAIService {
   constructor(apiKey) {
     this.openai = new OpenAI({ apiKey });
+    this.logger = new Logger();
   }
 
-  async getChatCompletion(systemPrompt, context) {
+  async getChatCompletion(messages) {
     try {
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o-mini", // o "gpt-3.5-turbo" si no tienes acceso a GPT-4
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: context }
-        ],
+        model: "gpt-4o-mini",
+        messages: messages,
         max_tokens: 2000,
         temperature: 0.7,
       });
-
       return response.choices[0].message.content.trim();
     } catch (error) {
-      logger.error("Error al obtener respuesta de OpenAI:", error);
+      this.logger.error("Error al obtener respuesta de OpenAI:", error);
       throw error;
     }
   }
 
-  async extractOrder(products, aiResponse) {
-      const systemPrompt = `
-      Eres un asistente especializado en extraer información de pedidos de imprenta.
-      Tu tarea es extraer los detalles del pedido de la respuesta del asistente.
-      Debes proporcionar un resumen del pedido en el siguiente formato JSON:
+  async handleInitialConversation(context, userMessage) {
+    const messages = [
+      { role: "system", content: "Eres un asistente de imprenta amigable y eficiente. Tu objetivo es ayudar a los clientes a cotizar servicios de impresión. Debes detectar cuando el cliente pide el menú y responder con {MENU_SOLICITADO}. Si el cliente está listo para seleccionar un servicio, responde con {LISTO_PARA_SELECCIONAR_SERVICIO}. Si el cliente quiere finalizar, responde con {FINALIZAR_CONVERSACION}." },
+      ...context,
+      { role: "user", content: userMessage }
+    ];
+    return await this.getChatCompletion(messages);
+  }
+
+  async selectService(services, userMessage) {
+    const messages = [
+      { role: "system", content: "Tu tarea es identificar si el usuario ha seleccionado un servicio válido de la lista proporcionada. Si el usuario selecciona un servicio válido, responde con {SERVICIO_CONFIRMADO} seguido del nombre exacto del servicio. Si no, pide más detalles." },
+      { role: "user", content: `Servicios disponibles: ${JSON.stringify(services)}. Mensaje del usuario: ${userMessage}` }
+    ];
     
-      {
-        "items": [
-          {
-            "categoria": "Categoría del producto",
-            "nombre": "Nombre del producto",
-            "cantidad": número,
-            "medidas": {
-              "ancho": número,
-              "alto": número
-            },
-            "terminaciones": ["sellado", "ojetillos", "bolsillo"],
-            "precio": número,
-            "dpi": número,
-            "formatos": ["PDF", "JPG"]
-          }
-        ],
-        "observaciones": "Observaciones del pedido"
-      }
+    const response = await this.getChatCompletion(messages);
     
-      Si no hay un pedido específico o la información es insuficiente, devuelve un objeto JSON con un array de items vacío y una observación explicativa.
-      NO incluyas ningún texto adicional, solo el JSON.
-    `;
-  
-    const context = `
-      Productos disponibles:
-      ${JSON.stringify(products, null, 2)}
-  
-      Respuesta del asistente:
-      ${aiResponse}
-    `;
-  
-    try {
-      const response = await this.getChatCompletion(systemPrompt, context);
-      let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(response);
-        if (!parsedResponse.items) {
-          parsedResponse.items = [];
-        }
-        if (!parsedResponse.observaciones) {
-          parsedResponse.observaciones = "No se proporcionaron observaciones.";
-        }
-  
-        // Verificar y asignar valores por defecto para DPI y formatos si no están presentes
-        parsedResponse.items.forEach(item => {
-          if (!item.dpi) {
-            item.dpi = 72; // Valor por defecto si no se especifica
-          }
-          if (!item.formatos) {
-            item.formatos = ['PDF', 'JPG']; // Formatos por defecto si no se especifican
-          }
-        });
-  
-      } catch (parseError) {
-        logger.error("Error al analizar la respuesta JSON:", parseError);
-        logger.info("Respuesta recibida:", response);
-        parsedResponse = { 
-          items: [], 
-          observaciones: "Error al procesar la respuesta. No se pudo extraer información del pedido."
-        };
-      }
-      return parsedResponse;
-    } catch (error) {
-      logger.error("Error al extraer el pedido:", error);
-      return { 
-        items: [], 
-        observaciones: "Error al procesar la solicitud de pedido."
-      };
+    if (response.includes("{SERVICIO_CONFIRMADO}")) {
+      return response;
+    } else {
+      return "No pude identificar el servicio. ¿Podrías proporcionar más detalles?";
+    }
+  }
+
+  async getMeasurementsAndFinishes(service, userMessage) {
+    const messages = [
+      { role: "system", content: `Tu objetivo es analizar si el usuario ha proporcionado medidas válidas para el servicio: ${JSON.stringify(service)}. Las medidas deben estar dentro del rango: ${service.medidas}. Si las medidas son válidas, pregunta por las terminaciones disponibles: ${service.sellado ? 'sellado' : ''} ${service.ojetillos ? 'ojetillos' : ''} ${service.bolsillo ? 'bolsillo' : ''}. Cuando toda la información esté completa, responde con {TERMINACIONES_MEDIDAS_SELECCIONADAS} seguido de un JSON con la información.` },
+      { role: "user", content: userMessage }
+    ];
+    const response = await this.getChatCompletion(messages);
+    
+    if (response.includes("{TERMINACIONES_MEDIDAS_SELECCIONADAS}")) {
+      return response;
+    } else {
+      return response + "\n\nPor favor, proporciona las medidas o selecciona las terminaciones.";
     }
   }
 
   async transcribeAudio(audioFilePath) {
     try {
-      const stats = await fsPromises.stat(audioFilePath);
-      if (stats.size > MAX_AUDIO_SIZE) {
-        throw new Error(`El archivo de audio excede el tamaño máximo permitido de ${MAX_AUDIO_SIZE / (1024 * 1024)} MB`);
-      }
-
+      const audioFile = await fs.readFile(audioFilePath);
       const response = await this.openai.audio.transcriptions.create({
-        file: fs.createReadStream(audioFilePath),
+        file: audioFile,
         model: "whisper-1",
       });
-      logger.info(`Audio transcrito exitosamente: ${audioFilePath}`);
       return response.text;
     } catch (error) {
-      logger.error(`Error al transcribir audio: ${error.message}`);
+      this.logger.error("Error al transcribir audio:", error);
       throw error;
     }
   }
+
+estimateTokens(messages) {
+  // Estimación aproximada, 1 token ≈ 4 caracteres
+  return messages.reduce((total, message) => total + message.content.length / 4, 0).toFixed(0);
+}
+
 }
 
 export default OpenAIService;
