@@ -1,0 +1,1342 @@
+
+// app.js
+
+// app.js
+
+import { createBot, createProvider, createFlow, addKeyword, MemoryDB, EVENTS } from '@builderbot/bot';
+import { BaileysProvider } from '@builderbot/provider-baileys';
+import { openaiService } from './services/openai-service.js';
+import { sheetsService } from './services/sheets-service.js';
+import { conversationManager } from './core/conversation-manager.js';
+import { commandHandler } from './core/command-handler.js';
+import { userSessionManager } from './core/user-session-manager.js';
+import { middlewareManager } from './core/middleware-manager.js';
+import { messageProcessor } from './middleware/message-processor.js';
+import { errorHandler } from './middleware/error-handler.js';
+import { quoteCommand } from './commands/quote-command.js';
+import { analyzeFileCommand } from './commands/analyze-file-command.js';
+import { generateBudgetCommand } from './commands/generate-budget-command.js';
+import { logger } from './utils/logger.js';
+import { pluginManager } from './core/plugin-manager.js';
+import { examplePlugin } from './plugins/example-plugin.js';
+import config from './config/index.js';
+
+const PORT = process.env.PORT || 3000;
+
+// Registrar plugins
+pluginManager.registerPlugin('examplePlugin', examplePlugin);
+
+// Registrar comandos
+commandHandler.registerCommand('QUOTE', quoteCommand);
+commandHandler.registerCommand('ANALYZE_FILE', analyzeFileCommand);
+commandHandler.registerCommand('GENERATE_BUDGET', generateBudgetCommand);
+
+// Configurar middleware
+middlewareManager.use(messageProcessor);
+middlewareManager.use(errorHandler);
+
+// Configurar estados de conversación
+conversationManager.registerState('INITIAL', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Bienvenido a la imprenta. ¿En qué puedo ayudarte?');
+});
+
+conversationManager.registerState('MAIN_MENU', async (ctx, action, { flowDynamic }) => {
+  await commandHandler.executeCommand(action, ctx, { flowDynamic });
+});
+
+conversationManager.registerState('SELECTING_SERVICE', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Por favor, selecciona un servicio de impresión.');
+});
+
+conversationManager.registerState('ENTERING_MEASUREMENTS', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Por favor, ingresa las medidas del producto.');
+});
+
+conversationManager.registerState('SELECTING_FINISHES', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('¿Deseas algún acabado especial?');
+});
+
+conversationManager.registerState('UPLOADING_FILE', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Por favor, sube tu archivo de diseño.');
+});
+
+conversationManager.registerState('CONFIRMING_ORDER', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('¿Confirmas tu pedido?');
+});
+
+// Configurar transiciones
+conversationManager.registerTransition('INITIAL', 'MAIN_MENU', () => true);
+conversationManager.registerTransition('MAIN_MENU', 'SELECTING_SERVICE', (ctx, action) => action === 'QUOTE');
+conversationManager.registerTransition('MAIN_MENU', 'UPLOADING_FILE', (ctx, action) => action === 'ANALYZE_FILE');
+conversationManager.registerTransition('MAIN_MENU', 'CONFIRMING_ORDER', (ctx, action) => action === 'GENERATE_BUDGET');
+conversationManager.registerTransition('SELECTING_SERVICE', 'ENTERING_MEASUREMENTS', () => true);
+conversationManager.registerTransition('ENTERING_MEASUREMENTS', 'SELECTING_FINISHES', () => true);
+conversationManager.registerTransition('SELECTING_FINISHES', 'UPLOADING_FILE', () => true);
+conversationManager.registerTransition('UPLOADING_FILE', 'CONFIRMING_ORDER', () => true);
+conversationManager.registerTransition('CONFIRMING_ORDER', 'MAIN_MENU', () => true);
+
+// Configurar flujo principal
+const mainFlow = addKeyword([EVENTS.WELCOME, 'hola', 'inicio', 'menu'])
+  .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
+    const userId = ctx.from;
+    ctx.userContext = userSessionManager.getSession(userId);
+
+    try {
+      await middlewareManager.run(ctx, { flowDynamic, gotoFlow });
+      await flowDynamic('¡Bienvenido a la imprenta! ¿En qué puedo ayudarte hoy?');
+      await conversationManager.handleMessage(ctx, { flowDynamic, gotoFlow });
+    } catch (error) {
+      logger.error(`Error in main flow for user ${userId}`, error);
+      if (error instanceof ApplicationError) {
+        await flowDynamic(error.message);
+      } else {
+        await flowDynamic('Lo siento, ha ocurrido un error inesperado. Por favor, intenta de nuevo más tarde.');
+      }
+    }
+  });
+
+  // Agregar un comando por defecto
+const defaultCommand = {
+    execute: async (ctx) => {
+      const { flowDynamic } = ctx;
+      await flowDynamic('Lo siento, no he entendido tu solicitud. ¿Podrías reformularla o elegir una de las opciones disponibles?');
+    }
+  };
+
+  commandHandler.registerDefaultCommand(defaultCommand);
+
+
+// Inicializar bot
+const main = async () => {
+  try {
+    await openaiService.initialize();
+    await sheetsService.initialize();
+
+    const adapterDB = new MemoryDB();
+    const adapterFlow = createFlow([mainFlow]);
+    const adapterProvider = createProvider(BaileysProvider, {
+      // Agregar configuración específica de Baileys si es necesario
+    });
+
+    const { httpServer } = await createBot({
+      flow: adapterFlow,
+      provider: adapterProvider,
+      database: adapterDB,
+    });
+
+    // Iniciar el servidor HTTP
+    if (httpServer) {
+      httpServer(PORT);
+      logger.info(`HTTP Server is running on port ${PORT}`);
+    } else {
+      logger.warn('HTTP Server is not available in this BuilderBot version');
+    }
+
+    logger.info('Bot initialized successfully');
+    logger.info('Scan the QR code with your WhatsApp to start the bot');
+  } catch (error) {
+    logger.error('Failed to initialize bot', error);
+    process.exit(1);
+  }
+};
+
+main().catch(error => {
+  logger.error('Unhandled error in main function', error);
+  process.exit(1);
+});
+
+
+// commands\analyze-file-command.js
+
+// commands/analyze-file-command.js
+
+import { fileAnalyzer } from '../services/file-analyzer.js';
+import { logger } from '../utils/logger.js';
+import { validators } from '../utils/validators.js';
+import { ValidationError } from '../utils/error-types.js';
+
+class AnalyzeFileCommand {
+  async execute(ctx) {
+    try {
+      await ctx.reply('Por favor, envía el archivo que deseas analizar.');
+      ctx.userContext.setState('UPLOADING_FILE');
+      
+      // La lógica de análisis del archivo se manejará en el estado UPLOADING_FILE de la FSM
+    } catch (error) {
+      logger.error('Error initiating file analysis command', error);
+      await ctx.reply('Lo siento, ha ocurrido un error al iniciar el análisis del archivo.');
+    }
+  }
+
+  async handleFileUpload(ctx) {
+    if (!ctx.attachment) {
+      await ctx.reply('No se ha recibido ningún archivo. Por favor, envía un archivo para analizar.');
+      return;
+    }
+
+    try {
+      validators.validateFile(ctx.attachment, {
+        allowedFileTypes: ['application/pdf', 'image/jpeg', 'image/png'],
+        maxFileSize: 10 * 1024 * 1024 // 10 MB
+      });
+
+      const analysis = await fileAnalyzer.analyzeFile(Buffer.from(ctx.attachment.data, 'base64'), ctx.attachment.filename);
+      await ctx.reply(analysis);
+
+      // Volver al menú principal después del análisis
+      ctx.userContext.setState('MAIN_MENU');
+      await ctx.reply('¿En qué más puedo ayudarte?');
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        await ctx.reply(error.message);
+      } else {
+        logger.error('Error analyzing file', error);
+        await ctx.reply('Lo siento, ha ocurrido un error al analizar el archivo.');
+      }
+      // Mantener el estado en UPLOADING_FILE para permitir otro intento
+    }
+  }
+}
+
+export const analyzeFileCommand = new AnalyzeFileCommand();
+
+
+// commands\generate-budget-command.js
+
+// commands/generate-budget-command.js
+
+import { openaiService } from '../services/openai-service.js';
+import { printingCalculator } from '../services/printing-calculator.js';
+import { logger } from '../utils/logger.js';
+import { ValidationError } from '../utils/error-types.js';
+
+class GenerateBudgetCommand {
+  async execute(ctx) {
+    try {
+      const cart = ctx.userContext.getCart();
+      if (cart.isEmpty()) {
+        await ctx.reply('No hay items en el carrito para generar un presupuesto. Por favor, cotiza algunos servicios primero.');
+        ctx.userContext.setState('MAIN_MENU');
+        return;
+      }
+
+      await ctx.reply('Generando presupuesto basado en tu carrito actual...');
+      ctx.userContext.setState('CONFIRMING_ORDER');
+
+      const budget = await this.generateBudget(cart);
+      await ctx.reply(budget);
+
+      await ctx.reply('¿Deseas confirmar este presupuesto o hacer cambios?');
+    } catch (error) {
+      logger.error('Error executing generate budget command', error);
+      await ctx.reply('Lo siento, ha ocurrido un error al generar el presupuesto.');
+      ctx.userContext.setState('MAIN_MENU');
+    }
+  }
+
+  async generateBudget(cart) {
+    try {
+      const calculatedOrder = printingCalculator.calculatePrice(cart);
+      const formattedBudget = printingCalculator.formatOrderSummary(calculatedOrder);
+
+      const aiPrompt = `Genera un presupuesto detallado basado en la siguiente orden de impresión:\n${formattedBudget}`;
+      const aiResponse = await openaiService.getChatCompletion(aiPrompt);
+
+      return `Aquí tienes tu presupuesto detallado:\n\n${aiResponse}`;
+    } catch (error) {
+      logger.error('Error generating budget', error);
+      throw new Error('No se pudo generar el presupuesto');
+    }
+  }
+
+  async handleConfirmation(ctx, confirmation) {
+    if (confirmation.toLowerCase() === 'confirmar') {
+      await ctx.reply('¡Gracias por confirmar tu pedido! Nuestro equipo se pondrá en contacto contigo pronto para finalizar los detalles.');
+      // Aquí se podría agregar lógica para guardar el pedido en la base de datos o enviar notificaciones
+      ctx.userContext.clearCart();
+    } else if (confirmation.toLowerCase() === 'cambios') {
+      await ctx.reply('Entendido. Volvamos al menú principal para hacer cambios en tu pedido.');
+    } else {
+      await ctx.reply('No entendí tu respuesta. Por favor, di "confirmar" para aceptar el presupuesto o "cambios" para modificar tu pedido.');
+      return; // Mantener el estado actual para esperar una respuesta válida
+    }
+    
+    ctx.userContext.setState('MAIN_MENU');
+    await ctx.reply('¿En qué más puedo ayudarte?');
+  }
+}
+
+export const generateBudgetCommand = new GenerateBudgetCommand();
+
+
+// commands\quote-command.js
+
+// commands/quote-command.js
+
+import { sheetsService } from '../services/sheets-service.js';
+import { logger } from '../utils/logger.js';
+import { validators } from '../utils/validators.js';
+import { ValidationError } from '../utils/error-types.js';
+
+class QuoteCommand {
+  async execute(ctx) {
+    try {
+      const menu = await sheetsService.getMenu();
+      ctx.userContext.setMenu(menu);
+      await ctx.reply('Por favor, dime qué tipo de impresión necesitas.');
+      ctx.userContext.setState('SELECTING_SERVICE');
+
+      // La lógica siguiente se manejará en los estados correspondientes de la FSM
+      // Este comando solo inicia el proceso de cotización
+
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        await ctx.reply(error.message);
+      } else {
+        logger.error('Error executing quote command', error);
+        await ctx.reply('Lo siento, ha ocurrido un error al procesar tu solicitud.');
+      }
+    }
+  }
+
+  async handleServiceSelection(ctx, service) {
+    // Esta lógica se moverá al estado SELECTING_SERVICE de la FSM
+    try {
+      validators.validateServiceSelection(service, ctx.userContext.getMenu());
+      ctx.userContext.getCart().addItem(service);
+      ctx.userContext.setState('ENTERING_MEASUREMENTS');
+      await ctx.reply(`Has seleccionado ${service.name}. Ahora, por favor, proporciona las medidas.`);
+    } catch (error) {
+      throw new ValidationError(error.message);
+    }
+  }
+
+  async handleMeasurements(ctx, measurements) {
+    // Esta lógica se moverá al estado ENTERING_MEASUREMENTS de la FSM
+    try {
+      const service = ctx.userContext.getCart().getLastItem();
+      validators.validateMeasurements(measurements, service);
+      ctx.userContext.getCart().updateLastItem({ measurements });
+      ctx.userContext.setState('SELECTING_FINISHES');
+      await ctx.reply('Medidas registradas. ¿Deseas algún acabado especial?');
+    } catch (error) {
+      throw new ValidationError(error.message);
+    }
+  }
+
+  async handleFinishes(ctx, finishes) {
+    // Esta lógica se moverá al estado SELECTING_FINISHES de la FSM
+    try {
+      const service = ctx.userContext.getCart().getLastItem();
+      validators.validateFinishes(finishes, service);
+      ctx.userContext.getCart().updateLastItem({ finishes });
+      ctx.userContext.setState('UPLOADING_FILE');
+      await ctx.reply('Acabados registrados. Por favor, sube tu archivo de diseño.');
+    } catch (error) {
+      throw new ValidationError(error.message);
+    }
+  }
+}
+
+export const quoteCommand = new QuoteCommand();
+
+
+// config\index.js
+
+import "dotenv/config";
+
+
+
+const createGoogleCredentials = () => {
+  console.log("GOOGLE_SERVICE_ACCOUNT_EMAIL:", process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  console.log("GOOGLE_PRIVATE_KEY:", process.env.GOOGLE_PRIVATE_KEY ? "Definido" : "No definido");
+  console.log("GOOGLE_SHEET_ID:", process.env.GOOGLE_SHEET_ID);
+  
+  return {
+    type: "service_account",
+    project_id: "proyectos-clientes-411618", // Asumiendo este project_id basado en el email
+    private_key: process.env.GOOGLE_PRIVATE_KEY,
+    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    // Otros campos necesarios...
+  };
+};
+
+const config = {
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+  },
+  googleSheets: {
+    sheetId: process.env.GOOGLE_SHEET_ID,
+    credentials: createGoogleCredentials(),
+  },
+  logging: {
+    level: process.env.LOG_LEVEL || 'info',
+  },
+};
+
+console.log("Configuración final:");
+console.log(JSON.stringify(config, (key, value) => 
+  key === 'private_key' ? (value ? 'Definido' : 'No definido') : value, 2
+));
+
+export default config;
+
+
+// core\command-handler.js
+
+import { logger } from '../utils/logger.js';
+
+class CommandHandler {
+  constructor() {
+    this.commands = new Map();
+    this.subcommands = new Map();
+    this.dependencies = new Map();
+  }
+
+  registerDefaultCommand(handler) {
+    this.defaultCommand = handler;
+    logger.info('Default command registered');
+  }
+
+  registerCommand(name, handler, dependencies = []) {
+    this.commands.set(name, handler);
+    this.dependencies.set(name, dependencies);
+    logger.info(`Command ${name} registered`);
+  }
+
+  registerSubcommand(commandName, subcommandName, handler) {
+    if (!this.subcommands.has(commandName)) {
+      this.subcommands.set(commandName, new Map());
+    }
+    this.subcommands.get(commandName).set(subcommandName, handler);
+    logger.info(`Subcommand ${subcommandName} registered for command ${commandName}`);
+  }
+
+  async executeCommand(name, ctx, subcommand = null) {
+    if (this.commands.has(name)) {
+      try {
+        await this.executeDependencies(name, ctx);
+        if (subcommand && this.subcommands.has(name) && this.subcommands.get(name).has(subcommand)) {
+          await this.subcommands.get(name).get(subcommand).execute(ctx);
+        } else {
+          await this.commands.get(name).execute(ctx);
+        }
+      } catch (error) {
+        logger.error(`Error executing command ${name}`, error);
+        throw error;
+      }
+    } else if (this.defaultCommand) {
+      await this.defaultCommand.execute(ctx);
+    } else {
+      logger.error(`Command ${name} not found and no default command registered`);
+      throw new Error(`Command ${name} not found`);
+    }
+  }
+
+  async executeDependencies(commandName, ctx) {
+    const dependencies = this.dependencies.get(commandName) || [];
+    for (const dep of dependencies) {
+      await this.executeCommand(dep, ctx);
+    }
+  }
+
+  getRegisteredCommands() {
+    return Array.from(this.commands.keys());
+  }
+
+  getSubcommands(commandName) {
+    return this.subcommands.get(commandName) ? Array.from(this.subcommands.get(commandName).keys()) : [];
+  }
+}
+
+export const commandHandler = new CommandHandler();
+
+
+// core\conversation-manager.js
+
+// core/conversation-manager.js
+
+import { openaiService } from '../services/openai-service.js';
+import { commandHandler } from './command-handler.js';
+import { sheetsService } from '../services/sheets-service.js';
+import { printingCalculator } from '../services/printing-calculator.js';
+import { logger } from '../utils/logger.js';
+import { ValidationError } from '../utils/error-types.js';
+import { validators } from '../utils/validators.js';
+
+class ConversationManager {
+  constructor() {
+    this.states = new Map();
+    this.transitions = new Map();
+  }
+
+  registerState(stateName, handler) {
+    this.states.set(stateName, handler);
+    logger.info(`State ${stateName} registered`);
+  }
+
+  registerTransition(fromState, toState, condition) {
+    if (!this.transitions.has(fromState)) {
+      this.transitions.set(fromState, new Map());
+    }
+    this.transitions.get(fromState).set(toState, condition);
+    logger.info(`Transition from ${fromState} to ${toState} registered`);
+  }
+
+  async handleMessage(ctx, { flowDynamic, gotoFlow }) {
+    const userContext = ctx.userContext;
+    const currentState = userContext.getState();
+
+    try {
+      userContext.addToHistory('user', ctx.body);
+
+      const action = await this.determineAction(ctx);
+      const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
+
+      if (nextState && this.states.has(nextState)) {
+        userContext.setState(nextState);
+        await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
+      } else {
+        throw new Error(`Invalid state transition from ${currentState} with action ${action}`);
+      }
+
+      const systemPrompt = this.getSystemPrompt(userContext);
+      const aiResponse = await openaiService.getChatCompletion(userContext, systemPrompt);
+
+      const processedResponse = await this.processAIResponse(aiResponse, action, userContext);
+
+      await flowDynamic(processedResponse.message);
+      userContext.addToHistory('assistant', processedResponse.message);
+
+      await this.handlePostActions(ctx, action, processedResponse, { flowDynamic, gotoFlow });
+
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        await flowDynamic(error.message);
+      } else {
+        logger.error(`Error handling message for user ${ctx.from}`, error);
+        await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.');
+      }
+    }
+  }
+
+  async determineAction(ctx) {
+    const userMessage = ctx.body.toLowerCase();
+    
+    // Intentar determinar la intención usando OpenAI
+    try {
+      const intent = await openaiService.determineIntent(userMessage);
+      switch (intent) {
+        case 'cotizar':
+          return 'QUOTE';
+        case 'analizar_archivo':
+          return 'ANALYZE_FILE';
+        case 'generar_presupuesto':
+          return 'GENERATE_BUDGET';
+        default:
+          // Si OpenAI no puede determinar la intención, usamos la lógica simple
+          if (userMessage.includes('cotizar')) return 'QUOTE';
+          if (userMessage.includes('analizar archivo')) return 'ANALYZE_FILE';
+          if (userMessage.includes('generar presupuesto')) return 'GENERATE_BUDGET';
+          return 'DEFAULT';
+      }
+    } catch (error) {
+      logger.error('Error determining intent with OpenAI', error);
+      // En caso de error, volvemos a la lógica simple
+      if (userMessage.includes('cotizar')) return 'QUOTE';
+      if (userMessage.includes('analizar archivo')) return 'ANALYZE_FILE';
+      if (userMessage.includes('generar presupuesto')) return 'GENERATE_BUDGET';
+      return 'DEFAULT';
+    }
+  }
+
+  async executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow }) {
+    const stateTransitions = this.transitions.get(currentState);
+    if (!stateTransitions) {
+      throw new Error(`No transitions defined for state: ${currentState}`);
+    }
+
+    for (const [nextState, condition] of stateTransitions.entries()) {
+      if (await condition(ctx, action)) {
+        return nextState;
+      }
+    }
+
+    return currentState; // Si no hay transición, permanecemos en el estado actual
+  }
+
+  async executeState(state, ctx, action, { flowDynamic, gotoFlow }) {
+    const stateHandler = this.states.get(state);
+    if (!stateHandler) {
+      throw new Error(`No handler found for state: ${state}`);
+    }
+    await stateHandler(ctx, action, { flowDynamic, gotoFlow });
+  }
+
+  getSystemPrompt(userContext) {
+    const basePrompt = "Eres un asistente virtual para una imprenta. Tu tarea es ayudar a los clientes a cotizar servicios de impresión.";
+    const stateSpecificPrompt = this.getStateSpecificPrompt(userContext.getState());
+    return `${basePrompt} ${stateSpecificPrompt}`;
+  }
+
+  getStateSpecificPrompt(state) {
+    const prompts = {
+      'INITIAL': "Saluda al cliente y pregúntale en qué puedes ayudarle.",
+      'MAIN_MENU': "Ayuda al cliente a elegir entre cotizar, analizar un archivo o generar un presupuesto.",
+      'SELECTING_SERVICE': "Ayuda al cliente a elegir un servicio de impresión. Ofrece opciones basadas en nuestro catálogo.",
+      'ENTERING_MEASUREMENTS': "Solicita las medidas específicas para el servicio seleccionado. Asegúrate de que sean válidas.",
+      'SELECTING_FINISHES': "Ofrece opciones de acabado como sellado, ojetillos o bolsillo si aplican al servicio seleccionado.",
+      'UPLOADING_FILE': "Guía al cliente para que suba su archivo de diseño. Menciona los formatos aceptados y los requisitos de DPI.",
+      'CONFIRMING_ORDER': "Presenta un resumen del pedido y pregunta al cliente si desea confirmar o modificar algo.",
+    };
+    return prompts[state] || "Asiste al cliente con su consulta actual.";
+  }
+
+  async processAIResponse(aiResponse, action, userContext) {
+    // Implementación para procesar la respuesta de la IA
+    return { message: aiResponse };
+  }
+
+  async handlePostActions(ctx, action, processedResponse, { flowDynamic, gotoFlow }) {
+    // Implementación para manejar acciones posteriores
+    logger.info(`Post-action handling for ${action}`);
+  }
+}
+
+export const conversationManager = new ConversationManager();
+
+
+// core\middleware-manager.js
+
+import { logger } from '../utils/logger.js';
+
+class MiddlewareManager {
+  constructor() {
+    this.middlewares = [];
+  }
+
+  use(middleware) {
+    this.middlewares.push(middleware);
+    logger.info(`Middleware registered: ${middleware.name}`);
+  }
+
+  async run(ctx, next) {
+    let index = 0;
+    const runner = async () => {
+      if (index < this.middlewares.length) {
+        await this.middlewares[index++](ctx, runner);
+      } else {
+        await next();
+      }
+    };
+    await runner();
+  }
+}
+
+export const middlewareManager = new MiddlewareManager();
+
+
+// core\plugin-manager.js
+
+import { logger } from '../utils/logger.js';
+
+class PluginManager {
+  constructor() {
+    this.plugins = new Map();
+  }
+
+  registerPlugin(name, plugin) {
+    if (this.plugins.has(name)) {
+      logger.warn(`Plugin ${name} already registered. Overwriting.`);
+    }
+    this.plugins.set(name, plugin);
+    logger.info(`Plugin ${name} registered successfully.`);
+  }
+
+  getPlugin(name) {
+    if (!this.plugins.has(name)) {
+      logger.error(`Plugin ${name} not found.`);
+      return null;
+    }
+    return this.plugins.get(name);
+  }
+
+  async executePluginMethod(pluginName, methodName, ...args) {
+    const plugin = this.getPlugin(pluginName);
+    if (!plugin) {
+      throw new Error(`Plugin ${pluginName} not found.`);
+    }
+    if (typeof plugin[methodName] !== 'function') {
+      throw new Error(`Method ${methodName} not found in plugin ${pluginName}.`);
+    }
+    try {
+      return await plugin[methodName](...args);
+    } catch (error) {
+      logger.error(`Error executing method ${methodName} of plugin ${pluginName}:`, error);
+      throw error;
+    }
+  }
+
+  getRegisteredPlugins() {
+    return Array.from(this.plugins.keys());
+  }
+}
+
+export const pluginManager = new PluginManager();
+
+
+// core\user-session-manager.js
+
+import { UserContext } from '../models/user-context.js';
+import { logger } from '../utils/logger.js';
+
+class UserSessionManager {
+  constructor() {
+    this.sessions = new Map();
+  }
+
+  getSession(userId) {
+    if (!this.sessions.has(userId)) {
+      this.sessions.set(userId, new UserContext(userId));
+      logger.info(`New session created for user ${userId}`);
+    }
+    return this.sessions.get(userId);
+  }
+
+  updateSession(userId, updates) {
+    const session = this.getSession(userId);
+    Object.assign(session, updates);
+    logger.info(`Session updated for user ${userId}`);
+  }
+
+  clearSession(userId) {
+    this.sessions.delete(userId);
+    logger.info(`Session cleared for user ${userId}`);
+  }
+}
+
+export const userSessionManager = new UserSessionManager();
+
+
+// middleware\error-handler.js
+
+import { logger } from '../utils/logger.js';
+
+export async function errorHandler(ctx, next) {
+  try {
+    await next();
+  } catch (error) {
+    logger.error('Error in request pipeline', error);
+    await ctx.reply('Lo siento, ha ocurrido un error. Por favor, intenta nuevamente más tarde.');
+  }
+}
+
+
+// middleware\message-processor.js
+
+// middleware/message-processor.js
+import { openaiService } from '../services/openai-service.js';
+import { logger } from '../utils/logger.js';
+import { pluginManager } from '../core/plugin-manager.js';
+
+export async function messageProcessor(ctx, { flowDynamic, state }) {
+  try {
+    // Ejecutar plugins onMessage
+    await pluginManager.executePluginMethod('examplePlugin', 'onMessage', ctx);
+
+    if (ctx.message.hasMedia) {
+      const media = await ctx.message.downloadMedia();
+      if (media.mimetype.startsWith('audio/')) {
+        try {
+          ctx.transcription = await openaiService.transcribeAudio(Buffer.from(media.data, 'base64'));
+          logger.info(`Audio transcribed for user ${ctx.from}`);
+        } catch (error) {
+          logger.error(`Error transcribing audio for user ${ctx.from}`, error);
+        }
+      } else {
+        ctx.attachment = {
+          filename: media.filename,
+          data: media.data,
+          mimetype: media.mimetype,
+        };
+      }
+    }
+  } catch (error) {
+    logger.error('Error in message processor', error);
+    throw error;
+  }
+}
+
+
+// models\print-order.js
+
+class PrintOrder {
+    constructor(userId) {
+      this.userId = userId;
+      this.items = [];
+      this.totalPrice = 0;
+      this.status = 'PENDING';
+    }
+  
+    addItem(item, quantity, price) {
+      this.items.push({ item, quantity, price });
+      this.calculateTotal();
+    }
+  
+    removeItem(index) {
+      this.items.splice(index, 1);
+      this.calculateTotal();
+    }
+  
+    calculateTotal() {
+      this.totalPrice = this.items.reduce((total, item) => total + item.quantity * item.price, 0);
+    }
+  
+    setStatus(status) {
+      this.status = status;
+    }
+  
+    toJSON() {
+      return {
+        userId: this.userId,
+        items: this.items,
+        totalPrice: this.totalPrice,
+        status: this.status,
+      };
+    }
+  }
+  
+  export { PrintOrder };
+
+
+// models\user-context.js
+
+import { PrintOrder } from './print-order.js';
+
+class UserContext {
+  constructor(userId) {
+    this.userId = userId;
+    this.state = 'INITIAL';
+    this.cart = new PrintOrder(userId);
+    this.menu = null;
+    this.conversationHistory = [];
+    this.lastInteraction = Date.now();
+  }
+
+  addToHistory(role, content) {
+    this.conversationHistory.push({ role, content });
+    this.trimHistory();
+    this.updateLastInteraction();
+  }
+
+  trimHistory() {
+    let totalWords = 0;
+    for (let i = this.conversationHistory.length - 1; i >= 0; i--) {
+      totalWords += this.conversationHistory[i].content.split(' ').length;
+      if (totalWords > 1500) {
+        this.conversationHistory = this.conversationHistory.slice(i + 1);
+        break;
+      }
+    }
+  }
+
+  getHistory() {
+    return this.conversationHistory;
+  }
+
+  setState(newState) {
+    this.state = newState;
+    this.updateLastInteraction();
+  }
+
+  getState() {
+    return this.state;
+  }
+
+  addToCart(item) {
+    if (this.cart.items.length >= 5) {
+      throw new Error('No se pueden agregar más de 5 servicios al carrito.');
+    }
+    this.cart.addItem(item);
+    this.updateLastInteraction();
+  }
+
+  removeFromCart(index) {
+    this.cart.removeItem(index);
+    this.updateLastInteraction();
+  }
+
+  getCart() {
+    return this.cart;
+  }
+
+  clearCart() {
+    this.cart = new PrintOrder(this.userId);
+    this.updateLastInteraction();
+  }
+
+  setMenu(menu) {
+    this.menu = menu;
+  }
+
+  getMenu() {
+    return this.menu;
+  }
+
+  updateLastInteraction() {
+    this.lastInteraction = Date.now();
+  }
+
+  isSessionExpired(expirationTime) {
+    return (Date.now() - this.lastInteraction) > expirationTime;
+  }
+}
+
+export { UserContext };
+
+
+// plugins\example-plugin.js
+
+// plugins/example-plugin.js
+export const examplePlugin = {
+  name: 'ExamplePlugin',
+  
+  onMessage: async (ctx) => {
+    console.log(`Mensaje recibido de ${ctx.from}: ${ctx.body}`);
+  },
+
+  onResponse: async (ctx, response) => {
+    console.log(`Respuesta a enviar a ${ctx.from}: ${response}`);
+  },
+
+  customFunction: async (ctx) => {
+    return `Función personalizada ejecutada para ${ctx.from}`;
+  }
+};
+
+
+// services\file-analyzer.js
+
+import fs from 'fs/promises';
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
+import fileType from 'file-type';
+const { fileTypeFromBuffer } = fileType;
+import { logger } from '../utils/logger.js';
+
+class FileAnalyzer {
+  async analyzeFile(fileBuffer, fileName) {
+    try {
+      const fileType = await fileTypeFromBuffer(fileBuffer);
+      
+      if (!fileType) {
+        return "No se pudo determinar el tipo de archivo.";
+      }
+
+      switch (fileType.mime) {
+        case 'application/pdf':
+          return await this.analyzePdf(fileBuffer);
+        case 'text/plain':
+          return await this.analyzeTextFile(fileBuffer);
+        case 'image/jpeg':
+        case 'image/png':
+          return await this.analyzeImage(fileBuffer, fileType.mime);
+        default:
+          return `Archivo recibido: ${fileName}. Tipo: ${fileType.mime}. No se puede analizar este tipo de archivo.`;
+      }
+    } catch (error) {
+      logger.error('Error analyzing file', error);
+      return "Ocurrió un error al analizar el archivo.";
+    }
+  }
+
+  async analyzePdf(buffer) {
+    try {
+      const data = await pdfParse(buffer);
+      return `PDF analizado. Número de páginas: ${data.numpages}. Texto extraído: ${data.text.substring(0, 200)}...`;
+    } catch (error) {
+      logger.error('Error analyzing PDF', error);
+      return "Ocurrió un error al analizar el archivo PDF.";
+    }
+  }
+
+  async analyzeTextFile(buffer) {
+    const text = buffer.toString('utf-8');
+    return `Archivo de texto analizado. Primeros 200 caracteres: ${text.substring(0, 200)}...`;
+  }
+
+  async analyzeImage(buffer, mimeType) {
+    return `Imagen ${mimeType} recibida. Tamaño: ${buffer.length} bytes.`;
+  }
+}
+
+export const fileAnalyzer = new FileAnalyzer();
+
+
+// services\openai-service.js
+
+import OpenAI from 'openai';
+import config from '../config/index.js';
+import { logger } from '../utils/logger.js';
+
+class OpenAIService {
+  constructor() {
+    this.client = new OpenAI({ apiKey: config.openai.apiKey });
+  }
+
+  async initialize() {
+    // Aquí puedes agregar cualquier lógica de inicialización necesaria
+    logger.info('OpenAI service initialized');
+  }
+
+  async getChatCompletion(userContext, newMessage) {
+    const messages = [
+      { role: 'system', content: this.getSystemPrompt() },
+      ...userContext.getHistory(),
+      { role: 'user', content: newMessage }
+    ];
+
+    const response = await this.client.chat.completions.create({
+      model: 'gpt-4-mini',
+      messages: messages,
+      max_tokens: 150
+    });
+
+    const aiResponse = response.choices[0].message.content.trim();
+    userContext.addToHistory('assistant', aiResponse);
+    return aiResponse;
+  }
+
+  getSystemPrompt() {
+    // Implementar el prompt del sistema aquí
+  }
+
+  async transcribeAudio(audioBuffer) {
+    try {
+      const response = await this.client.audio.transcriptions.create({
+        file: audioBuffer,
+        model: 'whisper-1',
+      });
+      return response.text;
+    } catch (error) {
+      logger.error('Error in audio transcription', error);
+      throw error;
+    }
+  }
+
+  async determineIntent(message) {
+    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: cotizar, analizar_archivo, generar_presupuesto, o desconocido. Responde solo con la intención, sin explicación adicional.
+
+Mensaje del usuario: "${message}"
+
+Intención:`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: 'gpt-4-mini',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10,
+        temperature: 0.3,
+      });
+
+      const intent = response.choices[0].message.content.trim().toLowerCase();
+      return ['cotizar', 'analizar_archivo', 'generar_presupuesto'].includes(intent) ? intent : 'desconocido';
+    } catch (error) {
+      logger.error('Error determining intent with OpenAI', error);
+      return 'desconocido';
+    }
+  }
+
+  
+}
+
+export const openaiService = new OpenAIService();
+
+
+// services\printing-calculator.js
+
+import { ValidationError } from '../utils/error-types.js';
+
+class PrintingCalculator {
+  calculatePrice(order, serviceDetails) {
+    let total = 0;
+    for (const item of order.items) {
+      const itemDetails = serviceDetails.find(s => s.id === item.id);
+      if (!itemDetails) {
+        throw new ValidationError(`Servicio no encontrado: ${item.id}`);
+      }
+      
+      const basePrice = this.calculateBasePrice(item, itemDetails);
+      const finishingsPrice = this.calculateFinishingsPrice(item, itemDetails);
+      const quantity = item.quantity || 1;
+      
+      total += (basePrice + finishingsPrice) * quantity;
+    }
+    return total;
+  }
+
+  calculateBasePrice(item, itemDetails) {
+    if (itemDetails.priceType === 'fixed') {
+      return itemDetails.basePrice;
+    } else if (itemDetails.priceType === 'perSquareMeter') {
+      const area = (item.width * item.height) / 10000; // convert cm² to m²
+      return itemDetails.basePrice * area;
+    }
+    throw new ValidationError(`Tipo de precio no soportado: ${itemDetails.priceType}`);
+  }
+
+  calculateFinishingsPrice(item, itemDetails) {
+    let finishingsPrice = 0;
+    if (item.finishings) {
+      for (const [finishing, isSelected] of Object.entries(item.finishings)) {
+        if (isSelected && itemDetails.finishings[finishing]) {
+          finishingsPrice += itemDetails.finishings[finishing];
+        }
+      }
+    }
+    return finishingsPrice;
+  }
+
+  formatOrderSummary(order, serviceDetails) {
+    let summary = "Resumen del pedido:\n";
+    let total = 0;
+
+    for (const item of order.items) {
+      const itemDetails = serviceDetails.find(s => s.id === item.id);
+      if (!itemDetails) {
+        throw new ValidationError(`Servicio no encontrado: ${item.id}`);
+      }
+
+      const basePrice = this.calculateBasePrice(item, itemDetails);
+      const finishingsPrice = this.calculateFinishingsPrice(item, itemDetails);
+      const itemTotal = (basePrice + finishingsPrice) * item.quantity;
+
+      summary += `- ${itemDetails.name}: ${item.quantity} x $${basePrice.toFixed(2)}\n`;
+      if (finishingsPrice > 0) {
+        summary += `  Acabados: $${finishingsPrice.toFixed(2)}\n`;
+      }
+      summary += `  Subtotal: $${itemTotal.toFixed(2)}\n\n`;
+
+      total += itemTotal;
+    }
+
+    summary += `Total: $${total.toFixed(2)}`;
+    return summary;
+  }
+}
+
+export const printingCalculator = new PrintingCalculator();
+
+
+// services\sheets-service.js
+
+import { JWT } from 'google-auth-library';
+import { GoogleSpreadsheet } from 'google-spreadsheet';
+import config from '../config/index.js';
+import { logger } from '../utils/logger.js';
+
+const SCOPES = [
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.file",
+];
+
+class SheetsService {
+  constructor() {
+    this.jwtFromEnv = new JWT({
+      email: config.googleSheets.credentials.client_email,
+      key: config.googleSheets.credentials.private_key.replace(/\\n/g, "\n"),
+      scopes: SCOPES,
+    });
+    this.doc = new GoogleSpreadsheet(config.googleSheets.sheetId, this.jwtFromEnv);
+  }
+
+  async initialize() {
+    try {
+      await this.doc.loadInfo();
+      logger.info('Google Sheets service initialized');
+    } catch (error) {
+      logger.error('Error initializing Google Sheets', error);
+      throw error;
+    }
+  }
+
+  async getMenu() {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[0];
+      await sheet.loadCells();
+
+      let menu = {};
+      const startRow = 7;
+
+      let categories = [];
+      for (let col = 0; col < sheet.columnCount; col++) {
+        const cellValue = sheet.getCell(startRow, col).value;
+        if (cellValue && typeof cellValue === 'string' && cellValue.trim() !== '') {
+          categories.push(cellValue.trim());
+        } else {
+          break;
+        }
+      }
+
+      categories.forEach((category, index) => {
+        let categoryItems = [];
+        for (let row = startRow + 1; row < sheet.rowCount; row++) {
+          const item = sheet.getCell(row, index).value;
+          const price = sheet.getCell(row, index).note;
+          if (item) {
+            let extractedPrice = price;
+            if (!extractedPrice) {
+              const priceMatch = item.match(/\$(\d+)/);
+              if (priceMatch) {
+                extractedPrice = priceMatch[1];
+              }
+            }
+            if (extractedPrice) {
+              categoryItems.push(`${category} - ${item.replace(/\$\d+/, '').trim()} $${extractedPrice}`);
+            }
+          } else {
+            break;
+          }
+        }
+        menu[category] = categoryItems;
+      });
+
+      return menu;
+    } catch (error) {
+      logger.error('Error fetching menu from Google Sheets', error);
+      throw error;
+    }
+  }
+
+  async saveOrder(order) {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1];
+      await sheet.addRow(order);
+      logger.info(`Order saved for user ${order.userId}`);
+    } catch (error) {
+      logger.error('Error saving order to Google Sheets', error);
+      throw error;
+    }
+  }
+}
+
+export const sheetsService = new SheetsService();
+
+
+// utils\error-types.js
+
+class ApplicationError extends Error {
+    constructor(message, status) {
+      super(message);
+      this.name = this.constructor.name;
+      this.status = status || 500;
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+  
+  class ValidationError extends ApplicationError {
+    constructor(message) {
+      super(message || 'Validation Error', 400);
+    }
+  }
+  
+  class NotFoundError extends ApplicationError {
+    constructor(message) {
+      super(message || 'Resource Not Found', 404);
+    }
+  }
+  
+  class UnauthorizedError extends ApplicationError {
+    constructor(message) {
+      super(message || 'Unauthorized', 401);
+    }
+  }
+  
+  export { ApplicationError, ValidationError, NotFoundError, UnauthorizedError };
+
+
+// utils\logger.js
+
+import winston from 'winston';
+import config from '../config/index.js';
+
+const logger = winston.createLogger({
+  level: config.logging.level,
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(({ timestamp, level, message, ...metadata }) => {
+      let msg = `${timestamp} [${level}] : ${message}`;
+      if (Object.keys(metadata).length > 0) {
+        msg += JSON.stringify(metadata);
+      }
+      return msg;
+    })
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    }),
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' })
+  ]
+});
+
+// Agregar un método para registrar errores con stack trace
+logger.logError = (message, error) => {
+  logger.error(`${message}: ${error.message}`, { stack: error.stack });
+};
+
+export { logger };
+
+
+// utils\validators.js
+
+import { ValidationError } from './error-types.js';
+
+export const validators = {
+  validateMeasurements(width, height, serviceDetails) {
+    if (width <= 0 || height <= 0) {
+      throw new ValidationError('Las medidas deben ser números positivos.');
+    }
+    if (serviceDetails.maxWidth && width > serviceDetails.maxWidth) {
+      throw new ValidationError(`El ancho máximo permitido es ${serviceDetails.maxWidth}cm.`);
+    }
+    if (serviceDetails.maxHeight && height > serviceDetails.maxHeight) {
+      throw new ValidationError(`El alto máximo permitido es ${serviceDetails.maxHeight}cm.`);
+    }
+  },
+
+  validateFinishings(finishings, serviceDetails) {
+    for (const [finishing, isSelected] of Object.entries(finishings)) {
+      if (isSelected && !serviceDetails.finishings[finishing]) {
+        throw new ValidationError(`El acabado "${finishing}" no está disponible para este servicio.`);
+      }
+    }
+  },
+
+  validateQuantity(quantity, serviceDetails) {
+    if (quantity <= 0 || !Number.isInteger(quantity)) {
+      throw new ValidationError('La cantidad debe ser un número entero positivo.');
+    }
+    if (serviceDetails.maxQuantity && quantity > serviceDetails.maxQuantity) {
+      throw new ValidationError(`La cantidad máxima permitida es ${serviceDetails.maxQuantity}.`);
+    }
+  },
+
+  validateFile(file, serviceDetails) {
+    if (!file) {
+      throw new ValidationError('Debe proporcionar un archivo.');
+    }
+    if (!serviceDetails.allowedFileTypes.includes(file.mimetype)) {
+      throw new ValidationError(`Tipo de archivo no permitido. Tipos permitidos: ${serviceDetails.allowedFileTypes.join(', ')}`);
+    }
+    if (file.size > serviceDetails.maxFileSize) {
+      throw new ValidationError(`El archivo excede el tamaño máximo permitido de ${serviceDetails.maxFileSize / (1024 * 1024)}MB.`);
+    }
+  }
+};
+
