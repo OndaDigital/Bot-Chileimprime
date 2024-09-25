@@ -17,7 +17,7 @@ const config = {
   port: process.env.PORT || 3000,
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL || 'gpt-4-mini',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   },
   googleSheets: {
     sheetId: process.env.GOOGLE_SHEET_ID,

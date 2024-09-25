@@ -1,3 +1,5 @@
+// services/openai-service.js
+
 import OpenAI from 'openai';
 import config from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -8,7 +10,6 @@ class OpenAIService {
   }
 
   async initialize() {
-    // Aquí puedes agregar cualquier lógica de inicialización necesaria
     logger.info('OpenAI service initialized');
   }
 
@@ -19,19 +20,46 @@ class OpenAIService {
       { role: 'user', content: newMessage }
     ];
 
-    const response = await this.client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: messages,
-      max_tokens: 150
-    });
+    try {
+      const response = await this.client.chat.completions.create({
+        model: config.openai.model,
+        messages: messages,
+        max_tokens: 150
+      });
 
-    const aiResponse = response.choices[0].message.content.trim();
-    userContext.addToHistory('assistant', aiResponse);
-    return aiResponse;
+      const aiResponse = response.choices[0].message.content.trim();
+      return aiResponse;
+    } catch (error) {
+      logger.error('Error getting chat completion from OpenAI', error);
+      throw error;
+    }
   }
 
   getSystemPrompt() {
-    // Implementar el prompt del sistema aquí
+    return `Eres un asistente virtual para una imprenta. Tu tarea es ayudar a los clientes a cotizar servicios de impresión, proporcionar información sobre servicios, y asistir en el proceso de pedidos. Sé amable, profesional y directo en tus respuestas.`;
+  }
+
+  async determineIntent(message) {
+    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
+
+Mensaje del usuario: "${message}"
+
+Intención:`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: config.openai.model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10,
+        temperature: 0.3,
+      });
+
+      const intent = response.choices[0].message.content.trim().toLowerCase();
+      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
+    } catch (error) {
+      logger.error('Error determining intent with OpenAI', error);
+      return 'desconocido';
+    }
   }
 
   async transcribeAudio(audioBuffer) {
@@ -46,31 +74,6 @@ class OpenAIService {
       throw error;
     }
   }
-
-  async determineIntent(message) {
-    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: cotizar, analizar_archivo, generar_presupuesto, o desconocido. Responde solo con la intención, sin explicación adicional.
-
-Mensaje del usuario: "${message}"
-
-Intención:`;
-
-    try {
-      const response = await this.client.chat.completions.create({
-        model: 'gpt-4-mini',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 10,
-        temperature: 0.3,
-      });
-
-      const intent = response.choices[0].message.content.trim().toLowerCase();
-      return ['cotizar', 'analizar_archivo', 'generar_presupuesto'].includes(intent) ? intent : 'desconocido';
-    } catch (error) {
-      logger.error('Error determining intent with OpenAI', error);
-      return 'desconocido';
-    }
-  }
-
-  
 }
 
 export const openaiService = new OpenAIService();

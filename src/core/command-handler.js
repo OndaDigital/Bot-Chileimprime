@@ -5,6 +5,7 @@ class CommandHandler {
     this.commands = new Map();
     this.subcommands = new Map();
     this.dependencies = new Map();
+    this.defaultCommand = null;
   }
 
   registerDefaultCommand(handler) {
@@ -26,31 +27,31 @@ class CommandHandler {
     logger.info(`Subcommand ${subcommandName} registered for command ${commandName}`);
   }
 
-  async executeCommand(name, ctx, subcommand = null) {
+  async executeCommand(name, ctx, { flowDynamic, gotoFlow }, subcommand = null) {
     if (this.commands.has(name)) {
       try {
-        await this.executeDependencies(name, ctx);
+        await this.executeDependencies(name, ctx, { flowDynamic, gotoFlow });
         if (subcommand && this.subcommands.has(name) && this.subcommands.get(name).has(subcommand)) {
-          await this.subcommands.get(name).get(subcommand).execute(ctx);
+          await this.subcommands.get(name).get(subcommand).execute(ctx, { flowDynamic, gotoFlow });
         } else {
-          await this.commands.get(name).execute(ctx);
+          await this.commands.get(name).execute(ctx, { flowDynamic, gotoFlow });
         }
       } catch (error) {
         logger.error(`Error executing command ${name}`, error);
         throw error;
       }
     } else if (this.defaultCommand) {
-      await this.defaultCommand.execute(ctx);
+      await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
     } else {
       logger.error(`Command ${name} not found and no default command registered`);
       throw new Error(`Command ${name} not found`);
     }
   }
 
-  async executeDependencies(commandName, ctx) {
+  async executeDependencies(commandName, ctx, { flowDynamic, gotoFlow }) {
     const dependencies = this.dependencies.get(commandName) || [];
     for (const dep of dependencies) {
-      await this.executeCommand(dep, ctx);
+      await this.executeCommand(dep, ctx, { flowDynamic, gotoFlow });
     }
   }
 

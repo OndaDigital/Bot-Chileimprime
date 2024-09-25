@@ -14,22 +14,26 @@ import { middlewareManager } from './core/middleware-manager.js';
 import { messageProcessor } from './middleware/message-processor.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { quoteCommand } from './commands/quote-command.js';
-import { analyzeFileCommand } from './commands/analyze-file-command.js';
-import { generateBudgetCommand } from './commands/generate-budget-command.js';
+import { listServicesCommand } from './commands/list-services-command.js';
+import { additionalInfoCommand } from './commands/additional-info-command.js';
+import { createOrderCommand } from './commands/create-order-command.js';
+import { greetingCommand } from './commands/greeting-command.js';
 import { logger } from './utils/logger.js';
 import { pluginManager } from './core/plugin-manager.js';
 import { examplePlugin } from './plugins/example-plugin.js';
 import config from './config/index.js';
 
-const PORT = process.env.PORT || 3000;
+const PORT = config.port;
 
 // Registrar plugins
 pluginManager.registerPlugin('examplePlugin', examplePlugin);
 
 // Registrar comandos
+commandHandler.registerCommand('GREETING', greetingCommand);
 commandHandler.registerCommand('QUOTE', quoteCommand);
-commandHandler.registerCommand('ANALYZE_FILE', analyzeFileCommand);
-commandHandler.registerCommand('GENERATE_BUDGET', generateBudgetCommand);
+commandHandler.registerCommand('LIST_SERVICES', listServicesCommand);
+commandHandler.registerCommand('ADDITIONAL_INFO', additionalInfoCommand);
+commandHandler.registerCommand('CREATE_ORDER', createOrderCommand);
 
 // Configurar middleware
 middlewareManager.use(messageProcessor);
@@ -44,36 +48,32 @@ conversationManager.registerState('MAIN_MENU', async (ctx, action, { flowDynamic
   await commandHandler.executeCommand(action, ctx, { flowDynamic });
 });
 
-conversationManager.registerState('SELECTING_SERVICE', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Por favor, selecciona un servicio de impresión.');
+conversationManager.registerState('LISTING_SERVICES', async (ctx, action, { flowDynamic }) => {
+  const serviceList = await sheetsService.getFormattedServiceList();
+  await flowDynamic(serviceList);
 });
 
-conversationManager.registerState('ENTERING_MEASUREMENTS', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Por favor, ingresa las medidas del producto.');
+conversationManager.registerState('PROVIDING_ADDITIONAL_INFO', async (ctx, action, { flowDynamic }) => {
+  const additionalInfo = await sheetsService.getFormattedAdditionalInfo();
+  await flowDynamic(additionalInfo);
 });
 
-conversationManager.registerState('SELECTING_FINISHES', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('¿Deseas algún acabado especial?');
+conversationManager.registerState('QUOTING', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Por favor, proporciona los detalles del servicio que deseas cotizar.');
 });
 
-conversationManager.registerState('UPLOADING_FILE', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Por favor, sube tu archivo de diseño.');
-});
-
-conversationManager.registerState('CONFIRMING_ORDER', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('¿Confirmas tu pedido?');
+conversationManager.registerState('CREATING_ORDER', async (ctx, action, { flowDynamic }) => {
+  await flowDynamic('Vamos a crear tu pedido. Por favor, proporciona los detalles del servicio que deseas ordenar.');
 });
 
 // Configurar transiciones
 conversationManager.registerTransition('INITIAL', 'MAIN_MENU', () => true);
-conversationManager.registerTransition('MAIN_MENU', 'SELECTING_SERVICE', (ctx, action) => action === 'QUOTE');
-conversationManager.registerTransition('MAIN_MENU', 'UPLOADING_FILE', (ctx, action) => action === 'ANALYZE_FILE');
-conversationManager.registerTransition('MAIN_MENU', 'CONFIRMING_ORDER', (ctx, action) => action === 'GENERATE_BUDGET');
-conversationManager.registerTransition('SELECTING_SERVICE', 'ENTERING_MEASUREMENTS', () => true);
-conversationManager.registerTransition('ENTERING_MEASUREMENTS', 'SELECTING_FINISHES', () => true);
-conversationManager.registerTransition('SELECTING_FINISHES', 'UPLOADING_FILE', () => true);
-conversationManager.registerTransition('UPLOADING_FILE', 'CONFIRMING_ORDER', () => true);
-conversationManager.registerTransition('CONFIRMING_ORDER', 'MAIN_MENU', () => true);
+conversationManager.registerTransition('MAIN_MENU', 'LISTING_SERVICES', (ctx, action) => action === 'LIST_SERVICES');
+conversationManager.registerTransition('MAIN_MENU', 'PROVIDING_ADDITIONAL_INFO', (ctx, action) => action === 'ADDITIONAL_INFO');
+conversationManager.registerTransition('MAIN_MENU', 'QUOTING', (ctx, action) => action === 'QUOTE');
+conversationManager.registerTransition('MAIN_MENU', 'CREATING_ORDER', (ctx, action) => action === 'CREATE_ORDER');
+
+
 
 // Configurar flujo principal
 const mainFlow = addKeyword([EVENTS.WELCOME, 'hola', 'inicio', 'menu'])
@@ -83,28 +83,12 @@ const mainFlow = addKeyword([EVENTS.WELCOME, 'hola', 'inicio', 'menu'])
 
     try {
       await middlewareManager.run(ctx, { flowDynamic, gotoFlow });
-      await flowDynamic('¡Bienvenido a la imprenta! ¿En qué puedo ayudarte hoy?');
       await conversationManager.handleMessage(ctx, { flowDynamic, gotoFlow });
     } catch (error) {
       logger.error(`Error in main flow for user ${userId}`, error);
-      if (error instanceof ApplicationError) {
-        await flowDynamic(error.message);
-      } else {
-        await flowDynamic('Lo siento, ha ocurrido un error inesperado. Por favor, intenta de nuevo más tarde.');
-      }
+      await flowDynamic('Lo siento, ha ocurrido un error inesperado. Por favor, intenta de nuevo más tarde.');
     }
   });
-
-  // Agregar un comando por defecto
-const defaultCommand = {
-    execute: async (ctx) => {
-      const { flowDynamic } = ctx;
-      await flowDynamic('Lo siento, no he entendido tu solicitud. ¿Podrías reformularla o elegir una de las opciones disponibles?');
-    }
-  };
-
-  commandHandler.registerDefaultCommand(defaultCommand);
-
 
 // Inicializar bot
 const main = async () => {
@@ -114,9 +98,7 @@ const main = async () => {
 
     const adapterDB = new MemoryDB();
     const adapterFlow = createFlow([mainFlow]);
-    const adapterProvider = createProvider(BaileysProvider, {
-      // Agregar configuración específica de Baileys si es necesario
-    });
+    const adapterProvider = createProvider(BaileysProvider);
 
     const { httpServer } = await createBot({
       flow: adapterFlow,
@@ -124,7 +106,6 @@ const main = async () => {
       database: adapterDB,
     });
 
-    // Iniciar el servidor HTTP
     if (httpServer) {
       httpServer(PORT);
       logger.info(`HTTP Server is running on port ${PORT}`);
@@ -133,7 +114,6 @@ const main = async () => {
     }
 
     logger.info('Bot initialized successfully');
-    logger.info('Scan the QR code with your WhatsApp to start the bot');
   } catch (error) {
     logger.error('Failed to initialize bot', error);
     process.exit(1);
@@ -144,6 +124,28 @@ main().catch(error => {
   logger.error('Unhandled error in main function', error);
   process.exit(1);
 });
+
+
+// commands\additional-info-command.js
+
+// src/commands/additional-info-command.js
+
+import { sheetsService } from '../services/sheets-service.js';
+import { logger } from '../utils/logger.js';
+
+class AdditionalInfoCommand {
+  async execute(ctx, { flowDynamic }) {
+    try {
+      const additionalInfo = await sheetsService.getFormattedAdditionalInfo();
+      await flowDynamic(additionalInfo);
+    } catch (error) {
+      logger.error('Error executing additional info command', error);
+      await flowDynamic('Lo siento, ha ocurrido un error al obtener la información adicional.');
+    }
+  }
+}
+
+export const additionalInfoCommand = new AdditionalInfoCommand();
 
 
 // commands\analyze-file-command.js
@@ -199,6 +201,34 @@ class AnalyzeFileCommand {
 }
 
 export const analyzeFileCommand = new AnalyzeFileCommand();
+
+
+// commands\create-order-command.js
+
+// src/commands/create-order-command.js
+
+import { sheetsService } from '../services/sheets-service.js';
+import { logger } from '../utils/logger.js';
+
+class CreateOrderCommand {
+  async execute(ctx, { flowDynamic }) {
+    try {
+      await flowDynamic('Vamos a crear tu pedido. Por favor, proporciona los siguientes detalles:');
+      await flowDynamic('1. Nombre del servicio\n2. Cantidad\n3. Medidas (si aplica)\n4. Acabados especiales (si deseas)');
+      ctx.userContext.setState('CREATING_ORDER');
+    } catch (error) {
+      logger.error('Error executing create order command', error);
+      await flowDynamic('Lo siento, ha ocurrido un error al iniciar el proceso de pedido.');
+    }
+  }
+
+  async handleOrderDetails(ctx, { flowDynamic }) {
+    // Aquí iría la lógica para procesar los detalles del pedido
+    // Este método se llamaría desde el estado CREATING_ORDER en conversation-manager.js
+  }
+}
+
+export const createOrderCommand = new CreateOrderCommand();
 
 
 // commands\generate-budget-command.js
@@ -267,6 +297,37 @@ class GenerateBudgetCommand {
 }
 
 export const generateBudgetCommand = new GenerateBudgetCommand();
+
+
+// commands\greeting-command.js
+
+export const greetingCommand = {
+    execute: async (ctx, { flowDynamic }) => {
+      await flowDynamic('¡Hola! Bienvenido a la imprenta. ¿En qué puedo ayudarte hoy?');
+    }
+  };
+
+
+// commands\list-services-command.js
+
+// src/commands/list-services-command.js
+
+import { sheetsService } from '../services/sheets-service.js';
+import { logger } from '../utils/logger.js';
+
+class ListServicesCommand {
+  async execute(ctx, { flowDynamic }) {
+    try {
+      const serviceList = await sheetsService.getFormattedServiceList();
+      await flowDynamic(serviceList);
+    } catch (error) {
+      logger.error('Error executing list services command', error);
+      await flowDynamic('Lo siento, ha ocurrido un error al obtener la lista de servicios.');
+    }
+  }
+}
+
+export const listServicesCommand = new ListServicesCommand();
 
 
 // commands\quote-command.js
@@ -343,27 +404,26 @@ export const quoteCommand = new QuoteCommand();
 
 // config\index.js
 
-import "dotenv/config";
+import dotenv from 'dotenv';
+import path from 'path';
 
+dotenv.config();
 
+const ENV = process.env.NODE_ENV || 'development';
 
-const createGoogleCredentials = () => {
-  console.log("GOOGLE_SERVICE_ACCOUNT_EMAIL:", process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
-  console.log("GOOGLE_PRIVATE_KEY:", process.env.GOOGLE_PRIVATE_KEY ? "Definido" : "No definido");
-  console.log("GOOGLE_SHEET_ID:", process.env.GOOGLE_SHEET_ID);
-  
-  return {
-    type: "service_account",
-    project_id: "proyectos-clientes-411618", // Asumiendo este project_id basado en el email
-    private_key: process.env.GOOGLE_PRIVATE_KEY,
-    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    // Otros campos necesarios...
-  };
-};
+const createGoogleCredentials = () => ({
+  type: "service_account",
+  project_id: process.env.GOOGLE_PROJECT_ID,
+  private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+});
 
 const config = {
+  env: ENV,
+  port: process.env.PORT || 3000,
   openai: {
     apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   },
   googleSheets: {
     sheetId: process.env.GOOGLE_SHEET_ID,
@@ -372,12 +432,8 @@ const config = {
   logging: {
     level: process.env.LOG_LEVEL || 'info',
   },
+  sessionTimeout: parseInt(process.env.SESSION_TIMEOUT) || 30 * 60 * 1000, // 30 minutos por defecto
 };
-
-console.log("Configuración final:");
-console.log(JSON.stringify(config, (key, value) => 
-  key === 'private_key' ? (value ? 'Definido' : 'No definido') : value, 2
-));
 
 export default config;
 
@@ -391,6 +447,7 @@ class CommandHandler {
     this.commands = new Map();
     this.subcommands = new Map();
     this.dependencies = new Map();
+    this.defaultCommand = null;
   }
 
   registerDefaultCommand(handler) {
@@ -412,31 +469,31 @@ class CommandHandler {
     logger.info(`Subcommand ${subcommandName} registered for command ${commandName}`);
   }
 
-  async executeCommand(name, ctx, subcommand = null) {
+  async executeCommand(name, ctx, { flowDynamic, gotoFlow }, subcommand = null) {
     if (this.commands.has(name)) {
       try {
-        await this.executeDependencies(name, ctx);
+        await this.executeDependencies(name, ctx, { flowDynamic, gotoFlow });
         if (subcommand && this.subcommands.has(name) && this.subcommands.get(name).has(subcommand)) {
-          await this.subcommands.get(name).get(subcommand).execute(ctx);
+          await this.subcommands.get(name).get(subcommand).execute(ctx, { flowDynamic, gotoFlow });
         } else {
-          await this.commands.get(name).execute(ctx);
+          await this.commands.get(name).execute(ctx, { flowDynamic, gotoFlow });
         }
       } catch (error) {
         logger.error(`Error executing command ${name}`, error);
         throw error;
       }
     } else if (this.defaultCommand) {
-      await this.defaultCommand.execute(ctx);
+      await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
     } else {
       logger.error(`Command ${name} not found and no default command registered`);
       throw new Error(`Command ${name} not found`);
     }
   }
 
-  async executeDependencies(commandName, ctx) {
+  async executeDependencies(commandName, ctx, { flowDynamic, gotoFlow }) {
     const dependencies = this.dependencies.get(commandName) || [];
     for (const dep of dependencies) {
-      await this.executeCommand(dep, ctx);
+      await this.executeCommand(dep, ctx, { flowDynamic, gotoFlow });
     }
   }
 
@@ -457,12 +514,9 @@ export const commandHandler = new CommandHandler();
 // core/conversation-manager.js
 
 import { openaiService } from '../services/openai-service.js';
-import { commandHandler } from './command-handler.js';
 import { sheetsService } from '../services/sheets-service.js';
-import { printingCalculator } from '../services/printing-calculator.js';
+import { commandHandler } from './command-handler.js';
 import { logger } from '../utils/logger.js';
-import { ValidationError } from '../utils/error-types.js';
-import { validators } from '../utils/validators.js';
 
 class ConversationManager {
   constructor() {
@@ -490,64 +544,40 @@ class ConversationManager {
     try {
       userContext.addToHistory('user', ctx.body);
 
-      const action = await this.determineAction(ctx);
+      const intent = await this.determineIntent(ctx.body);
+      const action = this.mapIntentToAction(intent);
+      
       const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
 
       if (nextState && this.states.has(nextState)) {
         userContext.setState(nextState);
         await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
       } else {
-        throw new Error(`Invalid state transition from ${currentState} with action ${action}`);
+        await this.handleDefaultResponse(ctx, intent, { flowDynamic });
       }
-
-      const systemPrompt = this.getSystemPrompt(userContext);
-      const aiResponse = await openaiService.getChatCompletion(userContext, systemPrompt);
-
-      const processedResponse = await this.processAIResponse(aiResponse, action, userContext);
-
-      await flowDynamic(processedResponse.message);
-      userContext.addToHistory('assistant', processedResponse.message);
-
-      await this.handlePostActions(ctx, action, processedResponse, { flowDynamic, gotoFlow });
 
     } catch (error) {
-      if (error instanceof ValidationError) {
-        await flowDynamic(error.message);
-      } else {
-        logger.error(`Error handling message for user ${ctx.from}`, error);
-        await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.');
-      }
+      logger.error(`Error handling message for user ${ctx.from}:`, error);
+      await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.');
+      userContext.setState('MAIN_MENU');
     }
   }
 
-  async determineAction(ctx) {
-    const userMessage = ctx.body.toLowerCase();
-    
-    // Intentar determinar la intención usando OpenAI
-    try {
-      const intent = await openaiService.determineIntent(userMessage);
-      switch (intent) {
-        case 'cotizar':
-          return 'QUOTE';
-        case 'analizar_archivo':
-          return 'ANALYZE_FILE';
-        case 'generar_presupuesto':
-          return 'GENERATE_BUDGET';
-        default:
-          // Si OpenAI no puede determinar la intención, usamos la lógica simple
-          if (userMessage.includes('cotizar')) return 'QUOTE';
-          if (userMessage.includes('analizar archivo')) return 'ANALYZE_FILE';
-          if (userMessage.includes('generar presupuesto')) return 'GENERATE_BUDGET';
-          return 'DEFAULT';
-      }
-    } catch (error) {
-      logger.error('Error determining intent with OpenAI', error);
-      // En caso de error, volvemos a la lógica simple
-      if (userMessage.includes('cotizar')) return 'QUOTE';
-      if (userMessage.includes('analizar archivo')) return 'ANALYZE_FILE';
-      if (userMessage.includes('generar presupuesto')) return 'GENERATE_BUDGET';
-      return 'DEFAULT';
-    }
+  async determineIntent(message) {
+    return await openaiService.determineIntent(message);
+  }
+
+  mapIntentToAction(intent) {
+    const intentActionMap = {
+      'saludo': 'GREETING',
+      'lista_servicios': 'LIST_SERVICES',
+      'informacion_adicional': 'ADDITIONAL_INFO',
+      'cotizar': 'QUOTE',
+      'realizar_pedido': 'CREATE_ORDER',
+      'pregunta_general': 'GENERAL_QUESTION',
+      'desconocido': 'UNKNOWN'
+    };
+    return intentActionMap[intent] || 'UNKNOWN';
   }
 
   async executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow }) {
@@ -562,7 +592,7 @@ class ConversationManager {
       }
     }
 
-    return currentState; // Si no hay transición, permanecemos en el estado actual
+    return currentState;
   }
 
   async executeState(state, ctx, action, { flowDynamic, gotoFlow }) {
@@ -573,33 +603,31 @@ class ConversationManager {
     await stateHandler(ctx, action, { flowDynamic, gotoFlow });
   }
 
-  getSystemPrompt(userContext) {
-    const basePrompt = "Eres un asistente virtual para una imprenta. Tu tarea es ayudar a los clientes a cotizar servicios de impresión.";
-    const stateSpecificPrompt = this.getStateSpecificPrompt(userContext.getState());
+  async handleDefaultResponse(ctx, intent, { flowDynamic }) {
+    const userContext = ctx.userContext;
+    const systemPrompt = this.getSystemPrompt(userContext.getState());
+    const aiResponse = await openaiService.getChatCompletion(userContext, systemPrompt);
+    await flowDynamic(aiResponse);
+    userContext.addToHistory('assistant', aiResponse);
+  }
+
+  getSystemPrompt(state) {
+    const basePrompt = "Eres un asistente virtual para una imprenta. Tu tarea es ayudar a los clientes con sus consultas sobre servicios de impresión.";
+    const stateSpecificPrompt = this.getStateSpecificPrompt(state);
     return `${basePrompt} ${stateSpecificPrompt}`;
   }
 
   getStateSpecificPrompt(state) {
     const prompts = {
       'INITIAL': "Saluda al cliente y pregúntale en qué puedes ayudarle.",
-      'MAIN_MENU': "Ayuda al cliente a elegir entre cotizar, analizar un archivo o generar un presupuesto.",
-      'SELECTING_SERVICE': "Ayuda al cliente a elegir un servicio de impresión. Ofrece opciones basadas en nuestro catálogo.",
-      'ENTERING_MEASUREMENTS': "Solicita las medidas específicas para el servicio seleccionado. Asegúrate de que sean válidas.",
-      'SELECTING_FINISHES': "Ofrece opciones de acabado como sellado, ojetillos o bolsillo si aplican al servicio seleccionado.",
-      'UPLOADING_FILE': "Guía al cliente para que suba su archivo de diseño. Menciona los formatos aceptados y los requisitos de DPI.",
-      'CONFIRMING_ORDER': "Presenta un resumen del pedido y pregunta al cliente si desea confirmar o modificar algo.",
+      'MAIN_MENU': "Ayuda al cliente a elegir entre ver la lista de servicios, obtener información adicional, cotizar un servicio o realizar un pedido.",
+      'LISTING_SERVICES': "Proporciona la lista de servicios disponibles de manera clara y concisa.",
+      'PROVIDING_ADDITIONAL_INFO': "Proporciona información adicional sobre horarios, despacho, métodos de pago, etc.",
+      'QUOTING': "Ayuda al cliente a obtener una cotización para un servicio específico.",
+      'CREATING_ORDER': "Guía al cliente a través del proceso de creación de un pedido.",
+      'GENERAL_QUESTION': "Responde a la pregunta general del cliente de la mejor manera posible.",
     };
     return prompts[state] || "Asiste al cliente con su consulta actual.";
-  }
-
-  async processAIResponse(aiResponse, action, userContext) {
-    // Implementación para procesar la respuesta de la IA
-    return { message: aiResponse };
-  }
-
-  async handlePostActions(ctx, action, processedResponse, { flowDynamic, gotoFlow }) {
-    // Implementación para manejar acciones posteriores
-    logger.info(`Post-action handling for ${action}`);
   }
 }
 
@@ -693,14 +721,19 @@ import { logger } from '../utils/logger.js';
 class UserSessionManager {
   constructor() {
     this.sessions = new Map();
+    this.sessionTimeout = 30 * 60 * 1000; // 30 minutos
   }
 
   getSession(userId) {
-    if (!this.sessions.has(userId)) {
-      this.sessions.set(userId, new UserContext(userId));
+    let session = this.sessions.get(userId);
+    if (!session) {
+      session = new UserContext(userId);
+      this.sessions.set(userId, session);
       logger.info(`New session created for user ${userId}`);
+    } else {
+      session.updateLastInteraction();
     }
-    return this.sessions.get(userId);
+    return session;
   }
 
   updateSession(userId, updates) {
@@ -713,9 +746,23 @@ class UserSessionManager {
     this.sessions.delete(userId);
     logger.info(`Session cleared for user ${userId}`);
   }
+
+  cleanupSessions() {
+    const now = Date.now();
+    for (const [userId, session] of this.sessions.entries()) {
+      if (now - session.lastInteraction > this.sessionTimeout) {
+        this.clearSession(userId);
+      }
+    }
+  }
+
+  startCleanupInterval() {
+    setInterval(() => this.cleanupSessions(), 5 * 60 * 1000); // Limpiar cada 5 minutos
+  }
 }
 
 export const userSessionManager = new UserSessionManager();
+userSessionManager.startCleanupInterval();
 
 
 // middleware\error-handler.js
@@ -727,7 +774,11 @@ export async function errorHandler(ctx, next) {
     await next();
   } catch (error) {
     logger.error('Error in request pipeline', error);
-    await ctx.reply('Lo siento, ha ocurrido un error. Por favor, intenta nuevamente más tarde.');
+    if (ctx.flowDynamic) {
+      await ctx.flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta nuevamente más tarde.');
+    } else {
+      logger.error('flowDynamic not available in context');
+    }
   }
 }
 
@@ -974,6 +1025,8 @@ export const fileAnalyzer = new FileAnalyzer();
 
 // services\openai-service.js
 
+// services/openai-service.js
+
 import OpenAI from 'openai';
 import config from '../config/index.js';
 import { logger } from '../utils/logger.js';
@@ -984,7 +1037,6 @@ class OpenAIService {
   }
 
   async initialize() {
-    // Aquí puedes agregar cualquier lógica de inicialización necesaria
     logger.info('OpenAI service initialized');
   }
 
@@ -995,19 +1047,46 @@ class OpenAIService {
       { role: 'user', content: newMessage }
     ];
 
-    const response = await this.client.chat.completions.create({
-      model: 'gpt-4-mini',
-      messages: messages,
-      max_tokens: 150
-    });
+    try {
+      const response = await this.client.chat.completions.create({
+        model: config.openai.model,
+        messages: messages,
+        max_tokens: 150
+      });
 
-    const aiResponse = response.choices[0].message.content.trim();
-    userContext.addToHistory('assistant', aiResponse);
-    return aiResponse;
+      const aiResponse = response.choices[0].message.content.trim();
+      return aiResponse;
+    } catch (error) {
+      logger.error('Error getting chat completion from OpenAI', error);
+      throw error;
+    }
   }
 
   getSystemPrompt() {
-    // Implementar el prompt del sistema aquí
+    return `Eres un asistente virtual para una imprenta. Tu tarea es ayudar a los clientes a cotizar servicios de impresión, proporcionar información sobre servicios, y asistir en el proceso de pedidos. Sé amable, profesional y directo en tus respuestas.`;
+  }
+
+  async determineIntent(message) {
+    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
+
+Mensaje del usuario: "${message}"
+
+Intención:`;
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: config.openai.model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 10,
+        temperature: 0.3,
+      });
+
+      const intent = response.choices[0].message.content.trim().toLowerCase();
+      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
+    } catch (error) {
+      logger.error('Error determining intent with OpenAI', error);
+      return 'desconocido';
+    }
   }
 
   async transcribeAudio(audioBuffer) {
@@ -1022,31 +1101,6 @@ class OpenAIService {
       throw error;
     }
   }
-
-  async determineIntent(message) {
-    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: cotizar, analizar_archivo, generar_presupuesto, o desconocido. Responde solo con la intención, sin explicación adicional.
-
-Mensaje del usuario: "${message}"
-
-Intención:`;
-
-    try {
-      const response = await this.client.chat.completions.create({
-        model: 'gpt-4-mini',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 10,
-        temperature: 0.3,
-      });
-
-      const intent = response.choices[0].message.content.trim().toLowerCase();
-      return ['cotizar', 'analizar_archivo', 'generar_presupuesto'].includes(intent) ? intent : 'desconocido';
-    } catch (error) {
-      logger.error('Error determining intent with OpenAI', error);
-      return 'desconocido';
-    }
-  }
-
-  
 }
 
 export const openaiService = new OpenAIService();
@@ -1129,24 +1183,27 @@ export const printingCalculator = new PrintingCalculator();
 
 // services\sheets-service.js
 
+// services/sheets-service.js
+
 import { JWT } from 'google-auth-library';
 import { GoogleSpreadsheet } from 'google-spreadsheet';
-import config from '../config/index.js';
+import moment from 'moment-timezone';
+import 'moment/locale/es.js';
 import { logger } from '../utils/logger.js';
-
-const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.file",
-];
+import config from '../config/index.js';
 
 class SheetsService {
   constructor() {
     this.jwtFromEnv = new JWT({
       email: config.googleSheets.credentials.client_email,
       key: config.googleSheets.credentials.private_key.replace(/\\n/g, "\n"),
-      scopes: SCOPES,
+      scopes: [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file",
+      ],
     });
     this.doc = new GoogleSpreadsheet(config.googleSheets.sheetId, this.jwtFromEnv);
+    moment.locale('es');
   }
 
   async initialize() {
@@ -1159,65 +1216,163 @@ class SheetsService {
     }
   }
 
-  async getMenu() {
+  async getServices() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[0];
-      await sheet.loadCells();
+      await sheet.loadCells('A1:Q100');
+  
+      let services = {};
+  
+      let currentCategory = null;
+      for (let row = 1; row < sheet.rowCount; row++) {
+        const id = sheet.getCell(row, 0).value;
+        if (!id) break;
+        
+        const category = sheet.getCell(row, 1).value;
+        if (category) currentCategory = category;
 
-      let menu = {};
-      const startRow = 7;
+        const service = {
+          id: id,
+          categoria: currentCategory,
+          tipo: sheet.getCell(row, 2).value,
+          nombre: sheet.getCell(row, 3).value,
+          sellado: sheet.getCell(row, 4).value,
+          ojetillos: sheet.getCell(row, 5).value,
+          bolsillo: sheet.getCell(row, 6).value,
+          formato: sheet.getCell(row, 7).value || 'PDF, JPG',
+          dpi: 72,
+          stock: sheet.getCell(row, 9).value,
+          estado: sheet.getCell(row, 10).value,
+          precio: sheet.getCell(row, 11).value,
+          medidas: sheet.getCell(row, 12).value,
+          precioSellado: sheet.getCell(row, 14).value,
+          precioBolsillo: sheet.getCell(row, 15).value,
+          precioOjetillo: sheet.getCell(row, 16).value
+        };
 
-      let categories = [];
-      for (let col = 0; col < sheet.columnCount; col++) {
-        const cellValue = sheet.getCell(startRow, col).value;
-        if (cellValue && typeof cellValue === 'string' && cellValue.trim() !== '') {
-          categories.push(cellValue.trim());
-        } else {
-          break;
-        }
+        if (!services[currentCategory]) services[currentCategory] = [];
+        services[currentCategory].push(service);
       }
-
-      categories.forEach((category, index) => {
-        let categoryItems = [];
-        for (let row = startRow + 1; row < sheet.rowCount; row++) {
-          const item = sheet.getCell(row, index).value;
-          const price = sheet.getCell(row, index).note;
-          if (item) {
-            let extractedPrice = price;
-            if (!extractedPrice) {
-              const priceMatch = item.match(/\$(\d+)/);
-              if (priceMatch) {
-                extractedPrice = priceMatch[1];
-              }
-            }
-            if (extractedPrice) {
-              categoryItems.push(`${category} - ${item.replace(/\$\d+/, '').trim()} $${extractedPrice}`);
-            }
-          } else {
-            break;
-          }
-        }
-        menu[category] = categoryItems;
-      });
-
-      return menu;
+  
+      return services;
     } catch (error) {
-      logger.error('Error fetching menu from Google Sheets', error);
+      logger.error('Error fetching services from Google Sheets', error);
       throw error;
     }
+  }
+
+  async getFormattedServiceList() {
+    const services = await this.getServices();
+    let formattedList = "Lista de servicios disponibles:\n\n";
+    
+    for (const [category, categoryServices] of Object.entries(services)) {
+      formattedList += `*${category}*:\n`;
+      categoryServices.forEach(service => {
+        formattedList += `- ${service.nombre}: $${service.precio}\n`;
+      });
+      formattedList += "\n";
+    }
+    
+    return formattedList;
   }
 
   async saveOrder(order) {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[1];
-      await sheet.addRow(order);
-      logger.info(`Order saved for user ${order.userId}`);
+      
+      const formattedDate = moment().tz('America/Santiago').format('DD-MM-YYYY HH:mm[hrs] - dddd');
+      const censoredPhone = this.censorPhoneNumber(order.telefono);
+  
+      const rowData = [
+        formattedDate,
+        censoredPhone,
+        order.nombre,
+        order.email,
+        order.detalles,
+        order.archivos,
+        order.observaciones,
+        order.total,
+        "Nuevo pedido"
+      ];
+  
+      const result = await sheet.addRows([rowData]);
+      
+      if (result && result.length > 0) {
+        const rowIndex = result[0].rowIndex || result[0]._rowNumber || sheet.rowCount;
+        logger.info(`Order saved successfully. Row ID: ${rowIndex}`);
+        return { success: true, message: "Pedido guardado exitosamente", rowIndex: rowIndex };
+      } else {
+        logger.warn("Could not get information about the added row");
+        return { success: true, message: "Pedido guardado exitosamente, pero no se pudo obtener el ID de la fila" };
+      }
     } catch (error) {
       logger.error('Error saving order to Google Sheets', error);
       throw error;
     }
+  }
+
+  async getAdditionalInfo() {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[2];
+      await sheet.loadCells('A1:G11');
+  
+      const additionalInfo = {
+        horarios: {},
+        comunasDespacho: [],
+        direccionRetiro: '',
+        promocionDia: '',
+        metodosPago: '',
+        tiempoPreparacion: ''
+      };
+  
+      ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
+        const horario = sheet.getCell(index + 1, 0).value;
+        additionalInfo.horarios[dia] = horario || 'No disponible';
+      });
+  
+      for (let row = 1; row <= 9; row++) {
+        const comuna = sheet.getCell(row, 1).value;
+        if (comuna && comuna.trim()) additionalInfo.comunasDespacho.push(comuna.trim());
+      }
+  
+      additionalInfo.direccionRetiro = sheet.getCell(1, 3).value || 'No disponible';
+      additionalInfo.promocionDia = sheet.getCell(1, 4).value || 'No hay promociones actualmente';
+      additionalInfo.metodosPago = sheet.getCell(1, 5).value || 'No especificado';
+      additionalInfo.tiempoPreparacion = sheet.getCell(1, 6).value || 'No especificado';
+  
+      return additionalInfo;
+    } catch (error) {
+      logger.error('Error fetching additional info from Google Sheets', error);
+      throw error;
+    }
+  }
+
+  async getFormattedAdditionalInfo() {
+    const info = await this.getAdditionalInfo();
+    let formattedInfo = "Información adicional:\n\n";
+    
+    formattedInfo += "*Horarios*:\n";
+    for (const [dia, horario] of Object.entries(info.horarios)) {
+      formattedInfo += `${dia}: ${horario}\n`;
+    }
+    
+    formattedInfo += "\n*Comunas de despacho*:\n";
+    formattedInfo += info.comunasDespacho.join(", ") + "\n";
+    
+    formattedInfo += `\n*Dirección de retiro*: ${info.direccionRetiro}\n`;
+    formattedInfo += `*Promoción del día*: ${info.promocionDia}\n`;
+    formattedInfo += `*Métodos de pago*: ${info.metodosPago}\n`;
+    formattedInfo += `*Tiempo de preparación*: ${info.tiempoPreparacion}\n`;
+    
+    return formattedInfo;
+  }
+
+  censorPhoneNumber(phoneNumber) {
+    if (phoneNumber.length <= 5) return phoneNumber;
+    return phoneNumber.slice(0, 2) + '*'.repeat(phoneNumber.length - 5) + phoneNumber.slice(-3);
   }
 }
 
@@ -1265,14 +1420,11 @@ const logger = winston.createLogger({
   level: config.logging.level,
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.printf(({ timestamp, level, message, ...metadata }) => {
-      let msg = `${timestamp} [${level}] : ${message}`;
-      if (Object.keys(metadata).length > 0) {
-        msg += JSON.stringify(metadata);
-      }
-      return msg;
-    })
+    winston.format.errors({ stack: true }),
+    winston.format.splat(),
+    winston.format.json()
   ),
+  defaultMeta: { service: 'print-bot' },
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(
@@ -1285,9 +1437,11 @@ const logger = winston.createLogger({
   ]
 });
 
-// Agregar un método para registrar errores con stack trace
 logger.logError = (message, error) => {
-  logger.error(`${message}: ${error.message}`, { stack: error.stack });
+  logger.error(`${message}: ${error.message}`, { 
+    stack: error.stack,
+    metadata: error
+  });
 };
 
 export { logger };
