@@ -8,6 +8,7 @@ import { conversationManager } from './core/conversation-manager.js';
 import { commandHandler } from './core/command-handler.js';
 import { userSessionManager } from './core/user-session-manager.js';
 import { middlewareManager } from './core/middleware-manager.js';
+import { loggingMiddleware } from './middleware/logging-middleware.js';
 import { messageProcessor } from './middleware/message-processor.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { quoteCommand } from './commands/quote-command.js';
@@ -39,6 +40,7 @@ commandHandler.registerDefaultCommand(defaultCommand);
 
 
 // Configurar middleware
+middlewareManager.use(loggingMiddleware);
 middlewareManager.use(messageProcessor);
 middlewareManager.use(errorHandler);
 

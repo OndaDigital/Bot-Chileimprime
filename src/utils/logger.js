@@ -64,8 +64,10 @@ logger.logError = (message, error) => {
 
 // Método personalizado para logging de transiciones de estado
 logger.logState = (currentState, nextState, context) => {
-  const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
-  logger.info(`${formattedDate} - INFO - State transition: ${currentState} -> ${nextState}`, context);
+  if (currentState !== nextState) {
+    const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
+    logger.info(`${formattedDate} - INFO - State transition: ${currentState} -> ${nextState}`, context);
+  }
 };
 
 export { logger };

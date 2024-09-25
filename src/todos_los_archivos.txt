@@ -11,6 +11,7 @@ import { conversationManager } from './core/conversation-manager.js';
 import { commandHandler } from './core/command-handler.js';
 import { userSessionManager } from './core/user-session-manager.js';
 import { middlewareManager } from './core/middleware-manager.js';
+import { loggingMiddleware } from './middleware/logging-middleware.js';
 import { messageProcessor } from './middleware/message-processor.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { quoteCommand } from './commands/quote-command.js';
@@ -42,6 +43,7 @@ commandHandler.registerDefaultCommand(defaultCommand);
 
 
 // Configurar middleware
+middlewareManager.use(loggingMiddleware);
 middlewareManager.use(messageProcessor);
 middlewareManager.use(errorHandler);
 
@@ -251,8 +253,11 @@ import { logger } from '../utils/logger.js';
 
 class DefaultCommand {
   async execute(ctx, { flowDynamic }) {
+    const currentState = ctx.userContext.getState();
     logger.info(`Executing default command for user ${ctx.from}`);
     await flowDynamic('Lo siento, no he entendido tu solicitud. ¿Podrías reformularla o elegir una de las opciones disponibles?');
+    const nextState = ctx.userContext.getState();
+    logger.logState(currentState, nextState, { userId: ctx.from, command: 'default' });
   }
 }
 
@@ -541,23 +546,30 @@ class CommandHandler {
   }
 
   async executeCommand(name, ctx, { flowDynamic, gotoFlow }, subcommand = null) {
-    if (this.commands.has(name)) {
-      try {
+    const currentState = ctx.userContext.getState();
+
+    try {
+      if (this.commands.has(name)) {
         await this.executeDependencies(name, ctx, { flowDynamic, gotoFlow });
         if (subcommand && this.subcommands.has(name) && this.subcommands.get(name).has(subcommand)) {
           await this.subcommands.get(name).get(subcommand).execute(ctx, { flowDynamic, gotoFlow });
         } else {
           await this.commands.get(name).execute(ctx, { flowDynamic, gotoFlow });
         }
-      } catch (error) {
-        logger.error(`Error executing command ${name}`, error);
-        throw error;
+      } else if (this.defaultCommand) {
+        await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
+      } else {
+        logger.error(`Command ${name} not found and no default command registered`);
+        throw new Error(`Command ${name} not found`);
       }
-    } else if (this.defaultCommand) {
-      await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
-    } else {
-      logger.error(`Command ${name} not found and no default command registered`);
-      throw new Error(`Command ${name} not found`);
+
+      const nextState = ctx.userContext.getState();
+      if (nextState !== currentState) {
+        logger.logState(currentState, nextState, { userId: ctx.from, command: name, subcommand });
+      }
+    } catch (error) {
+      logger.error(`Error executing command ${name}`, error);
+      throw error;
     }
   }
 
@@ -618,14 +630,11 @@ class ConversationManager {
       const intent = await this.determineIntent(ctx.body);
       const action = this.mapIntentToAction(intent);
       
-      if (action === 'UNKNOWN') {
-        await commandHandler.executeCommand('UNKNOWN', ctx, { flowDynamic, gotoFlow });
-        return;
-      }
+      logger.info(`Intent detected: ${intent}, Action mapped: ${action}`, { userId: ctx.from });
 
       const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
 
-      if (nextState && this.states.has(nextState)) {
+      if (nextState && this.states.has(nextState) && nextState !== currentState) {
         logger.logState(currentState, nextState, { userId: ctx.from, intent, action });
         userContext.setState(nextState);
         await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
@@ -859,6 +868,33 @@ export async function errorHandler(ctx, next) {
       logger.error('flowDynamic not available in context');
     }
   }
+}
+
+
+// middleware\logging-middleware.js
+
+// middleware/logging-middleware.js
+import { logger } from '../utils/logger.js';
+
+export async function loggingMiddleware(ctx, next) {
+  const startTime = Date.now();
+  const initialState = ctx.userContext.getState();
+
+  logger.info(`Processing message for user ${ctx.from}`, {
+    initialState,
+    message: ctx.body,
+  });
+
+  await next();
+
+  const endTime = Date.now();
+  const finalState = ctx.userContext.getState();
+  
+  logger.info(`Finished processing message for user ${ctx.from}`, {
+    initialState,
+    finalState,
+    processingTime: `${endTime - startTime}ms`,
+  });
 }
 
 
@@ -1511,7 +1547,7 @@ import moment from 'moment-timezone';
 moment.tz.setDefault("America/Santiago");
 
 const customFormat = winston.format.printf(({ level, message, timestamp, ...metadata }) => {
-  const formattedDate = moment(timestamp).format('YYYY-MM-DD HH:mm:ss');
+  const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
   let msg = `${formattedDate} - ${level.toUpperCase()} - ${message}`;
   
   if (Object.keys(metadata).length > 0 && metadata.service !== 'print-bot') {
@@ -1544,29 +1580,33 @@ const logger = winston.createLogger({
 
 // Sobrescribir los métodos de logging para asegurar el formato correcto
 ['error', 'warn', 'info', 'debug'].forEach((level) => {
+  const originalMethod = logger[level];
   logger[level] = function (message, metadata) {
     const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
-    console.log(`${formattedDate} - ${level.toUpperCase()} - ${message}`, metadata);
-    winston.log(level, message, metadata);
+    const formattedMessage = `${formattedDate} - ${level.toUpperCase()} - ${message}`;
+    if (metadata) {
+      originalMethod.call(this, formattedMessage, metadata);
+    } else {
+      originalMethod.call(this, formattedMessage);
+    }
   };
 });
 
+// Método personalizado para logging de errores
 logger.logError = (message, error) => {
   const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
-  console.error(`${formattedDate} - ERROR - ${message}: ${error.message}`, { 
-    stack: error.stack,
-    metadata: error
-  });
-  logger.error(`${message}: ${error.message}`, { 
+  logger.error(`${formattedDate} - ERROR - ${message}: ${error.message}`, { 
     stack: error.stack,
     metadata: error
   });
 };
 
+// Método personalizado para logging de transiciones de estado
 logger.logState = (currentState, nextState, context) => {
-  const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
-  console.log(`${formattedDate} - INFO - State transition: ${currentState} -> ${nextState}`, context);
-  logger.info(`State transition: ${currentState} -> ${nextState}`, context);
+  if (currentState !== nextState) {
+    const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
+    logger.info(`${formattedDate} - INFO - State transition: ${currentState} -> ${nextState}`, context);
+  }
 };
 
 export { logger };

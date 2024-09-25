@@ -28,23 +28,30 @@ class CommandHandler {
   }
 
   async executeCommand(name, ctx, { flowDynamic, gotoFlow }, subcommand = null) {
-    if (this.commands.has(name)) {
-      try {
+    const currentState = ctx.userContext.getState();
+
+    try {
+      if (this.commands.has(name)) {
         await this.executeDependencies(name, ctx, { flowDynamic, gotoFlow });
         if (subcommand && this.subcommands.has(name) && this.subcommands.get(name).has(subcommand)) {
           await this.subcommands.get(name).get(subcommand).execute(ctx, { flowDynamic, gotoFlow });
         } else {
           await this.commands.get(name).execute(ctx, { flowDynamic, gotoFlow });
         }
-      } catch (error) {
-        logger.error(`Error executing command ${name}`, error);
-        throw error;
+      } else if (this.defaultCommand) {
+        await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
+      } else {
+        logger.error(`Command ${name} not found and no default command registered`);
+        throw new Error(`Command ${name} not found`);
       }
-    } else if (this.defaultCommand) {
-      await this.defaultCommand.execute(ctx, { flowDynamic, gotoFlow });
-    } else {
-      logger.error(`Command ${name} not found and no default command registered`);
-      throw new Error(`Command ${name} not found`);
+
+      const nextState = ctx.userContext.getState();
+      if (nextState !== currentState) {
+        logger.logState(currentState, nextState, { userId: ctx.from, command: name, subcommand });
+      }
+    } catch (error) {
+      logger.error(`Error executing command ${name}`, error);
+      throw error;
     }
   }
 

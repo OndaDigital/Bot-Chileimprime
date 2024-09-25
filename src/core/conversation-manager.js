@@ -34,14 +34,11 @@ class ConversationManager {
       const intent = await this.determineIntent(ctx.body);
       const action = this.mapIntentToAction(intent);
       
-      if (action === 'UNKNOWN') {
-        await commandHandler.executeCommand('UNKNOWN', ctx, { flowDynamic, gotoFlow });
-        return;
-      }
+      logger.info(`Intent detected: ${intent}, Action mapped: ${action}`, { userId: ctx.from });
 
       const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
 
-      if (nextState && this.states.has(nextState)) {
+      if (nextState && this.states.has(nextState) && nextState !== currentState) {
         logger.logState(currentState, nextState, { userId: ctx.from, intent, action });
         userContext.setState(nextState);
         await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
