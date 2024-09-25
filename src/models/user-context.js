@@ -8,8 +8,8 @@ class UserContext {
     this.menu = null;
     this.conversationHistory = [];
     this.lastInteraction = Date.now();
+    this.selectedService = null;
   }
-
   addToHistory(role, content) {
     this.conversationHistory.push({ role, content });
     this.trimHistory();
@@ -25,6 +25,15 @@ class UserContext {
         break;
       }
     }
+  }
+
+  setSelectedService(service) {
+    this.selectedService = service;
+    this.updateLastInteraction();
+  }
+
+  getSelectedService() {
+    return this.selectedService;
   }
 
   getHistory() {

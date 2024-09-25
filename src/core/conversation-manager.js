@@ -21,7 +21,7 @@ class ConversationManager {
       this.transitions.set(fromState, new Map());
     }
     this.transitions.get(fromState).set(toState, condition);
-    logger.info(`Transition from ${fromState} to ${toState} registered`);
+    logger.info(`Transition registered: ${fromState} -> ${toState}`);
   }
 
   async handleMessage(ctx, { flowDynamic, gotoFlow }) {
@@ -42,6 +42,7 @@ class ConversationManager {
       const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
 
       if (nextState && this.states.has(nextState)) {
+        logger.logState(currentState, nextState, { userId: ctx.from, intent, action });
         userContext.setState(nextState);
         await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
       } else {
@@ -49,7 +50,7 @@ class ConversationManager {
       }
 
     } catch (error) {
-      logger.error(`Error handling message for user ${ctx.from}:`, error);
+      logger.logError(`Error handling message for user ${ctx.from}`, error);
       await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.');
       userContext.setState('MAIN_MENU');
     }
@@ -66,6 +67,7 @@ class ConversationManager {
       'informacion_adicional': 'ADDITIONAL_INFO',
       'cotizar': 'QUOTE',
       'realizar_pedido': 'CREATE_ORDER',
+      'seleccionar_servicio': 'SELECT_SERVICE',
       'pregunta_general': 'GENERAL_QUESTION',
       'desconocido': 'UNKNOWN'
     };
@@ -114,6 +116,7 @@ class ConversationManager {
       'INITIAL': "Saluda al cliente y pregúntale en qué puedes ayudarle.",
       'MAIN_MENU': "Ayuda al cliente a elegir entre ver la lista de servicios, obtener información adicional, cotizar un servicio o realizar un pedido.",
       'LISTING_SERVICES': "Proporciona la lista de servicios disponibles de manera clara y concisa.",
+      'SELECTING_SERVICE': "Ayuda al cliente a seleccionar un servicio específico del menú.",
       'PROVIDING_ADDITIONAL_INFO': "Proporciona información adicional sobre horarios, despacho, métodos de pago, etc.",
       'QUOTING': "Ayuda al cliente a obtener una cotización para un servicio específico.",
       'CREATING_ORDER': "Guía al cliente a través del proceso de creación de un pedido.",

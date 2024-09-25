@@ -18,6 +18,8 @@ import { listServicesCommand } from './commands/list-services-command.js';
 import { additionalInfoCommand } from './commands/additional-info-command.js';
 import { createOrderCommand } from './commands/create-order-command.js';
 import { greetingCommand } from './commands/greeting-command.js';
+import { defaultCommand } from './commands/default-command.js';
+import { selectServiceCommand } from './commands/select-service-command.js';
 import { logger } from './utils/logger.js';
 import { pluginManager } from './core/plugin-manager.js';
 import { examplePlugin } from './plugins/example-plugin.js';
@@ -34,6 +36,10 @@ commandHandler.registerCommand('QUOTE', quoteCommand);
 commandHandler.registerCommand('LIST_SERVICES', listServicesCommand);
 commandHandler.registerCommand('ADDITIONAL_INFO', additionalInfoCommand);
 commandHandler.registerCommand('CREATE_ORDER', createOrderCommand);
+commandHandler.registerCommand('SELECT_SERVICE', selectServiceCommand);
+commandHandler.registerDefaultCommand(defaultCommand);
+
+
 
 // Configurar middleware
 middlewareManager.use(messageProcessor);
@@ -52,6 +58,11 @@ conversationManager.registerState('LISTING_SERVICES', async (ctx, action, { flow
   const serviceList = await sheetsService.getFormattedServiceList();
   await flowDynamic(serviceList);
 });
+
+conversationManager.registerState('SELECTING_SERVICE', async (ctx, action, { flowDynamic }) => {
+    await commandHandler.executeCommand('SELECT_SERVICE', ctx, { flowDynamic });
+  });
+  
 
 conversationManager.registerState('PROVIDING_ADDITIONAL_INFO', async (ctx, action, { flowDynamic }) => {
   const additionalInfo = await sheetsService.getFormattedAdditionalInfo();
@@ -72,6 +83,8 @@ conversationManager.registerTransition('MAIN_MENU', 'LISTING_SERVICES', (ctx, ac
 conversationManager.registerTransition('MAIN_MENU', 'PROVIDING_ADDITIONAL_INFO', (ctx, action) => action === 'ADDITIONAL_INFO');
 conversationManager.registerTransition('MAIN_MENU', 'QUOTING', (ctx, action) => action === 'QUOTE');
 conversationManager.registerTransition('MAIN_MENU', 'CREATING_ORDER', (ctx, action) => action === 'CREATE_ORDER');
+conversationManager.registerTransition('LISTING_SERVICES', 'SELECTING_SERVICE', () => true);
+conversationManager.registerTransition('SELECTING_SERVICE', 'QUOTING', () => true);
 
 
 
@@ -229,6 +242,21 @@ class CreateOrderCommand {
 }
 
 export const createOrderCommand = new CreateOrderCommand();
+
+
+// commands\default-command.js
+
+// commands/default-command.js
+import { logger } from '../utils/logger.js';
+
+class DefaultCommand {
+  async execute(ctx, { flowDynamic }) {
+    logger.info(`Executing default command for user ${ctx.from}`);
+    await flowDynamic('Lo siento, no he entendido tu solicitud. ¿Podrías reformularla o elegir una de las opciones disponibles?');
+  }
+}
+
+export const defaultCommand = new DefaultCommand();
 
 
 // commands\generate-budget-command.js
@@ -402,6 +430,49 @@ class QuoteCommand {
 export const quoteCommand = new QuoteCommand();
 
 
+// commands\select-service-command.js
+
+// commands/select-service-command.js
+
+import { sheetsService } from '../services/sheets-service.js';
+import { logger } from '../utils/logger.js';
+import { ValidationError } from '../utils/error-types.js';
+
+class SelectServiceCommand {
+  async execute(ctx, { flowDynamic }) {
+    try {
+      const userInput = ctx.body.toLowerCase();
+      const services = await sheetsService.getServices();
+      const selectedService = this.findService(services, userInput);
+
+      if (selectedService) {
+        ctx.userContext.setSelectedService(selectedService);
+        await flowDynamic(`Has seleccionado ${selectedService.nombre}. El precio base es $${selectedService.precio}. ¿Deseas proceder con la cotización?`);
+      } else {
+        throw new ValidationError('Servicio no encontrado. Por favor, selecciona un servicio válido del menú.');
+      }
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        await flowDynamic(error.message);
+      } else {
+        logger.error('Error executing select service command:', error);
+        await flowDynamic('Lo siento, ha ocurrido un error al seleccionar el servicio. Por favor, intenta nuevamente.');
+      }
+    }
+  }
+
+  findService(services, userInput) {
+    for (const category of Object.values(services)) {
+      const service = category.find(s => s.nombre.toLowerCase().includes(userInput));
+      if (service) return service;
+    }
+    return null;
+  }
+}
+
+export const selectServiceCommand = new SelectServiceCommand();
+
+
 // config\index.js
 
 import dotenv from 'dotenv';
@@ -534,7 +605,7 @@ class ConversationManager {
       this.transitions.set(fromState, new Map());
     }
     this.transitions.get(fromState).set(toState, condition);
-    logger.info(`Transition from ${fromState} to ${toState} registered`);
+    logger.info(`Transition registered: ${fromState} -> ${toState}`);
   }
 
   async handleMessage(ctx, { flowDynamic, gotoFlow }) {
@@ -547,9 +618,15 @@ class ConversationManager {
       const intent = await this.determineIntent(ctx.body);
       const action = this.mapIntentToAction(intent);
       
+      if (action === 'UNKNOWN') {
+        await commandHandler.executeCommand('UNKNOWN', ctx, { flowDynamic, gotoFlow });
+        return;
+      }
+
       const nextState = await this.executeStateAndDetermineNext(currentState, ctx, action, { flowDynamic, gotoFlow });
 
       if (nextState && this.states.has(nextState)) {
+        logger.logState(currentState, nextState, { userId: ctx.from, intent, action });
         userContext.setState(nextState);
         await this.executeState(nextState, ctx, action, { flowDynamic, gotoFlow });
       } else {
@@ -557,7 +634,7 @@ class ConversationManager {
       }
 
     } catch (error) {
-      logger.error(`Error handling message for user ${ctx.from}:`, error);
+      logger.logError(`Error handling message for user ${ctx.from}`, error);
       await flowDynamic('Lo siento, ha ocurrido un error. Por favor, intenta de nuevo más tarde.');
       userContext.setState('MAIN_MENU');
     }
@@ -574,6 +651,7 @@ class ConversationManager {
       'informacion_adicional': 'ADDITIONAL_INFO',
       'cotizar': 'QUOTE',
       'realizar_pedido': 'CREATE_ORDER',
+      'seleccionar_servicio': 'SELECT_SERVICE',
       'pregunta_general': 'GENERAL_QUESTION',
       'desconocido': 'UNKNOWN'
     };
@@ -622,6 +700,7 @@ class ConversationManager {
       'INITIAL': "Saluda al cliente y pregúntale en qué puedes ayudarle.",
       'MAIN_MENU': "Ayuda al cliente a elegir entre ver la lista de servicios, obtener información adicional, cotizar un servicio o realizar un pedido.",
       'LISTING_SERVICES': "Proporciona la lista de servicios disponibles de manera clara y concisa.",
+      'SELECTING_SERVICE': "Ayuda al cliente a seleccionar un servicio específico del menú.",
       'PROVIDING_ADDITIONAL_INFO': "Proporciona información adicional sobre horarios, despacho, métodos de pago, etc.",
       'QUOTING': "Ayuda al cliente a obtener una cotización para un servicio específico.",
       'CREATING_ORDER': "Guía al cliente a través del proceso de creación de un pedido.",
@@ -872,8 +951,8 @@ class UserContext {
     this.menu = null;
     this.conversationHistory = [];
     this.lastInteraction = Date.now();
+    this.selectedService = null;
   }
-
   addToHistory(role, content) {
     this.conversationHistory.push({ role, content });
     this.trimHistory();
@@ -889,6 +968,15 @@ class UserContext {
         break;
       }
     }
+  }
+
+  setSelectedService(service) {
+    this.selectedService = service;
+    this.updateLastInteraction();
+  }
+
+  getSelectedService() {
+    return this.selectedService;
   }
 
   getHistory() {
@@ -1067,7 +1155,7 @@ class OpenAIService {
   }
 
   async determineIntent(message) {
-    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
+    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, seleccionar_servicio, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
 
 Mensaje del usuario: "${message}"
 
@@ -1082,9 +1170,9 @@ Intención:`;
       });
 
       const intent = response.choices[0].message.content.trim().toLowerCase();
-      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
+      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'seleccionar_servicio', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
     } catch (error) {
-      logger.error('Error determining intent with OpenAI', error);
+      logger.error('Error determining intent with OpenAI:', error);
       return 'desconocido';
     }
   }
@@ -1413,8 +1501,25 @@ class ApplicationError extends Error {
 
 // utils\logger.js
 
+// utils/logger.js
+
 import winston from 'winston';
 import config from '../config/index.js';
+import moment from 'moment-timezone';
+
+// Configurar el formato de fecha para Chile
+moment.tz.setDefault("America/Santiago");
+
+const customFormat = winston.format.printf(({ level, message, timestamp, ...metadata }) => {
+  const formattedDate = moment(timestamp).format('YYYY-MM-DD HH:mm:ss');
+  let msg = `${formattedDate} - ${level.toUpperCase()} - ${message}`;
+  
+  if (Object.keys(metadata).length > 0 && metadata.service !== 'print-bot') {
+    msg += ` ${JSON.stringify(metadata)}`;
+  }
+  
+  return msg;
+});
 
 const logger = winston.createLogger({
   level: config.logging.level,
@@ -1422,14 +1527,14 @@ const logger = winston.createLogger({
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.splat(),
-    winston.format.json()
+    customFormat
   ),
   defaultMeta: { service: 'print-bot' },
   transports: [
     new winston.transports.Console({
       format: winston.format.combine(
         winston.format.colorize(),
-        winston.format.simple()
+        customFormat
       )
     }),
     new winston.transports.File({ filename: 'error.log', level: 'error' }),
@@ -1437,11 +1542,31 @@ const logger = winston.createLogger({
   ]
 });
 
+// Sobrescribir los métodos de logging para asegurar el formato correcto
+['error', 'warn', 'info', 'debug'].forEach((level) => {
+  logger[level] = function (message, metadata) {
+    const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
+    console.log(`${formattedDate} - ${level.toUpperCase()} - ${message}`, metadata);
+    winston.log(level, message, metadata);
+  };
+});
+
 logger.logError = (message, error) => {
+  const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
+  console.error(`${formattedDate} - ERROR - ${message}: ${error.message}`, { 
+    stack: error.stack,
+    metadata: error
+  });
   logger.error(`${message}: ${error.message}`, { 
     stack: error.stack,
     metadata: error
   });
+};
+
+logger.logState = (currentState, nextState, context) => {
+  const formattedDate = moment().format('YYYY-MM-DD HH:mm:ss');
+  console.log(`${formattedDate} - INFO - State transition: ${currentState} -> ${nextState}`, context);
+  logger.info(`State transition: ${currentState} -> ${nextState}`, context);
 };
 
 export { logger };

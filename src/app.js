@@ -16,6 +16,7 @@ import { additionalInfoCommand } from './commands/additional-info-command.js';
 import { createOrderCommand } from './commands/create-order-command.js';
 import { greetingCommand } from './commands/greeting-command.js';
 import { defaultCommand } from './commands/default-command.js';
+import { selectServiceCommand } from './commands/select-service-command.js';
 import { logger } from './utils/logger.js';
 import { pluginManager } from './core/plugin-manager.js';
 import { examplePlugin } from './plugins/example-plugin.js';
@@ -32,7 +33,9 @@ commandHandler.registerCommand('QUOTE', quoteCommand);
 commandHandler.registerCommand('LIST_SERVICES', listServicesCommand);
 commandHandler.registerCommand('ADDITIONAL_INFO', additionalInfoCommand);
 commandHandler.registerCommand('CREATE_ORDER', createOrderCommand);
+commandHandler.registerCommand('SELECT_SERVICE', selectServiceCommand);
 commandHandler.registerDefaultCommand(defaultCommand);
+
 
 
 // Configurar middleware
@@ -53,6 +56,11 @@ conversationManager.registerState('LISTING_SERVICES', async (ctx, action, { flow
   await flowDynamic(serviceList);
 });
 
+conversationManager.registerState('SELECTING_SERVICE', async (ctx, action, { flowDynamic }) => {
+    await commandHandler.executeCommand('SELECT_SERVICE', ctx, { flowDynamic });
+  });
+  
+
 conversationManager.registerState('PROVIDING_ADDITIONAL_INFO', async (ctx, action, { flowDynamic }) => {
   const additionalInfo = await sheetsService.getFormattedAdditionalInfo();
   await flowDynamic(additionalInfo);
@@ -72,6 +80,8 @@ conversationManager.registerTransition('MAIN_MENU', 'LISTING_SERVICES', (ctx, ac
 conversationManager.registerTransition('MAIN_MENU', 'PROVIDING_ADDITIONAL_INFO', (ctx, action) => action === 'ADDITIONAL_INFO');
 conversationManager.registerTransition('MAIN_MENU', 'QUOTING', (ctx, action) => action === 'QUOTE');
 conversationManager.registerTransition('MAIN_MENU', 'CREATING_ORDER', (ctx, action) => action === 'CREATE_ORDER');
+conversationManager.registerTransition('LISTING_SERVICES', 'SELECTING_SERVICE', () => true);
+conversationManager.registerTransition('SELECTING_SERVICE', 'QUOTING', () => true);
 
 
 

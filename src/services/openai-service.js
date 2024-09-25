@@ -40,7 +40,7 @@ class OpenAIService {
   }
 
   async determineIntent(message) {
-    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
+    const prompt = `Determina la intención del usuario basada en el siguiente mensaje. Las posibles intenciones son: saludo, lista_servicios, informacion_adicional, cotizar, realizar_pedido, seleccionar_servicio, pregunta_general, o desconocido. Responde solo con la intención, sin explicación adicional.
 
 Mensaje del usuario: "${message}"
 
@@ -55,9 +55,9 @@ Intención:`;
       });
 
       const intent = response.choices[0].message.content.trim().toLowerCase();
-      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
+      return ['saludo', 'lista_servicios', 'informacion_adicional', 'cotizar', 'realizar_pedido', 'seleccionar_servicio', 'pregunta_general', 'desconocido'].includes(intent) ? intent : 'desconocido';
     } catch (error) {
-      logger.error('Error determining intent with OpenAI', error);
+      logger.error('Error determining intent with OpenAI:', error);
       return 'desconocido';
     }
   }
