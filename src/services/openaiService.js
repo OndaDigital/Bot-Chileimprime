@@ -36,7 +36,7 @@ class OpenAIService {
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileValidation}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -83,7 +83,7 @@ class OpenAIService {
 
     5. Subida y Validación de Archivos:
        - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
-       - Cuando haya un fileValidation en currentOrder, evalúa su validez considerando:
+       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
          a) El servicio seleccionado
          b) Las medidas especificadas
          c) El resultado del análisis del archivo

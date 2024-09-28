@@ -17,7 +17,7 @@ class FlowManager {
       principalFlow: null,
       confirmedFlow: null,
       restartBotFlow: null,
-      fileUploadFlow: null,
+      documentFlow: null,
       catchAllFlow: null,
       idleTimeoutFlow: null,
       promoFlow: null
@@ -31,7 +31,7 @@ class FlowManager {
     this.flows.principalFlow = this.createPrincipalFlow();
     this.flows.confirmedFlow = this.createConfirmedFlow();
     this.flows.restartBotFlow = this.createRestartBotFlow();
-    this.flows.fileUploadFlow = this.createFileUploadFlow();
+    this.flows.documentFlow = this.createDocumentFlow();
     this.flows.catchAllFlow = this.createCatchAllFlow();
     this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
     this.flows.promoFlow = this.createPromoFlow();
@@ -59,7 +59,7 @@ class FlowManager {
       });
   }
 
-  createFileUploadFlow() {
+  createDocumentFlow() {
     return addKeyword(EVENTS.DOCUMENT)
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         try {
@@ -71,7 +71,7 @@ class FlowManager {
           
           await userContextManager.updateCurrentOrder(ctx.from, {
             filePath: filePath,
-            fileValidation: validationResult
+            fileAnalysis: validationResult
           });
           
           this.enqueueMessage(ctx.from, "ARCHIVO_RECIBIDO", async (accumulatedMessage) => {
@@ -83,6 +83,7 @@ class FlowManager {
         }
       });
   }
+
 
   createConfirmedFlow() {
     return addKeyword(EVENTS.ACTION)
@@ -194,7 +195,7 @@ class FlowManager {
           case "VALIDATE_FILE":
             await this.handleFileValidation(ctx, flowDynamic, order);
             break;
-          case "CONFIRMAR_PEDIDO":
+          case "CONFIRM_ORDER":
             await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
             break;
           case "SOLICITUD_HUMANO":
@@ -248,10 +249,10 @@ class FlowManager {
     }
   
     async handleFileValidation(ctx, flowDynamic, order) {
-      if (order.fileValidation.isValid) {
+      if (order.fileAnalysis.isValid) {
         await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
       } else {
-        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileValidation.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
+        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
       }
     }
   

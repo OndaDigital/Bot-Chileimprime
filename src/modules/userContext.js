@@ -30,8 +30,9 @@ class UserContextManager {
           },
           quantity: null,
           filePath: null,
-          fileValidation: null,
+          fileAnalysis: null,
           availableWidths: [],
+          availableFinishes: [],
           fileValidationCriteria: {},
           price: 0
         },
@@ -72,6 +73,7 @@ class UserContextManager {
       userContext.currentOrder.category = serviceInfo.category;
       userContext.currentOrder.type = serviceInfo.type;
       userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
+      userContext.currentOrder.availableFinishes = this.getAvailableFinishes(serviceInfo);
       userContext.currentOrder.fileValidationCriteria = {
         format: serviceInfo.format,
         minDPI: serviceInfo.minDPI,
@@ -91,6 +93,14 @@ class UserContextManager {
     throw new Error(`Servicio no encontrado: ${serviceName}`);
   }
 
+  getAvailableFinishes(serviceInfo) {
+    const finishes = [];
+    if (serviceInfo.sellado) finishes.push("sellado");
+    if (serviceInfo.ojetillos) finishes.push("ojetillos");
+    if (serviceInfo.bolsillo) finishes.push("bolsillo");
+    return finishes;
+  }
+
   resetContext(userId) {
     this.userContexts.delete(userId);
     logger.info(`Contexto reiniciado para usuario ${userId}`);
@@ -108,7 +118,7 @@ class UserContextManager {
     const userContext = this.getUserContext(userId);
     const order = userContext.currentOrder;
 
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileValidation'];
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
     if (!hasAllRequiredFields) return false;
@@ -133,13 +143,17 @@ class UserContextManager {
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
       const area = order.measures.width * order.measures.height;
       total = area * serviceInfo.precio * order.quantity;
+
+      if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
+      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * area;
+      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * area;
     } else {
       total = serviceInfo.precio * order.quantity;
-    }
 
-    if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
-    if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
-    if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+      if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
+      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
+      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+    }
 
     userContext.currentOrder.price = total;
     return total;

@@ -110,9 +110,9 @@ class OrderManager {
   
     handleValidateFile(userId, isValid, reason) {
       userContextManager.updateCurrentOrder(userId, {
-        fileValidation: { isValid, reason }
+        fileAnalysis: { isValid, reason }
       });
-  
+      
       const userContext = userContextManager.getUserContext(userId);
   
       return {
@@ -138,7 +138,7 @@ class OrderManager {
         this.orderConfirmed.add(userId);
   
         return {
-          action: "CONFIRMAR_PEDIDO",
+          action: "CONFIRM_ORDER",
           order: userContext.currentOrder,
           summary: orderSummary,
           result: result
