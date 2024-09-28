@@ -1,138 +1,92 @@
 // app.js
 
-import { createBot, createProvider, createFlow, addKeyword, MemoryDB, EVENTS } from '@builderbot/bot';
-import { BaileysProvider } from '@builderbot/provider-baileys';
-import { openaiService } from './services/openai-service.js';
-import { sheetsService } from './services/sheets-service.js';
-import { conversationManager } from './core/conversation-manager.js';
-import { commandHandler } from './core/command-handler.js';
-import { userSessionManager } from './core/user-session-manager.js';
-import { middlewareManager } from './core/middleware-manager.js';
-import { loggingMiddleware } from './middleware/logging-middleware.js';
-import { messageProcessor } from './middleware/message-processor.js';
-import { errorHandler } from './middleware/error-handler.js';
-import { quoteCommand } from './commands/quote-command.js';
-import { listServicesCommand } from './commands/list-services-command.js';
-import { additionalInfoCommand } from './commands/additional-info-command.js';
-import { createOrderCommand } from './commands/create-order-command.js';
-import { greetingCommand } from './commands/greeting-command.js';
-import { defaultCommand } from './commands/default-command.js';
-import { selectServiceCommand } from './commands/select-service-command.js';
-import { logger } from './utils/logger.js';
-import { pluginManager } from './core/plugin-manager.js';
-import { examplePlugin } from './plugins/example-plugin.js';
-import config from './config/index.js';
+import "dotenv/config";
+import flowManager from './modules/flowManager.js';
+import whatsappService from './services/whatsappService.js';
+import sheetService from './services/sheetService.js';
+import logger from './utils/logger.js';
+import createMiddleware from './core/middleware.js';
+import logMiddleware from './core/log-middleware.js';
+import userContextManager from './modules/userContext.js';
+import config from './config/config.js';
+import { errorHandler } from './utils/errorHandler.js';
 
-const PORT = config.port;
+const middleware = createMiddleware([logMiddleware]);
 
-// Registrar plugins
-pluginManager.registerPlugin('examplePlugin', examplePlugin);
+const initializeServices = async () => {
+  let menu = null;
+  let additionalInfo = null;
 
-// Registrar comandos
-commandHandler.registerCommand('GREETING', greetingCommand);
-commandHandler.registerCommand('QUOTE', quoteCommand);
-commandHandler.registerCommand('LIST_SERVICES', listServicesCommand);
-commandHandler.registerCommand('ADDITIONAL_INFO', additionalInfoCommand);
-commandHandler.registerCommand('CREATE_ORDER', createOrderCommand);
-commandHandler.registerCommand('SELECT_SERVICE', selectServiceCommand);
-commandHandler.registerDefaultCommand(defaultCommand);
+  try {
+    await sheetService.initialize();
+    menu = await sheetService.getMenu();
+    additionalInfo = await sheetService.getAdditionalInfo();
+    
+    userContextManager.setGlobalData(menu, additionalInfo);
 
+    logger.info("Menú e información adicional inicializados correctamente");
+    logger.info(`Menú (truncado): ${JSON.stringify(menu).substring(0, 100)}...`);
+    logger.info(`Info adicional (truncada): ${JSON.stringify(additionalInfo).substring(0, 100)}...`);
+  } catch (error) {
+    logger.error(`Error al inicializar servicios: ${error.message}`);
+    logger.warn("Iniciando con funcionalidad reducida");
+  }
 
+  return { menu, additionalInfo };
+};
 
-// Configurar middleware
-middlewareManager.use(loggingMiddleware);
-middlewareManager.use(messageProcessor);
-middlewareManager.use(errorHandler);
-
-// Configurar estados de conversación
-conversationManager.registerState('INITIAL', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Bienvenido a la imprenta. ¿En qué puedo ayudarte?');
-});
-
-conversationManager.registerState('MAIN_MENU', async (ctx, action, { flowDynamic }) => {
-  await commandHandler.executeCommand(action, ctx, { flowDynamic });
-});
-
-conversationManager.registerState('LISTING_SERVICES', async (ctx, action, { flowDynamic }) => {
-  const serviceList = await sheetsService.getFormattedServiceList();
-  await flowDynamic(serviceList);
-});
-
-conversationManager.registerState('SELECTING_SERVICE', async (ctx, action, { flowDynamic }) => {
-    await commandHandler.executeCommand('SELECT_SERVICE', ctx, { flowDynamic });
-  });
-  
-
-conversationManager.registerState('PROVIDING_ADDITIONAL_INFO', async (ctx, action, { flowDynamic }) => {
-  const additionalInfo = await sheetsService.getFormattedAdditionalInfo();
-  await flowDynamic(additionalInfo);
-});
-
-conversationManager.registerState('QUOTING', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Por favor, proporciona los detalles del servicio que deseas cotizar.');
-});
-
-conversationManager.registerState('CREATING_ORDER', async (ctx, action, { flowDynamic }) => {
-  await flowDynamic('Vamos a crear tu pedido. Por favor, proporciona los detalles del servicio que deseas ordenar.');
-});
-
-// Configurar transiciones
-conversationManager.registerTransition('INITIAL', 'MAIN_MENU', () => true);
-conversationManager.registerTransition('MAIN_MENU', 'LISTING_SERVICES', (ctx, action) => action === 'LIST_SERVICES');
-conversationManager.registerTransition('MAIN_MENU', 'PROVIDING_ADDITIONAL_INFO', (ctx, action) => action === 'ADDITIONAL_INFO');
-conversationManager.registerTransition('MAIN_MENU', 'QUOTING', (ctx, action) => action === 'QUOTE');
-conversationManager.registerTransition('MAIN_MENU', 'CREATING_ORDER', (ctx, action) => action === 'CREATE_ORDER');
-conversationManager.registerTransition('LISTING_SERVICES', 'SELECTING_SERVICE', () => true);
-conversationManager.registerTransition('SELECTING_SERVICE', 'QUOTING', () => true);
-
-
-
-// Configurar flujo principal
-const mainFlow = addKeyword([EVENTS.WELCOME, 'hola', 'inicio', 'menu'])
-  .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-    const userId = ctx.from;
-    ctx.userContext = userSessionManager.getSession(userId);
-
-    try {
-      await middlewareManager.run(ctx, { flowDynamic, gotoFlow });
-      await conversationManager.handleMessage(ctx, { flowDynamic, gotoFlow });
-    } catch (error) {
-      logger.error(`Error in main flow for user ${userId}`, error);
-      await flowDynamic('Lo siento, ha ocurrido un error inesperado. Por favor, intenta de nuevo más tarde.');
-    }
-  });
-
-// Inicializar bot
 const main = async () => {
   try {
-    await openaiService.initialize();
-    await sheetsService.initialize();
+    const { menu, additionalInfo } = await initializeServices();
 
-    const adapterDB = new MemoryDB();
-    const adapterFlow = createFlow([mainFlow]);
-    const adapterProvider = createProvider(BaileysProvider);
+    const flows = await flowManager.initializeFlows();
 
-    const { httpServer } = await createBot({
-      flow: adapterFlow,
-      provider: adapterProvider,
-      database: adapterDB,
+    // Aplicar middleware a todos los flujos
+    flows.forEach(flow => {
+      flow.addAction(middleware);
     });
 
-    if (httpServer) {
-      httpServer(PORT);
-      logger.info(`HTTP Server is running on port ${PORT}`);
+    await whatsappService.initialize(flows);
+
+    logger.info('Bot inicializado correctamente');
+
+    if (menu && additionalInfo) {
+      logger.info('Bot iniciado con todas las funcionalidades');
     } else {
-      logger.warn('HTTP Server is not available in this BuilderBot version');
+      logger.warn('Bot iniciado con funcionalidad reducida. Algunas características pueden no estar disponibles.');
     }
 
-    logger.info('Bot initialized successfully');
+    // Configurar actualización periódica del menú y la información adicional
+    setInterval(async () => {
+      try {
+        await sheetService.reinitialize();
+        const updatedMenu = await sheetService.getMenu();
+        const updatedAdditionalInfo = await sheetService.getAdditionalInfo();
+        userContextManager.setGlobalData(updatedMenu, updatedAdditionalInfo);
+        logger.info("Menú e información adicional actualizados correctamente");
+      } catch (error) {
+        logger.error(`Error al actualizar menú e información adicional: ${error.message}`);
+      }
+    }, config.menuUpdateInterval);
+
   } catch (error) {
-    logger.error('Failed to initialize bot', error);
+    logger.error(`Error crítico al inicializar el bot: ${error.message}`);
     process.exit(1);
   }
 };
 
-main().catch(error => {
-  logger.error('Unhandled error in main function', error);
+main().catch(err => {
+  logger.error('Error fatal en main:', err);
   process.exit(1);
+});
+
+// Manejo de errores no capturados
+process.on('uncaughtException', (error) => {
+  logger.error(`Uncaught Exception: ${error.message}`);
+  // Implementar lógica adicional si es necesario (por ejemplo, reiniciar el bot)
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+  // Implementar lógica adicional si es necesario
 });
