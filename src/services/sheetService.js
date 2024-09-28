@@ -1,5 +1,3 @@
-// services/sheetService.js
-
 import { JWT } from "google-auth-library";
 import { GoogleSpreadsheet } from "google-spreadsheet";
 import moment from 'moment-timezone';
@@ -13,9 +11,6 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 5000; // 5 seconds
-
 class GoogleSheetService {
   constructor() {
     this.jwtFromEnv = new JWT({
@@ -26,7 +21,7 @@ class GoogleSheetService {
     this.doc = new GoogleSpreadsheet(config.googleSheetId, this.jwtFromEnv);
     moment.locale('es');
     moment.tz.setDefault(config.timezone);
-    this.menu = null;
+    this.services = null;
     this.additionalInfo = null;
     this.isInitialized = false;
   }
@@ -34,11 +29,11 @@ class GoogleSheetService {
   async initialize() {
     try {
       await this.doc.loadInfo();
-      await this.loadMenuWithRetry();
+      await this.loadServicesWithRetry();
       await this.loadAdditionalInfoWithRetry();
       this.isInitialized = true;
-      logger.info("Menú e información adicional inicializados correctamente");
-      logger.info(`Menú: ${JSON.stringify(this.menu)}`);
+      logger.info("Servicios e información adicional inicializados correctamente");
+      logger.info(`Servicios: ${JSON.stringify(this.services)}`);
       logger.info(`Información adicional: ${JSON.stringify(this.additionalInfo)}`);
     } catch (error) {
       logger.error(`Error al inicializar SheetService: ${error.message}`);
@@ -46,128 +41,113 @@ class GoogleSheetService {
     }
   }
 
-  async loadMenuWithRetry() {
-    for (let i = 0; i < MAX_RETRIES; i++) {
+  async loadServicesWithRetry() {
+    for (let i = 0; i < config.MAX_RETRIES; i++) {
       try {
-        this.menu = await this.getMenu();
+        this.services = await this.getServices();
         return;
       } catch (error) {
-        logger.error(`Intento ${i + 1} fallido al cargar el menú: ${error.message}`);
-        if (i === MAX_RETRIES - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        logger.error(`Intento ${i + 1} fallido al cargar los servicios: ${error.message}`);
+        if (i === config.MAX_RETRIES - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, config.RETRY_DELAY));
       }
     }
   }
 
   async loadAdditionalInfoWithRetry() {
-    for (let i = 0; i < MAX_RETRIES; i++) {
+    for (let i = 0; i < config.MAX_RETRIES; i++) {
       try {
         this.additionalInfo = await this.getAdditionalInfo();
         return;
       } catch (error) {
         logger.error(`Intento ${i + 1} fallido al cargar información adicional: ${error.message}`);
-        if (i === MAX_RETRIES - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        if (i === config.MAX_RETRIES - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, config.RETRY_DELAY));
       }
     }
   }
 
-  async getMenu() {
+  async getServices() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[0];
-      await sheet.loadCells();
+      await sheet.loadCells('A1:Q1000');
   
-      let menu = {};
-      const startRow = 7;
+      let services = {};
+      let currentRow = 1;
   
-      let categories = [];
-      for (let col = 0; col < sheet.columnCount; col++) {
-        const cellValue = sheet.getCell(startRow, col).value;
-        if (cellValue && typeof cellValue === 'string' && cellValue.trim() !== '') {
-          categories.push(cellValue.trim());
-        } else {
-          break;
-        }
+      while (currentRow < sheet.rowCount) {
+        const id = sheet.getCell(currentRow, 0).value;
+        if (!id) break;
+  
+        const service = {
+          id: id,
+          category: sheet.getCell(currentRow, 1).value,
+          type: sheet.getCell(currentRow, 2).value,
+          name: sheet.getCell(currentRow, 3).value,
+          sellado: sheet.getCell(currentRow, 4).value === 'Sí',
+          ojetillos: sheet.getCell(currentRow, 5).value === 'Sí',
+          bolsillo: sheet.getCell(currentRow, 6).value === 'Sí',
+          format: sheet.getCell(currentRow, 7).value,
+          minDPI: parseInt(sheet.getCell(currentRow, 8).value),
+          stock: parseInt(sheet.getCell(currentRow, 9).value),
+          status: sheet.getCell(currentRow, 10).value,
+          precio: parseFloat(sheet.getCell(currentRow, 11).value),
+          availableWidths: sheet.getCell(currentRow, 12).value.split(',').map(w => parseFloat(w.trim())),
+          precioSellado: parseFloat(sheet.getCell(currentRow, 14).value) || 0,
+          precioBolsillo: parseFloat(sheet.getCell(currentRow, 15).value) || 0,
+          precioOjetillos: parseFloat(sheet.getCell(currentRow, 16).value) || 0
+        };
+  
+        services[service.name] = service;
+        currentRow++;
       }
   
-      categories.forEach((category, index) => {
-        let categoryItems = [];
-        for (let row = startRow + 1; row < sheet.rowCount; row++) {
-          const item = sheet.getCell(row, index).value;
-          const price = sheet.getCell(row, index).note;
-          if (item) {
-            let extractedPrice = price;
-            if (!extractedPrice) {
-              const priceMatch = item.match(/\$(\d+)/);
-              if (priceMatch) {
-                extractedPrice = priceMatch[1];
-              }
-            }
-            if (extractedPrice) {
-              categoryItems.push({
-                nombre: item.replace(/\$\d+/, '').trim(),
-                precio: parseInt(extractedPrice)
-              });
-            }
-          } else {
-            break;
-          }
-        }
-        menu[category] = categoryItems;
-      });
-  
-      return menu;
+      return services;
     } catch (err) {
-      logger.error("Error al obtener el menú:", err);
-      throw new CustomError('MenuFetchError', 'Error al obtener el menú desde Google Sheets', err);
+      logger.error("Error al obtener los servicios:", err);
+      throw new CustomError('ServicesFetchError', 'Error al obtener los servicios desde Google Sheets', err);
     }
   }
 
   async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[2]; // Tercera hoja
-      await sheet.loadCells('A1:H11');
+      const sheet = this.doc.sheetsByIndex[1];
+      await sheet.loadCells('A1:C100');
   
       const additionalInfo = {
         horarios: {},
-        zonasDespacho: [],
-        direccionRetiro: '',
-        promocionDia: '',
-        metodosPago: '',
-        tiempoPreparacion: ''
+        terminaciones: [],
+        tiemposEntrega: '',
+        politicaArchivos: '',
+        informacionContacto: ''
       };
   
       // Horarios
-      ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-        const horario = sheet.getCell(index + 1, 1).value;
-        additionalInfo.horarios[dia] = horario || 'No disponible';
-        logger.info(`Horario cargado para ${dia}: ${additionalInfo.horarios[dia]}`);
-      });
-  
-      // Zonas de despacho
-      for (let row = 1; row <= 9; row++) {
-        const zona = sheet.getCell(row, 2).value;
-        if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
+      for (let row = 1; row <= 7; row++) {
+        const dia = sheet.getCell(row, 0).value;
+        const horario = sheet.getCell(row, 1).value;
+        if (dia && horario) {
+          additionalInfo.horarios[dia] = horario;
+        }
       }
-      logger.info(`Zonas de despacho: ${additionalInfo.zonasDespacho.join(', ')}`);
   
-      // Dirección de retiro
-      additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
-      logger.info(`Dirección de retiro: ${additionalInfo.direccionRetiro}`);
+      // Terminaciones
+      let row = 1;
+      while (sheet.getCell(row, 2).value) {
+        additionalInfo.terminaciones.push(sheet.getCell(row, 2).value);
+        row++;
+      }
   
-      // Promoción del día
-      additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
-      logger.info(`Promoción del día: ${additionalInfo.promocionDia}`);
+      // Tiempos de entrega
+      additionalInfo.tiemposEntrega = sheet.getCell(1, 3).value;
   
-      // Métodos de pago
-      additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
-      logger.info(`Métodos de pago: ${additionalInfo.metodosPago}`);
+      // Política de archivos
+      additionalInfo.politicaArchivos = sheet.getCell(1, 4).value;
   
-      // Tiempos de preparación
-      additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
-      logger.info(`Tiempos de preparación: ${additionalInfo.tiempoPreparacion}`);
+      // Información de contacto
+      additionalInfo.informacionContacto = sheet.getCell(1, 5).value;
   
       logger.info("Información adicional cargada completamente:", JSON.stringify(additionalInfo, null, 2));
   
@@ -190,12 +170,12 @@ class GoogleSheetService {
   }
 
   async saveOrder(data) {
-    logger.info(`Iniciando guardado de orden en Google Sheets: ${JSON.stringify(data)}`);
+    logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
       await this.doc.loadInfo();
       logger.info('Información del documento cargada exitosamente');
       
-      const sheet = this.doc.sheetsByIndex[1];
+      const sheet = this.doc.sheetsByIndex[2];
       logger.info(`Hoja seleccionada: ${sheet.title}`);
       
       await sheet.loadCells();
@@ -211,7 +191,7 @@ class GoogleSheetService {
         data.pedido,
         data.observaciones,
         data.total,
-        "Nuevo pedido"
+        "Nueva cotización"
       ];
   
       logger.info(`Datos de fila preparados para inserción: ${JSON.stringify(rowData)}`);
@@ -230,7 +210,6 @@ class GoogleSheetService {
         const safeProperties = {
           rowIndex: firstRow.rowIndex,
           rowNumber: firstRow._rowNumber || firstRow.rowNumber,
-          // Añade aquí otras propiedades que sean seguras de extraer
         };
         
         logger.info(`Propiedades seguras de la primera fila: ${JSON.stringify(safeProperties)}`);
@@ -238,25 +217,25 @@ class GoogleSheetService {
         const rowIndex = safeProperties.rowIndex || safeProperties.rowNumber || sheet.rowCount;
         logger.info(`Fila añadida exitosamente. ID de la nueva fila: ${rowIndex}`);
   
-        return { success: true, message: "Pedido guardado exitosamente", rowIndex: rowIndex };
+        return { success: true, message: "Cotización guardada exitosamente", rowIndex: rowIndex };
       } else {
         logger.warn("No se pudo obtener información de la fila añadida");
-        return { success: true, message: "Pedido guardado exitosamente, pero no se pudo obtener el ID de la fila" };
+        return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
       }
     } catch (err) {
-      logger.error("Error detallado al guardar el pedido en Google Sheets:", err.message);
+      logger.error("Error detallado al guardar la cotización en Google Sheets:", err.message);
       logger.error("Stack trace:", err.stack);
-      throw new CustomError('OrderSaveError', `Error al guardar el pedido: ${err.message}`, err);
+      throw new CustomError('OrderSaveError', `Error al guardar la cotización: ${err.message}`, err);
     }
   }
 
   async reinitialize() {
     try {
-      logger.info("Reinicializando menú e información adicional");
-      await this.loadMenuWithRetry();
+      logger.info("Reinicializando servicios e información adicional");
+      await this.loadServicesWithRetry();
       await this.loadAdditionalInfoWithRetry();
-      logger.info("Menú e información adicional reinicializados correctamente");
-      logger.info(`Menú actualizado: ${JSON.stringify(this.menu)}`);
+      logger.info("Servicios e información adicional reinicializados correctamente");
+      logger.info(`Servicios actualizados: ${JSON.stringify(this.services)}`);
       logger.info(`Información adicional actualizada: ${JSON.stringify(this.additionalInfo)}`);
     } catch (error) {
       logger.error(`Error al reinicializar SheetService: ${error.message}`);

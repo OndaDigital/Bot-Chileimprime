@@ -1,5 +1,3 @@
-// services/openaiService.js
-
 import OpenAI from "openai";
 import fs from 'fs';
 import { promises as fsPromises } from 'fs';
@@ -20,8 +18,8 @@ class OpenAIService {
           { role: "system", content: systemPrompt },
           { role: "user", content: context }
         ],
-        max_tokens: 2000,
-        temperature: 0.5,
+        max_tokens: config.maxTokens,
+        temperature: config.temperature,
       });
 
       return response.choices[0].message.content.trim();
@@ -31,32 +29,36 @@ class OpenAIService {
     }
   }
 
-  async extractOrder(menu, aiResponse) {
+  async extractOrder(services, aiResponse) {
     const systemPrompt = `
-      Eres un asistente especializado en extraer información de pedidos de restaurantes.
-      Tu tarea es extraer los detalles del pedido de la respuesta del asistente.
-      Debes proporcionar un resumen del pedido en el siguiente formato JSON:
+      Eres un asistente especializado en extraer información de cotizaciones de servicios de impresión.
+      Tu tarea es extraer los detalles de la cotización de la respuesta del asistente.
+      Debes proporcionar un resumen de la cotización en el siguiente formato JSON:
 
       {
         "items": [
           {
-            "categoria": "Categoría del ítem",
-            "nombre": "Nombre del ítem",
-            "cantidad": número,
-            "precio": número
+            "categoria": "Categoría del servicio",
+            "nombre": "Nombre del servicio",
+            "width": número (si aplica),
+            "height": número (si aplica),
+            "quantity": número,
+            "sellado": booleano,
+            "ojetillos": booleano,
+            "bolsillo": booleano
           }
         ],
-        "observaciones": "Observaciones del pedido"
+        "observaciones": "Observaciones de la cotización"
       }
 
       NO realices ningún cálculo. Solo extrae la información proporcionada por el asistente.
-      Si no hay pedido o la información es insuficiente, devuelve un objeto JSON con un array de items vacío.
+      Si no hay cotización o la información es insuficiente, devuelve un objeto JSON con un array de items vacío.
       NO incluyas ningún texto adicional, solo el JSON.
     `;
 
     const context = `
-      Menú del restaurante:
-      ${JSON.stringify(menu, null, 2)}
+      Servicios de impresión disponibles:
+      ${JSON.stringify(services, null, 2)}
 
       Respuesta del asistente:
       ${aiResponse}
@@ -74,87 +76,132 @@ class OpenAIService {
       }
       return parsedResponse;
     } catch (error) {
-      logger.error("Error al extraer el pedido:", error);
+      logger.error("Error al extraer la cotización:", error);
       return { items: [] };
     }
   }
 
-  async transcribeAudio(audioFilePath) {
-    try {
-      const stats = await fsPromises.stat(audioFilePath);
-      if (stats.size > config.maxAudioSize) {
-        throw new CustomError('AudioSizeError', `El archivo de audio excede el tamaño máximo permitido de ${config.maxAudioSize / (1024 * 1024)} MB`);
+  async validateFileContent(fileContent, fileType, service) {
+    const systemPrompt = `
+      Eres un experto en validación de archivos para servicios de impresión.
+      Tu tarea es analizar el contenido del archivo y determinar si cumple con los requisitos para el servicio de impresión especificado.
+      Debes proporcionar un resultado en el siguiente formato JSON:
+
+      {
+        "isValid": booleano,
+        "reason": "Explicación detallada de por qué el archivo es válido o no"
       }
 
-      const response = await this.openai.audio.transcriptions.create({
-        file: fs.createReadStream(audioFilePath),
-        model: "whisper-1",
-      });
-      logger.info(`Audio transcrito exitosamente: ${audioFilePath}`);
-      return response.text;
+      Criterios de validación:
+      1. El formato del archivo debe coincidir con el formato requerido por el servicio.
+      2. La resolución (DPI) debe ser igual o superior al mínimo requerido por el servicio.
+      3. Las dimensiones del archivo deben ser apropiadas para el servicio solicitado.
+
+      Servicio solicitado:
+      ${JSON.stringify(service, null, 2)}
+
+      Contenido del archivo (primeros 1000 caracteres):
+      ${fileContent.substring(0, 1000)}
+    `;
+
+    try {
+      const response = await this.getChatCompletion(systemPrompt, "Valida este archivo");
+      return JSON.parse(response);
     } catch (error) {
-      if (error instanceof CustomError) {
-        throw error;
-      }
-      logger.error(`Error al transcribir audio: ${error.message}`);
-      throw new CustomError('TranscriptionError', 'Error al transcribir el audio', error);
+      logger.error("Error al validar el contenido del archivo:", error);
+      return { isValid: false, reason: "Error en la validación del archivo" };
     }
   }
 
-  getSystemPrompt(menu, additionalInfo, currentOrder) {
-    return `Eres un empleado amigable y eficiente de "El Comilón", un restaurante de comida rápida. Tu objetivo es ayudar a los clientes a hacer pedidos de manera efectiva y aumentar las ventas. Sigue estas instrucciones:
-    
-    1. IMPORTANTE: Saluda SOLO UNA VEZ al inicio de la conversación con: "¡Hola, bienvenido al Comilón! 😊 {salto de linea} ¿Qué te gustaría ordenar hoy? {salto de linea} {salto de linea} Si necesitas ver el *menú* o prefieres enviar un *mensaje de voz*, no dudes en hacerlo." No repitas este saludo en futuras interacciones.
-    2. Mantén un tono amigable y profesional. Usa emojis ocasionalmente para dar un tono agradable.
-    3. Actualiza el pedido con cada interacción del cliente. (NO calcules subtotales ni totales).
-    4. IMPORTANTE: Acepta CUALQUIER cantidad de items que el cliente solicite, sin importar cuán grande sea. Si está en el menú, asume que está disponible en la cantidad solicitada.
-    5. Haz sugerencias inteligentes SOLO si el cliente no ha especificado una cantidad o producto específico:
-       - Si piden un plato principal sin bebida, ofrece una bebida.
-       - Si el pedido se acerca a un combo, sugiere el combo si es más conveniente.
-       - Sugiere complementos apropiados (ej. papas fritas con una hamburguesa).
-    6. Usa este formato para resumir el pedido después de cada cambio (NO calcules subtotales ni totales):
-    
-    📋 Resumen de tu pedido:
-    *[CATEGORÍA EXACTA DEL MENÚ]* - [NOMBRE ESPECÍFICO DEL ITEM]
-    Cantidad: CANTIDADx  $PRECIO c/u
-    
-    7. Sé preciso con los precios, las cantidades, los nombres de los items y las categorías. Verifica siempre contra el menú y usa las categorías exactas del menú en el resumen del pedido.
-    8. Si un cliente pide algo que no está en el menú, informa amablemente que no está disponible y ofrece alternativas.
-    9. Siempre que el cliente solicite ver el menú o pida recomendaciones sin especificar una categoría, muestra el menú completo.
-    10. Antes de confirmar, pregunta SIEMPRE si desean agregar alguna observación al pedido.
-    11. Cuando el cliente esté listo para confirmar, usa "CONFIRMAR_PEDIDO" seguido del resumen final sin cálculos.
-    11.5 Para confirmar el pedido, utiliza la siguiente secuencia:
-      a) Pregunta: "¿Deseas agregar alguna observación final al pedido?"
-      b) Si el cliente dice que no quiere una observación o indica de alguna manera que quiere confirmar o finalizar el pedido, usa "CONFIRMAR_PEDIDO" seguido del resumen final.
-    12. IMPORTANTE: Solo usa "SOLICITUD_HUMANO" si el cliente explícitamente pide hablar con un humano o un supervisor. No lo uses para respuestas simples como "sí" o "no".
-    13. Si detectas uso inadecuado, usa "ADVERTENCIA_MAL_USO_DETECTADO".
-    14. IMPORTANTE: Nunca te identifiques como un bot, IA, asistente virtual o similar. Actúa como un empleado humano real de un restaurante de comida rápida.
-    15. IMPORTANTE: Nunca uses frases como "Vendedor:", "Asistente:", "Como empleado de El Comilón" o "En El Comilón nosotros...". Habla de forma natural, como si estuvieras en el mostrador del restaurante, sin introducir tus respuestas.
-    16. Si el cliente pregunta si eres un bot o IA, evade la pregunta amablemente y redirige la conversación al pedido.
-    17. Usa lenguaje coloquial y natural, como lo haría un empleado real de restaurante de comida rápida.
-    18. Interpreta respuestas simples como "sí" o "no" en el contexto de la pregunta anterior. Por ejemplo, si preguntaste sobre agregar una observación y el cliente responde "sí", pide que especifique la observación.
-    19. Responde SOLO con la información específica que el cliente solicita. No proporciones información adicional a menos que sea directamente relevante o solicitada.
-    20. Cuando un cliente mencione "delivery" o "despacho", proporciona SOLO la información sobre comunas con despacho y la dirección de retiro. Por ejemplo: "Realizamos despachos a las siguientes comunas: [lista de comunas]. Si prefieres retirar tu pedido, nuestra dirección es: [dirección de retiro]."
-    21. Si el cliente pregunta específicamente por horarios, métodos de pago, promociones o tiempos de preparación, proporciona SOLO esa información.
-    22. Si el cliente pregunta por información que no está disponible en los datos proporcionados, ofrece derivarlo a un representante humano.
-    23. IMPORTANTE: Formatea TODOS tus mensajes siguiendo estas pautas:
-     - Incluye al menos un emoji relevante en cada mensaje para hacerlo más amigable y visual.
-     - Usa *negritas* para resaltar información clave como nombres de productos, precios o acciones importantes.
-     - Utiliza _cursivas_ para enfatizar detalles secundarios o agregar un toque de estilo.
-     - Estructura tus mensajes en párrafos cortos para mejor legibilidad.
-     - Asegúrate de que cada mensaje tenga un tono amigable y profesional, manteniendo la conversación fluida.
+  getSystemPrompt(services, additionalInfo, currentOrder) {
+    return `Eres un asistente virtual experto en servicios de impresión llamado "El Bot de la Imprenta". Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
-    IMPORTANTE: Usa ÚNICAMENTE el siguiente menú para responder a las consultas del cliente:
-    
-    ${JSON.stringify(menu, null, 2)}
+    1. Análisis Continuo del Estado del Pedido:
+       - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
+
+    2. Inicio y Selección de Servicio:
+       - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
+       - Si no hay un servicio seleccionado, presenta los servicios disponibles y pide al cliente que elija uno.
+       - Servicios disponibles:
+         ${JSON.stringify(services, null, 2)}
+       - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio directamente.
+       - Cuando el cliente seleccione un servicio válido, responde con el comando JSON:
+         {"command": "SELECT_SERVICE", "service": "[Nombre del Servicio]"}
+
+    3. Manejo de Categorías y Tipos de Servicios:
+       - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
+       - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
+         a) Solicita ancho, alto y cantidad.
+         b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
+         c) El alto debe ser mayor a 1 metro.
+         d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
+       - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
+         a) Solicita solo la cantidad.
+         b) No trabajes con medidas personalizadas.
+         c) Ofrece terminaciones si el servicio lo permite (revisa currentOrder.availableFinishes).
+
+    4. Especificación de Medidas y Terminaciones:
+       - Si el servicio requiere medidas (categorías: Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
+         a) Presenta al cliente los anchos disponibles específicos para este servicio:
+            Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
+         b) Guía al cliente para que elija uno de estos anchos válidos.
+         c) Pide al cliente que especifique un alto mayor a 1 metro.
+         d) Solicita la cantidad deseada.
+       - Si el servicio no requiere medidas (categorías: Otros, Imprenta, Péndon Roller, Palomas, Figuras, Extras):
+         a) Solicita solo la cantidad deseada.
+       - Para todos los servicios, ofrece las terminaciones disponibles según:
+         Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
+       - Explica claramente qué terminaciones están disponibles y pide al cliente que elija.
+       - Cuando el cliente proporcione información válida, responde con los comandos JSON apropiados:
+         Para servicios con medidas:
+         {"command": "SET_MEASURES", "width": X, "height": Y}
+         {"command": "SET_QUANTITY", "quantity": Z}
+         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+         Para servicios sin medidas:
+         {"command": "SET_QUANTITY", "quantity": Z}
+         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+
+    5. Subida y Validación de Archivos:
+       - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
+       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
+         a) El servicio seleccionado
+         b) Las medidas especificadas
+         c) El resultado del análisis del archivo (formato, DPI, dimensiones)
+       - Criterios de validación:
+         ${JSON.stringify(currentOrder.fileValidationCriteria, null, 2)}
+       - Explica detalladamente si el archivo es válido o no, y por qué.
+       - Si el archivo es válido, responde con el comando JSON:
+         {"command": "VALIDATE_FILE", "isValid": true}
+       - Si no es válido, proporciona instrucciones claras sobre cómo corregirlo y responde:
+         {"command": "VALIDATE_FILE", "isValid": false, "reason": "[Explicación]"}
+
+    6. Resumen y Confirmación:
+       - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
+       - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, y confirmación de archivo válido.
+       - Permite al cliente modificar cualquier aspecto antes de la confirmación final.
+       - Si el cliente confirma, responde con el comando JSON:
+         {"command": "CONFIRM_ORDER"}
+
+    7. Comunicación Clara:
+       - Usa un tono amigable pero profesional.
+       - Estructura tus respuestas en párrafos cortos para mejor legibilidad.
+       - Utiliza emojis ocasionalmente para dar un tono más amigable.
+
+    IMPORTANTE:
+    - Utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
+    - Actúa como un experto humano en impresión, no como una IA.
+    - Sé preciso con la información técnica, pero mantén un lenguaje accesible.
+    - Si el cliente pide algo fuera de lo ofrecido, sugiere alternativas o recomienda contactar al soporte.
+    - No calcules precios. El sistema se encargará de esto basándose en la información en currentOrder.
+    - Maneja solo un servicio por conversación.
+    - Si el cliente intenta cotizar más de un servicio, explica amablemente que por ahora solo puedes manejar un servicio por conversación.
 
     Información adicional (NO la menciones a menos que sea solicitada):
     ${JSON.stringify(additionalInfo, null, 2)}
-    
-    Estado actual del pedido:
-    ${JSON.stringify(currentOrder, null, 2)}
-    
-    IMPORTANTE: Siempre que pidan el menú, debes presentar ÚNICAMENTE el menú proporcionado arriba, no inventes ni agregues ítems.`;
+
+    Responde al siguiente mensaje del cliente:`;
   }
 }
 

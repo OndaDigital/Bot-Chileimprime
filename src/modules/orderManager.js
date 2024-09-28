@@ -1,11 +1,8 @@
-// modules/orderManager.js
-
 import logger from '../utils/logger.js';
 import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
 import moment from 'moment-timezone';
 import config from '../config/config.js';
 import sheetService from '../services/sheetService.js';
-import openaiService from '../services/openaiService.js';
 import { CustomError } from '../utils/errorHandler.js';
 
 class OrderManager {
@@ -16,7 +13,18 @@ class OrderManager {
   calculateOrder(order) {
     let total = 0;
     const calculatedItems = order.items.map(item => {
-      const subtotal = item.cantidad * item.precio;
+      let subtotal = 0;
+      if (item.width && item.height) {
+        const area = item.width * item.height;
+        subtotal = area * item.precio * item.quantity;
+      } else {
+        subtotal = item.precio * item.quantity;
+      }
+      
+      if (item.sellado) subtotal += item.precioSellado * (item.width * item.height);
+      if (item.ojetillos) subtotal += item.precioOjetillos * (item.width * item.height);
+      if (item.bolsillo) subtotal += item.precioBolsillo * (item.width * item.height);
+      
       total += subtotal;
       return { ...item, subtotal };
     });
@@ -29,11 +37,17 @@ class OrderManager {
   }
 
   formatOrderSummary(order) {
-    let summary = "📋 Resumen final de tu pedido:\n\n";
+    let summary = "📋 Resumen final de tu cotización:\n\n";
 
     order.items.forEach(item => {
       summary += `*${item.categoria}* - ${item.nombre}\n`;
-      summary += `Cantidad: ${item.cantidad}x  $${formatPrice(item.precio)} c/u\n`;
+      if (item.width && item.height) {
+        summary += `Medidas: ${item.width}m x ${item.height}m\n`;
+      }
+      summary += `Cantidad: ${item.quantity}\n`;
+      if (item.sellado) summary += "- Con sellado\n";
+      if (item.ojetillos) summary += "- Con ojetillos\n";
+      if (item.bolsillo) summary += "- Con bolsillo\n";
       summary += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
     });
 
@@ -46,22 +60,54 @@ class OrderManager {
     return summary;
   }
 
-  async updateOrder(userId, aiResponse, menu, currentOrder) {
-    logger.info(`Actualizando orden para usuario ${userId}. Respuesta AI: ${aiResponse}`);
+  async updateOrder(userId, jsonCommand, services, currentOrder) {
+    logger.info(`Actualizando orden para usuario ${userId}. Comando: ${JSON.stringify(jsonCommand)}`);
     try {
-      const extractedOrder = await openaiService.extractOrder(menu, aiResponse);
-      logger.info(`Orden extraída en JSON para usuario ${userId}: ${JSON.stringify(extractedOrder)}`);
-
-      if (extractedOrder && extractedOrder.items.length > 0) {
-        currentOrder.items = [...currentOrder.items, ...extractedOrder.items];
-        currentOrder.observaciones = extractedOrder.observaciones || currentOrder.observaciones;
-        return { action: "ACTUALIZAR", order: currentOrder };
-      } else if (aiResponse.includes("SOLICITUD_HUMANO")) {
-        return { action: "SOLICITUD_HUMANO" };
-      } else if (aiResponse.includes("ADVERTENCIA_MAL_USO_DETECTADO")) {
-        return { action: "ADVERTENCIA_MAL_USO_DETECTADO" };
+      switch (jsonCommand.command) {
+        case "SELECT_SERVICE":
+          currentOrder.service = jsonCommand.service;
+          currentOrder.category = services[jsonCommand.service].category;
+          currentOrder.availableWidths = services[jsonCommand.service].availableWidths;
+          currentOrder.availableFinishes = services[jsonCommand.service].availableFinishes;
+          return { action: "SELECT_SERVICE", order: currentOrder };
+        case "SET_MEASURES":
+          if (!currentOrder.items) currentOrder.items = [];
+          currentOrder.items.push({
+            categoria: currentOrder.category,
+            nombre: currentOrder.service,
+            width: jsonCommand.width,
+            height: jsonCommand.height,
+            precio: services[currentOrder.service].precio
+          });
+          return { action: "SET_MEASURES", order: currentOrder };
+        case "SET_QUANTITY":
+          if (currentOrder.items && currentOrder.items.length > 0) {
+            currentOrder.items[currentOrder.items.length - 1].quantity = jsonCommand.quantity;
+          }
+          return { action: "SET_QUANTITY", order: currentOrder };
+        case "SET_FINISHES":
+          if (currentOrder.items && currentOrder.items.length > 0) {
+            const currentItem = currentOrder.items[currentOrder.items.length - 1];
+            currentItem.sellado = jsonCommand.sellado;
+            currentItem.ojetillos = jsonCommand.ojetillos;
+            currentItem.bolsillo = jsonCommand.bolsillo;
+            currentItem.precioSellado = services[currentOrder.service].precioSellado;
+            currentItem.precioOjetillos = services[currentOrder.service].precioOjetillos;
+            currentItem.precioBolsillo = services[currentOrder.service].precioBolsillo;
+          }
+          return { action: "SET_FINISHES", order: currentOrder };
+        case "VALIDATE_FILE":
+          currentOrder.fileValidation = {
+            isValid: jsonCommand.isValid,
+            reason: jsonCommand.reason
+          };
+          return { action: "VALIDATE_FILE", order: currentOrder };
+        case "CONFIRM_ORDER":
+          return { action: "CONFIRMAR_PEDIDO", order: currentOrder };
+        default:
+          logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
+          return { action: "CONTINUAR", order: currentOrder };
       }
-      return { action: "CONTINUAR", order: currentOrder };
     } catch (error) {
       logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
       throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
@@ -93,32 +139,37 @@ class OrderManager {
 
       if (result.success) {
         this.orderConfirmed.add(userId);
-        logger.info(`Pedido finalizado y guardado correctamente para usuario ${userId}`);
+        logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
         
         return { 
-          confirmationMessage: "*¡Gracias!* 🎉 Tu pedido ha sido registrado y será preparado pronto. Un representante se pondrá en contacto contigo para confirmar los detalles. 📞",
+          confirmationMessage: "*¡Gracias!* 🎉 Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales. 📞",
           orderSummary: this.formatOrderSummary(calculatedOrder),
           endConversation: true
         };
       } else {
-        throw new Error("Error al guardar el pedido");
+        throw new Error("Error al guardar la cotización");
       }
     } catch (error) {
-      logger.error(`Error detallado al finalizar el pedido para usuario ${userId}:`, error);
-      throw new CustomError('OrderFinalizationError', 'Error al finalizar el pedido', error);
+      logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
+      throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
     }
   }
-
 
   formatOrderForSheet(order) {
     let details = '';
     let total = 0;
     
     order.items.forEach(item => {
-      const subtotal = item.cantidad * item.precio;
-      details += `${item.categoria} - ${item.cantidad}x ${item.nombre} - $${formatPrice(item.precio)} c/u\n`;
-      details += `Subtotal: $${formatPrice(subtotal)}\n`;
-      total += subtotal;
+      details += `${item.categoria} - ${item.nombre}\n`;
+      if (item.width && item.height) {
+        details += `Medidas: ${item.width}m x ${item.height}m\n`;
+      }
+      details += `Cantidad: ${item.quantity}\n`;
+      if (item.sellado) details += "- Con sellado\n";
+      if (item.ojetillos) details += "- Con ojetillos\n";
+      if (item.bolsillo) details += "- Con bolsillo\n";
+      details += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
+      total += item.subtotal;
     });
     
     return {
@@ -127,15 +178,21 @@ class OrderManager {
     };
   }
 
-
   estimateTotal(order) {
     let total = 0;
     order.items.forEach(item => {
-      total += item.cantidad * item.precio;
+      let itemTotal = item.precio * item.quantity;
+      if (item.width && item.height) {
+        const area = item.width * item.height;
+        itemTotal = area * item.precio * item.quantity;
+      }
+      if (item.sellado) itemTotal += item.precioSellado * (item.width * item.height);
+      if (item.ojetillos) itemTotal += item.precioOjetillos * (item.width * item.height);
+      if (item.bolsillo) itemTotal += item.precioBolsillo * (item.width * item.height);
+      total += itemTotal;
     });
     return formatPrice(total);
   }
-
 
   isOrderConfirmed(userId) {
     return this.orderConfirmed.has(userId);
