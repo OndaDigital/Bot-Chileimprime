@@ -11,6 +11,9 @@ const SCOPES = [
   "https://www.googleapis.com/auth/drive.file",
 ];
 
+const MAX_RETRIES = 5;
+const INITIAL_RETRY_DELAY = 1000; // 1 segundo
+
 class GoogleSheetService {
   constructor() {
     this.jwtFromEnv = new JWT({
@@ -26,45 +29,41 @@ class GoogleSheetService {
     this.isInitialized = false;
   }
 
+
   async initialize() {
     try {
       await this.doc.loadInfo();
-      await this.loadServicesWithRetry();
-      await this.loadAdditionalInfoWithRetry();
+      await this.retryOperation(() => this.loadServicesWithRetry());
+      await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
       this.isInitialized = true;
       logger.info("Servicios e información adicional inicializados correctamente");
-      logger.info(`Servicios: ${JSON.stringify(this.services)}`);
-      logger.info(`Información adicional: ${JSON.stringify(this.additionalInfo)}`);
     } catch (error) {
       logger.error(`Error al inicializar SheetService: ${error.message}`);
       throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
     }
   }
 
-  async loadServicesWithRetry() {
-    for (let i = 0; i < config.MAX_RETRIES; i++) {
+  async retryOperation(operation, maxRetries = MAX_RETRIES) {
+    let retries = 0;
+    while (retries < maxRetries) {
       try {
-        this.services = await this.getServices();
-        return;
+        return await operation();
       } catch (error) {
-        logger.error(`Intento ${i + 1} fallido al cargar los servicios: ${error.message}`);
-        if (i === config.MAX_RETRIES - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, config.RETRY_DELAY));
+        if (retries === maxRetries - 1) throw error;
+        const delay = Math.pow(2, retries) * INITIAL_RETRY_DELAY;
+        logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retries++;
       }
     }
   }
 
+  async loadServicesWithRetry() {
+    this.services = await this.getServices();
+  }
+
   async loadAdditionalInfoWithRetry() {
-    for (let i = 0; i < config.MAX_RETRIES; i++) {
-      try {
-        this.additionalInfo = await this.getAdditionalInfo();
-        return;
-      } catch (error) {
-        logger.error(`Intento ${i + 1} fallido al cargar información adicional: ${error.message}`);
-        if (i === config.MAX_RETRIES - 1) throw error;
-        await new Promise(resolve => setTimeout(resolve, config.RETRY_DELAY));
-      }
-    }
+    this.additionalInfo = await this.getAdditionalInfo();
   }
 
   async getServices() {
@@ -78,51 +77,13 @@ class GoogleSheetService {
         const id = sheet.getCell(i, 0).value;
         if (!id) break;
   
-        const category = sheet.getCell(i, 1).value;
-        const type = sheet.getCell(i, 2).value;
-        const name = sheet.getCell(i, 3).value;
-        const sellado = sheet.getCell(i, 4).value === 'Sí';
-        const ojetillos = sheet.getCell(i, 5).value === 'Sí';
-        const bolsillo = sheet.getCell(i, 6).value === 'Sí';
-        const format = sheet.getCell(i, 7).value;
-        const minDPI = parseInt(sheet.getCell(i, 8).value);
-        const stock = parseInt(sheet.getCell(i, 9).value);
-        const status = sheet.getCell(i, 10).value;
-        const precio = parseFloat(sheet.getCell(i, 11).value);
-        const availableWidths = sheet.getCell(i, 12).value.split(',').map(w => {
-          const [material, imprimible] = w.split('-').map(s => s.trim());
-          return {
-            material: parseFloat(material.replace('m', '')),
-            imprimible: parseFloat(imprimible.replace('m', ''))
-          };
-        });
-        const precioSellado = parseFloat(sheet.getCell(i, 14).value) || 0;
-        const precioBolsillo = parseFloat(sheet.getCell(i, 15).value) || 0;
-        const precioOjetillos = parseFloat(sheet.getCell(i, 16).value) || 0;
-
-        const service = {
-          id,
-          category,
-          type,
-          name,
-          sellado,
-          ojetillos,
-          bolsillo,
-          format,
-          minDPI,
-          stock,
-          status,
-          precio,
-          availableWidths,
-          precioSellado,
-          precioBolsillo,
-          precioOjetillos
-        };
-
-        if (!services[category]) {
-          services[category] = [];
+        const service = this.extractServiceData(sheet, i);
+        if (service) {
+          if (!services[service.category]) {
+            services[service.category] = [];
+          }
+          services[service.category].push(service);
         }
-        services[category].push(service);
       }
   
       return services;
@@ -130,6 +91,44 @@ class GoogleSheetService {
       logger.error("Error al obtener los servicios:", err);
       throw new CustomError('ServicesFetchError', 'Error al obtener los servicios desde Google Sheets', err);
     }
+  }
+
+  extractServiceData(sheet, row) {
+    try {
+      return {
+        id: sheet.getCell(row, 0).value,
+        category: sheet.getCell(row, 1).value,
+        type: sheet.getCell(row, 2).value,
+        name: sheet.getCell(row, 3).value,
+        sellado: sheet.getCell(row, 4).value === 'Sí',
+        ojetillos: sheet.getCell(row, 5).value === 'Sí',
+        bolsillo: sheet.getCell(row, 6).value === 'Sí',
+        format: sheet.getCell(row, 7).value,
+        minDPI: parseInt(sheet.getCell(row, 8).value) || 0,
+        stock: parseInt(sheet.getCell(row, 9).value) || 0,
+        status: sheet.getCell(row, 10).value,
+        precio: parseFloat(sheet.getCell(row, 11).value) || 0,
+        availableWidths: this.parseAvailableWidths(sheet.getCell(row, 12).value),
+        precioSellado: parseFloat(sheet.getCell(row, 14).value) || 0,
+        precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
+        precioOjetillos: parseFloat(sheet.getCell(row, 16).value) || 0
+      };
+    } catch (error) {
+      logger.error(`Error al extraer datos del servicio en la fila ${row}: ${error.message}`);
+      return null;
+    }
+  }
+
+
+  parseAvailableWidths(widthsString) {
+    if (!widthsString) return [];
+    return widthsString.split(',').map(w => {
+      const [material, imprimible] = w.split('-').map(s => s ? s.trim() : '');
+      return {
+        material: parseFloat(material ? material.replace('m', '') : 0) || 0,
+        imprimible: parseFloat(imprimible ? imprimible.replace('m', '') : 0) || 0
+      };
+    });
   }
 
   async getAdditionalInfo() {
@@ -147,31 +146,9 @@ class GoogleSheetService {
         tiempoPreparacion: ''
       };
   
-      // Horarios
-      ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-        const horario = sheet.getCell(index + 1, 1).value;
-        additionalInfo.horarios[dia] = horario || 'No disponible';
-      });
+      this.extractAdditionalInfo(sheet, additionalInfo);
   
-      // Zonas de despacho
-      for (let row = 1; row <= 9; row++) {
-        const zona = sheet.getCell(row, 2).value;
-        if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
-      }
-  
-      // Dirección de retiro
-      additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
-  
-      // Promoción del día
-      additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
-  
-      // Métodos de pago
-      additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
-  
-      // Tiempos de preparación
-      additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
-  
-      logger.info("Información adicional cargada completamente:", JSON.stringify(additionalInfo, null, 2));
+      logger.info("Información adicional cargada completamente");
   
       return additionalInfo;
     } catch (err) {
@@ -180,59 +157,33 @@ class GoogleSheetService {
     }
   }
 
+  extractAdditionalInfo(sheet, additionalInfo) {
+    ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
+      additionalInfo.horarios[dia] = sheet.getCell(index + 1, 1).value || 'No disponible';
+    });
+  
+    for (let row = 1; row <= 9; row++) {
+      const zona = sheet.getCell(row, 2).value;
+      if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
+    }
+  
+    additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
+    additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
+    additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
+    additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
+  }
+
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
       await this.doc.loadInfo();
-      logger.info('Información del documento cargada exitosamente');
-      
       const sheet = this.doc.sheetsByIndex[1];
-      logger.info(`Hoja seleccionada: ${sheet.title}`);
-      
       await sheet.loadCells();
-      logger.info('Celdas de la hoja cargadas exitosamente');
   
-      const formattedDate = moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd');
-      const censoredPhone = this.censorPhoneNumber(data.telefono);
-  
-      const rowData = [
-        formattedDate,
-        censoredPhone,
-        data.nombre,
-        data.correo || '',
-        data.pedido,
-        data.archivos || '',
-        data.total,
-        "Nueva cotización"
-      ];
-  
-      logger.info(`Datos de fila preparados para inserción: ${JSON.stringify(rowData)}`);
-  
+      const rowData = this.prepareRowData(data);
       const result = await sheet.addRows([rowData]);
-      
-      logger.info(`Tipo de resultado: ${typeof result}`);
-      logger.info(`¿Es un array? ${Array.isArray(result)}`);
-      logger.info(`Longitud del resultado: ${result.length}`);
   
-      if (Array.isArray(result) && result.length > 0) {
-        const firstRow = result[0];
-        logger.info(`Tipo de la primera fila: ${typeof firstRow}`);
-        
-        const safeProperties = {
-          rowIndex: firstRow.rowIndex,
-          rowNumber: firstRow._rowNumber || firstRow.rowNumber,
-        };
-        
-        logger.info(`Propiedades seguras de la primera fila: ${JSON.stringify(safeProperties)}`);
-        
-        const rowIndex = safeProperties.rowIndex || safeProperties.rowNumber || sheet.rowCount;
-        logger.info(`Fila añadida exitosamente. ID de la nueva fila: ${rowIndex}`);
-  
-        return { success: true, message: "Cotización guardada exitosamente", rowIndex: rowIndex };
-      } else {
-        logger.warn("No se pudo obtener información de la fila añadida");
-        return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
-      }
+      return this.processAddRowResult(result, sheet);
     } catch (err) {
       logger.error("Error detallado al guardar la cotización en Google Sheets:", err.message);
       logger.error("Stack trace:", err.stack);
@@ -240,25 +191,47 @@ class GoogleSheetService {
     }
   }
 
-  censorPhoneNumber(phoneNumber) {
-    if (phoneNumber.length <= 5) {
-      return phoneNumber;
+  prepareRowData(data) {
+    const formattedDate = moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd');
+    const censoredPhone = this.censorPhoneNumber(data.telefono);
+    return [
+      formattedDate,
+      censoredPhone,
+      data.nombre,
+      data.correo || '',
+      data.pedido,
+      data.archivos || '',
+      data.total,
+      "Nueva cotización"
+    ];
+  }
+
+  processAddRowResult(result, sheet) {
+    if (Array.isArray(result) && result.length > 0) {
+      const firstRow = result[0];
+      const rowIndex = firstRow.rowIndex || firstRow._rowNumber || sheet.rowCount;
+      logger.info(`Fila añadida exitosamente. ID de la nueva fila: ${rowIndex}`);
+      return { success: true, message: "Cotización guardada exitosamente", rowIndex: rowIndex };
+    } else {
+      logger.warn("No se pudo obtener información de la fila añadida");
+      return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
     }
+  }
+
+  censorPhoneNumber(phoneNumber) {
+    if (phoneNumber.length <= 5) return phoneNumber;
     const firstTwo = phoneNumber.slice(0, 2);
     const lastThree = phoneNumber.slice(-3);
     const middleLength = phoneNumber.length - 5;
-    const censoredMiddle = '*'.repeat(middleLength);
-    return `${firstTwo}${censoredMiddle}${lastThree}`;
+    return `${firstTwo}${'*'.repeat(middleLength)}${lastThree}`;
   }
 
   async reinitialize() {
     try {
       logger.info("Reinicializando servicios e información adicional");
-      await this.loadServicesWithRetry();
-      await this.loadAdditionalInfoWithRetry();
+      await this.retryOperation(() => this.loadServicesWithRetry());
+      await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
       logger.info("Servicios e información adicional reinicializados correctamente");
-      logger.info(`Servicios actualizados: ${JSON.stringify(this.services)}`);
-      logger.info(`Información adicional actualizada: ${JSON.stringify(this.additionalInfo)}`);
     } catch (error) {
       logger.error(`Error al reinicializar SheetService: ${error.message}`);
       throw new CustomError('SheetServiceReinitError', 'Error al reinicializar el servicio de Google Sheets', error);

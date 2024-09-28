@@ -1,3 +1,5 @@
+// services/fileValidationService.js
+
 import fs from 'fs';
 import { promisify } from 'util';
 import path from 'path';
@@ -5,8 +7,17 @@ import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 import config from '../config/config.js';
 import sharp from 'sharp';
-import pdf from 'pdf-parse';
-import { fileTypeFromFile } from 'file-type';
+
+// Importar createRequire para usar require en ES Modules
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+// Importar pdf-parse utilizando require
+const pdfParse = require('pdf-parse');
+
+// Importar file-type
+import fileType from 'file-type';
+const { fileTypeFromFile } = fileType;
 
 const readFile = promisify(fs.readFile);
 
@@ -17,13 +28,20 @@ class FileValidationService {
 
   async initialize() {
     logger.info('FileValidationService inicializado');
+    // Ya no es necesario importar pdf-parse dinámicamente
   }
 
   async validateFile(filePath, service) {
     try {
-      const fileType = await fileTypeFromFile(filePath);
-      const fileExtension = path.extname(filePath).toLowerCase().slice(1);
-      
+      const fileTypeResult = await fileTypeFromFile(filePath);
+
+      let fileExtension;
+      if (fileTypeResult) {
+        fileExtension = fileTypeResult.ext;
+      } else {
+        fileExtension = path.extname(filePath).toLowerCase().slice(1);
+      }
+
       if (!this.supportedFormats.includes(fileExtension)) {
         throw new CustomError('UnsupportedFormatError', `Formato de archivo no soportado: ${fileExtension}`);
       }
@@ -37,6 +55,10 @@ class FileValidationService {
         fileInfo = { format: fileExtension };
       }
 
+      if (fileTypeResult) {
+        fileInfo.mimeType = fileTypeResult.mime;
+      }
+
       return this.checkFileRequirements(fileInfo, service);
     } catch (error) {
       logger.error(`Error al validar el archivo: ${error.message}`);
@@ -47,7 +69,7 @@ class FileValidationService {
   async validateImage(filePath) {
     const image = sharp(filePath);
     const metadata = await image.metadata();
-    
+
     return {
       format: metadata.format,
       width: metadata.width,
@@ -58,19 +80,25 @@ class FileValidationService {
   }
 
   async validatePDF(filePath) {
-    const dataBuffer = await readFile(filePath);
-    const data = await pdf(dataBuffer);
-    
-    const width = data.pages[0].width * (72 / 25.4); // Convertir a mm
-    const height = data.pages[0].height * (72 / 25.4); // Convertir a mm
-    
-    return {
-      format: 'pdf',
-      width,
-      height,
-      dpi: 72,
-      pages: data.numpages
-    };
+    try {
+      const dataBuffer = await readFile(filePath);
+      const data = await pdfParse(dataBuffer);
+
+      // Asumiendo que data.metadata contiene width y height
+      const width = data.metadata?.width || 0;
+      const height = data.metadata?.height || 0;
+
+      return {
+        format: 'pdf',
+        width,
+        height,
+        dpi: 72, // Asumir 72 DPI si no se puede obtener
+        pages: data.numpages
+      };
+    } catch (error) {
+      logger.error(`Error al validar PDF: ${error.message}`);
+      throw new CustomError('PDFValidationError', 'Error al validar el archivo PDF', error);
+    }
   }
 
   checkFileRequirements(fileInfo, service) {

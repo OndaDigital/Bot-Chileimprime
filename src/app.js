@@ -18,14 +18,16 @@ const initializeServices = async () => {
 
   try {
     await sheetService.initialize();
+    await fileValidationService.initialize();
     services = await sheetService.getServices();
     additionalInfo = await sheetService.getAdditionalInfo();
     
-    userContextManager.setGlobalData(services, additionalInfo);
-
-    logger.info("Servicios e información adicional inicializados correctamente");
-    logger.info(`Servicios (truncado): ${JSON.stringify(services).substring(0, 100)}...`);
-    logger.info(`Info adicional (truncada): ${JSON.stringify(additionalInfo).substring(0, 100)}...`);
+    if (services && additionalInfo) {
+      userContextManager.setGlobalData(services, additionalInfo);
+      logger.info("Servicios e información adicional inicializados correctamente");
+    } else {
+      throw new Error("No se pudieron obtener los servicios o la información adicional");
+    }
   } catch (error) {
     logger.error(`Error al inicializar servicios: ${error.message}`);
     logger.warn("Iniciando con funcionalidad reducida");
@@ -40,13 +42,11 @@ const main = async () => {
 
     const flows = await flowManager.initializeFlows();
 
-    // Aplicar middleware a todos los flujos
     flows.forEach(flow => {
       flow.addAction(middleware);
     });
 
     await whatsappService.initialize(flows);
-    await fileValidationService.initialize();
 
     logger.info('Bot inicializado correctamente');
 
@@ -62,8 +62,12 @@ const main = async () => {
         await sheetService.reinitialize();
         const updatedServices = await sheetService.getServices();
         const updatedAdditionalInfo = await sheetService.getAdditionalInfo();
-        userContextManager.setGlobalData(updatedServices, updatedAdditionalInfo);
-        logger.info("Servicios e información adicional actualizados correctamente");
+        if (updatedServices && updatedAdditionalInfo) {
+          userContextManager.setGlobalData(updatedServices, updatedAdditionalInfo);
+          logger.info("Servicios e información adicional actualizados correctamente");
+        } else {
+          logger.warn("No se pudieron actualizar los servicios o la información adicional");
+        }
       } catch (error) {
         logger.error(`Error al actualizar servicios e información adicional: ${error.message}`);
       }
