@@ -73,33 +73,56 @@ class GoogleSheetService {
       const sheet = this.doc.sheetsByIndex[0];
       await sheet.loadCells('A1:Q1000');
   
-        
       const services = {};
-      // Asumiendo que cada fila representa un servicio
       for (let i = 1; i < sheet.rowCount; i++) {
         const id = sheet.getCell(i, 0).value;
         if (!id) break;
   
-        services[id] = {
-          id: id,
-          category: sheet.getCell(i, 1).value,
-          type: sheet.getCell(i, 2).value,
-          name: sheet.getCell(i, 3).value,
-          sellado: sheet.getCell(i, 4).value === 'Sí',
-          ojetillos: sheet.getCell(i, 5).value === 'Sí',
-          bolsillo: sheet.getCell(i, 6).value === 'Sí',
-          format: sheet.getCell(i, 7).value,
-          minDPI: parseInt(sheet.getCell(i, 8).value),
-          stock: parseInt(sheet.getCell(i, 9).value),
-          status: sheet.getCell(i, 10).value,
-          precio: parseFloat(sheet.getCell(i, 11).value),
-          availableWidths: sheet.getCell(i, 12).value.split(',').map(w => parseFloat(w.trim())),
-          precioSellado: parseFloat(sheet.getCell(i, 14).value) || 0,
-          precioBolsillo: parseFloat(sheet.getCell(i, 15).value) || 0,
-          precioOjetillos: parseFloat(sheet.getCell(i, 16).value) || 0
+        const category = sheet.getCell(i, 1).value;
+        const type = sheet.getCell(i, 2).value;
+        const name = sheet.getCell(i, 3).value;
+        const sellado = sheet.getCell(i, 4).value === 'Sí';
+        const ojetillos = sheet.getCell(i, 5).value === 'Sí';
+        const bolsillo = sheet.getCell(i, 6).value === 'Sí';
+        const format = sheet.getCell(i, 7).value;
+        const minDPI = parseInt(sheet.getCell(i, 8).value);
+        const stock = parseInt(sheet.getCell(i, 9).value);
+        const status = sheet.getCell(i, 10).value;
+        const precio = parseFloat(sheet.getCell(i, 11).value);
+        const availableWidths = sheet.getCell(i, 12).value.split(',').map(w => {
+          const [material, imprimible] = w.split('-').map(s => s.trim());
+          return {
+            material: parseFloat(material.replace('m', '')),
+            imprimible: parseFloat(imprimible.replace('m', ''))
+          };
+        });
+        const precioSellado = parseFloat(sheet.getCell(i, 14).value) || 0;
+        const precioBolsillo = parseFloat(sheet.getCell(i, 15).value) || 0;
+        const precioOjetillos = parseFloat(sheet.getCell(i, 16).value) || 0;
+
+        const service = {
+          id,
+          category,
+          type,
+          name,
+          sellado,
+          ojetillos,
+          bolsillo,
+          format,
+          minDPI,
+          stock,
+          status,
+          precio,
+          availableWidths,
+          precioSellado,
+          precioBolsillo,
+          precioOjetillos
         };
-  
-        services[service.name] = service;
+
+        if (!services[category]) {
+          services[category] = [];
+        }
+        services[category].push(service);
       }
   
       return services;
@@ -157,17 +180,6 @@ class GoogleSheetService {
     }
   }
 
-  censorPhoneNumber(phoneNumber) {
-    if (phoneNumber.length <= 5) {
-      return phoneNumber;
-    }
-    const firstTwo = phoneNumber.slice(0, 2);
-    const lastThree = phoneNumber.slice(-3);
-    const middleLength = phoneNumber.length - 5;
-    const censoredMiddle = '*'.repeat(middleLength);
-    return `${firstTwo}${censoredMiddle}${lastThree}`;
-  }
-
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
@@ -205,7 +217,6 @@ class GoogleSheetService {
         const firstRow = result[0];
         logger.info(`Tipo de la primera fila: ${typeof firstRow}`);
         
-        // Extraer propiedades seguras individualmente
         const safeProperties = {
           rowIndex: firstRow.rowIndex,
           rowNumber: firstRow._rowNumber || firstRow.rowNumber,
@@ -226,6 +237,17 @@ class GoogleSheetService {
       logger.error("Stack trace:", err.stack);
       throw new CustomError('OrderSaveError', `Error al guardar la cotización: ${err.message}`, err);
     }
+  }
+
+  censorPhoneNumber(phoneNumber) {
+    if (phoneNumber.length <= 5) {
+      return phoneNumber;
+    }
+    const firstTwo = phoneNumber.slice(0, 2);
+    const lastThree = phoneNumber.slice(-3);
+    const middleLength = phoneNumber.length - 5;
+    const censoredMiddle = '*'.repeat(middleLength);
+    return `${firstTwo}${censoredMiddle}${lastThree}`;
   }
 
   async reinitialize() {

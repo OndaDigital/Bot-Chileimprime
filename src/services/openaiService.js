@@ -16,7 +16,7 @@ class OpenAIService {
         model: config.languageModel,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: context }
+          ...context
         ],
         max_tokens: config.maxTokens,
         temperature: config.temperature,
@@ -29,44 +29,14 @@ class OpenAIService {
     }
   }
 
-  async validateFileContent(fileContent, fileType, service) {
-    const systemPrompt = `
-      Eres un experto en validación de archivos para servicios de impresión.
-      Tu tarea es analizar el contenido del archivo y determinar si cumple con los requisitos para el servicio de impresión especificado.
-      Debes proporcionar un resultado en el siguiente formato JSON:
+  getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
+    const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
 
-      {
-        "isValid": booleano,
-        "reason": "Explicación detallada de por qué el archivo es válido o no"
-      }
-
-      Criterios de validación:
-      1. El formato del archivo debe coincidir con el formato requerido por el servicio.
-      2. La resolución (DPI) debe ser igual o superior al mínimo requerido por el servicio.
-      3. Las dimensiones del archivo deben ser apropiadas para el servicio solicitado.
-
-      Servicio solicitado:
-      ${JSON.stringify(service, null, 2)}
-
-      Contenido del archivo (primeros 1000 caracteres):
-      ${fileContent.substring(0, 1000)}
-    `;
-
-    try {
-      const response = await this.getChatCompletion(systemPrompt, "Valida este archivo");
-      return JSON.parse(response);
-    } catch (error) {
-      logger.error("Error al validar el contenido del archivo:", error);
-      return { isValid: false, reason: "Error en la validación del archivo" };
-    }
-  }
-
-  getSystemPrompt(services, currentOrder, additionalInfo) {
     return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileValidation}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -113,17 +83,13 @@ class OpenAIService {
 
     5. Subida y Validación de Archivos:
        - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
-       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
+       - Cuando haya un fileValidation en currentOrder, evalúa su validez considerando:
          a) El servicio seleccionado
          b) Las medidas especificadas
-         c) El resultado del análisis del archivo (formato, DPI, dimensiones)
-       - Criterios de validación:
-         ${JSON.stringify(currentOrder.fileValidationCriteria, null, 2)}
-       - Explica detalladamente si el archivo es válido o no, y por qué.
-       - Si el archivo es válido, responde con el comando JSON:
-         {"command": "VALIDATE_FILE", "isValid": true}
-       - Si no es válido, proporciona instrucciones claras sobre cómo corregirlo y responde:
-         {"command": "VALIDATE_FILE", "isValid": false, "reason": "[Explicación]"}
+         c) El resultado del análisis del archivo
+       - Si el archivo es válido, informa al cliente y procede con la confirmación del pedido.
+       - Si no es válido, explica las razones y proporciona instrucciones claras sobre cómo corregirlo.
+         Pide al cliente que envíe un nuevo archivo que cumpla con las especificaciones.
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
@@ -149,7 +115,32 @@ class OpenAIService {
     Información adicional (NO la menciones a menos que sea solicitada):
     ${JSON.stringify(additionalInfo, null, 2)}
 
+    Contexto de la conversación:
+    ${contextStr}
+
     Responde al siguiente mensaje del cliente:`;
+  }
+
+  async transcribeAudio(audioFilePath) {
+    try {
+      const stats = await fsPromises.stat(audioFilePath);
+      if (stats.size > config.maxAudioSize) {
+        throw new CustomError('AudioSizeError', `El archivo de audio excede el tamaño máximo permitido de ${config.maxAudioSize / (1024 * 1024)} MB`);
+      }
+
+      const response = await this.openai.audio.transcriptions.create({
+        file: fs.createReadStream(audioFilePath),
+        model: "whisper-1",
+      });
+      logger.info(`Audio transcrito exitosamente: ${audioFilePath}`);
+      return response.text;
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      logger.error(`Error al transcribir audio: ${error.message}`);
+      throw new CustomError('TranscriptionError', 'Error al transcribir el audio', error);
+    }
   }
 }
 

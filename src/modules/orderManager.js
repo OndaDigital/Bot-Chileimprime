@@ -3,6 +3,7 @@ import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
 import moment from 'moment-timezone';
 import config from '../config/config.js';
 import sheetService from '../services/sheetService.js';
+import userContextManager from './userContext.js';
 import { CustomError } from '../utils/errorHandler.js';
 
 class OrderManager {
@@ -10,215 +11,228 @@ class OrderManager {
     this.orderConfirmed = new Set();
   }
 
-  calculateOrder(order) {
-    let total = 0;
-    const calculatedItems = order.items.map(item => {
-      let subtotal = 0;
-      if (item.width && item.height) {
-        const area = item.width * item.height;
-        subtotal = area * item.precio * item.quantity;
-      } else {
-        subtotal = item.precio * item.quantity;
-      }
-      
-      if (item.sellado) subtotal += item.precioSellado * (item.width * item.height);
-      if (item.ojetillos) subtotal += item.precioOjetillos * (item.width * item.height);
-      if (item.bolsillo) subtotal += item.precioBolsillo * (item.width * item.height);
-      
-      total += subtotal;
-      return { ...item, subtotal };
-    });
-
-    return {
-      items: calculatedItems,
-      total,
-      observaciones: order.observaciones
-    };
-  }
-
-  formatOrderSummary(order) {
-    let summary = "📋 Resumen final de tu cotización:\n\n";
-
-    order.items.forEach(item => {
-      summary += `*${item.categoria}* - ${item.nombre}\n`;
-      if (item.width && item.height) {
-        summary += `Medidas: ${item.width}m x ${item.height}m\n`;
-      }
-      summary += `Cantidad: ${item.quantity}\n`;
-      if (item.sellado) summary += "- Con sellado\n";
-      if (item.ojetillos) summary += "- Con ojetillos\n";
-      if (item.bolsillo) summary += "- Con bolsillo\n";
-      summary += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
-    });
-
-    summary += `💰 Total: $${formatPrice(order.total)}\n`;
-
-    if (order.observaciones) {
-      summary += `\nObservaciones: ${order.observaciones}\n`;
-    }
-
-    return summary;
-  }
-
   async updateOrder(userId, jsonCommand, services, currentOrder) {
     logger.info(`Actualizando orden para usuario ${userId}. Comando: ${JSON.stringify(jsonCommand)}`);
     try {
       switch (jsonCommand.command) {
         case "SELECT_SERVICE":
-          currentOrder.service = jsonCommand.service;
-          currentOrder.category = services[jsonCommand.service].category;
-          currentOrder.availableWidths = services[jsonCommand.service].availableWidths;
-          currentOrder.availableFinishes = services[jsonCommand.service].availableFinishes;
-          return { action: "SELECT_SERVICE", order: currentOrder };
+          return this.handleSelectService(userId, jsonCommand.service);
         case "SET_MEASURES":
-          if (!currentOrder.items) currentOrder.items = [];
-          currentOrder.items.push({
-            categoria: currentOrder.category,
-            nombre: currentOrder.service,
-            width: jsonCommand.width,
-            height: jsonCommand.height,
-            precio: services[currentOrder.service].precio
-          });
-          return { action: "SET_MEASURES", order: currentOrder };
+          return this.handleSetMeasures(userId, jsonCommand.width, jsonCommand.height);
         case "SET_QUANTITY":
-          if (currentOrder.items && currentOrder.items.length > 0) {
-            currentOrder.items[currentOrder.items.length - 1].quantity = jsonCommand.quantity;
-          }
-          return { action: "SET_QUANTITY", order: currentOrder };
+          return this.handleSetQuantity(userId, jsonCommand.quantity);
         case "SET_FINISHES":
-          if (currentOrder.items && currentOrder.items.length > 0) {
-            const currentItem = currentOrder.items[currentOrder.items.length - 1];
-            currentItem.sellado = jsonCommand.sellado;
-            currentItem.ojetillos = jsonCommand.ojetillos;
-            currentItem.bolsillo = jsonCommand.bolsillo;
-            currentItem.precioSellado = services[currentOrder.service].precioSellado;
-            currentItem.precioOjetillos = services[currentOrder.service].precioOjetillos;
-            currentItem.precioBolsillo = services[currentOrder.service].precioBolsillo;
-          }
-          return { action: "SET_FINISHES", order: currentOrder };
+          return this.handleSetFinishes(userId, jsonCommand.sellado, jsonCommand.ojetillos, jsonCommand.bolsillo);
         case "VALIDATE_FILE":
-          currentOrder.fileValidation = {
-            isValid: jsonCommand.isValid,
-            reason: jsonCommand.reason
-          };
-          return { action: "VALIDATE_FILE", order: currentOrder };
-        case "CONFIRM_ORDER":
-          return { action: "CONFIRMAR_PEDIDO", order: currentOrder };
-        default:
-          logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
-          return { action: "CONTINUAR", order: currentOrder };
+          return this.handleValidateFile(userId, jsonCommand.isValid, jsonCommand.reason);
+          case "CONFIRM_ORDER":
+            return this.handleConfirmOrder(userId);
+          default:
+            logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
+            return { action: "CONTINUAR", order: currentOrder };
+        }
+      } catch (error) {
+        logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
+        throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
       }
-    } catch (error) {
-      logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
     }
-  }
-
-  async finalizeOrder(userId, userName, order) {
-    logger.info(`Finalizando orden para usuario ${userId}`);
-    
-    const calculatedOrder = this.calculateOrder(order);
-    logger.info(`Orden calculada para usuario ${userId}: ${JSON.stringify(calculatedOrder)}`);
-    const formattedOrder = this.formatOrderForSheet(calculatedOrder);
-    logger.info(`Orden formateada para hoja de cálculo, usuario ${userId}: ${JSON.stringify(formattedOrder)}`);
   
-    const finalOrder = {
-      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
-      telefono: userId,
-      nombre: userName || 'Cliente',
-      pedido: formattedOrder.details,
-      observaciones: order.observaciones || 'Sin observaciones',
-      total: formattedOrder.total
-    };
+    handleSelectService(userId, serviceName) {
+      const userContext = userContextManager.getUserContext(userId);
+      userContextManager.updateCurrentOrder(userId, { service: serviceName });
+      const serviceInfo = userContextManager.getServiceInfo(serviceName);
+      
+      return {
+        action: "SELECT_SERVICE",
+        order: userContext.currentOrder,
+        serviceInfo: serviceInfo
+      };
+    }
   
-    logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
+    handleSetMeasures(userId, width, height) {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
   
-    try {
-      const result = await sheetService.saveOrder(finalOrder);
-      logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
-
-      if (result.success) {
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
+      }
+  
+      const validWidth = serviceInfo.availableWidths.find(w => w.material === width);
+      if (!validWidth) {
+        throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
+      }
+  
+      if (height <= 1) {
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
+      }
+  
+      userContextManager.updateCurrentOrder(userId, {
+        measures: { width: validWidth.material, height: height }
+      });
+  
+      return {
+        action: "SET_MEASURES",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleSetQuantity(userId, quantity) {
+      if (quantity <= 0) {
+        throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
+      }
+  
+      userContextManager.updateCurrentOrder(userId, { quantity: quantity });
+      const userContext = userContextManager.getUserContext(userId);
+  
+      return {
+        action: "SET_QUANTITY",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+  
+      const finishes = {
+        sellado: sellado && serviceInfo.sellado,
+        ojetillos: ojetillos && serviceInfo.ojetillos,
+        bolsillo: bolsillo && serviceInfo.bolsillo
+      };
+  
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+  
+      return {
+        action: "SET_FINISHES",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleValidateFile(userId, isValid, reason) {
+      userContextManager.updateCurrentOrder(userId, {
+        fileValidation: { isValid, reason }
+      });
+  
+      const userContext = userContextManager.getUserContext(userId);
+  
+      return {
+        action: "VALIDATE_FILE",
+        order: userContext.currentOrder
+      };
+    }
+  
+    async handleConfirmOrder(userId) {
+      const userContext = userContextManager.getUserContext(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        throw new CustomError('IncompleteOrderError', 'La orden no está completa');
+      }
+  
+      const total = userContextManager.calculatePrice(userId);
+      userContextManager.updateCurrentOrder(userId, { total: total });
+  
+      try {
+        const orderSummary = this.formatOrderSummary(userContext.currentOrder);
+        const result = await this.finalizeOrder(userId, userContext.currentOrder);
+  
         this.orderConfirmed.add(userId);
-        logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
-        
-        return { 
-          confirmationMessage: "*¡Gracias!* 🎉 Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales. 📞",
-          orderSummary: this.formatOrderSummary(calculatedOrder),
-          endConversation: true
+  
+        return {
+          action: "CONFIRMAR_PEDIDO",
+          order: userContext.currentOrder,
+          summary: orderSummary,
+          result: result
         };
-      } else {
-        throw new Error("Error al guardar la cotización");
+      } catch (error) {
+        logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
+        throw new CustomError('OrderConfirmationError', 'Error al confirmar el pedido', error);
       }
-    } catch (error) {
-      logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
-      throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
+    }
+  
+    formatOrderSummary(order) {
+      let summary = "📋 Resumen final de tu cotización:\n\n";
+  
+      const serviceInfo = userContextManager.getServiceInfo(order.service);
+      summary += `*Servicio:* ${order.service} (${serviceInfo.category})\n`;
+  
+      if (order.measures) {
+        summary += `*Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
+      }
+  
+      summary += `*Cantidad:* ${order.quantity}\n`;
+  
+      if (order.finishes) {
+        summary += "*Terminaciones:*\n";
+        if (order.finishes.sellado) summary += "- Sellado\n";
+        if (order.finishes.ojetillos) summary += "- Ojetillos\n";
+        if (order.finishes.bolsillo) summary += "- Bolsillo\n";
+      }
+  
+      summary += `\n💰 *Total:* $${formatPrice(order.total)}\n`;
+  
+      return summary;
+    }
+  
+    async finalizeOrder(userId, order) {
+      logger.info(`Finalizando orden para usuario ${userId}`);
+      
+      const finalOrder = {
+        fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
+        telefono: userId,
+        nombre: order.userName || 'Cliente',
+        pedido: this.formatOrderForSheet(order),
+        observaciones: order.observaciones || 'Sin observaciones',
+        total: `$${formatPrice(order.total)}`
+      };
+    
+      logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
+    
+      try {
+        const result = await sheetService.saveOrder(finalOrder);
+        logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
+  
+        if (result.success) {
+          logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
+          return { 
+            success: true,
+            message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
+            orderNumber: result.rowIndex
+          };
+        } else {
+          throw new Error("Error al guardar la cotización");
+        }
+      } catch (error) {
+        logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
+        throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
+      }
+    }
+  
+    formatOrderForSheet(order) {
+      let details = `Servicio: ${order.service}\n`;
+      
+      if (order.measures) {
+        details += `Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
+      }
+      
+      details += `Cantidad: ${order.quantity}\n`;
+      
+      if (order.finishes) {
+        details += "Terminaciones:\n";
+        if (order.finishes.sellado) details += "- Sellado\n";
+        if (order.finishes.ojetillos) details += "- Ojetillos\n";
+        if (order.finishes.bolsillo) details += "- Bolsillo\n";
+      }
+      
+      return details.trim();
+    }
+  
+    isOrderConfirmed(userId) {
+      return this.orderConfirmed.has(userId);
+    }
+  
+    resetOrder(userId) {
+      this.orderConfirmed.delete(userId);
     }
   }
-
-  formatOrderForSheet(order) {
-    let details = '';
-    let total = 0;
-    
-    order.items.forEach(item => {
-      details += `${item.categoria} - ${item.nombre}\n`;
-      if (item.width && item.height) {
-        details += `Medidas: ${item.width}m x ${item.height}m\n`;
-      }
-      details += `Cantidad: ${item.quantity}\n`;
-      if (item.sellado) details += "- Con sellado\n";
-      if (item.ojetillos) details += "- Con ojetillos\n";
-      if (item.bolsillo) details += "- Con bolsillo\n";
-      details += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
-      total += item.subtotal;
-    });
-    
-    return {
-      details: details.trim(),
-      total: `$${formatPrice(total)}`
-    };
-  }
-
-  estimateTotal(order) {
-    let total = 0;
-    order.items.forEach(item => {
-      let itemTotal = item.precio * item.quantity;
-      if (item.width && item.height) {
-        const area = item.width * item.height;
-        itemTotal = area * item.precio * item.quantity;
-      }
-      if (item.sellado) itemTotal += item.precioSellado * (item.width * item.height);
-      if (item.ojetillos) itemTotal += item.precioOjetillos * (item.width * item.height);
-      if (item.bolsillo) itemTotal += item.precioBolsillo * (item.width * item.height);
-      total += itemTotal;
-    });
-    return formatPrice(total);
-  }
-
-  calculatePrice(order, services) {
-    let total = 0;
-    const service = services[order.service];
-
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(order.category)) {
-      const area = order.measures.width * order.measures.height;
-      total = area * service.precio * order.quantity;
-    } else {
-      total = service.precio * order.quantity;
-    }
-
-    if (order.finishes.sellado) total += service.precioSellado * order.quantity;
-    if (order.finishes.ojetillos) total += service.precioOjetillos * order.quantity;
-    if (order.finishes.bolsillo) total += service.precioBolsillo * order.quantity;
-
-    return total;
-  }
-
-  isOrderConfirmed(userId) {
-    return this.orderConfirmed.has(userId);
-  }
-
-  resetOrder(userId) {
-    this.orderConfirmed.delete(userId);
-  }
-}
-
-export default new OrderManager();
+  
+  export default new OrderManager();

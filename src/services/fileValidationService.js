@@ -6,6 +6,7 @@ import { CustomError } from '../utils/errorHandler.js';
 import config from '../config/config.js';
 import sharp from 'sharp';
 import pdf from 'pdf-parse';
+import { fileTypeFromFile } from 'file-type';
 
 const readFile = promisify(fs.readFile);
 
@@ -15,13 +16,14 @@ class FileValidationService {
   }
 
   async initialize() {
-    // Cualquier inicialización necesaria
     logger.info('FileValidationService inicializado');
   }
 
   async validateFile(filePath, service) {
     try {
+      const fileType = await fileTypeFromFile(filePath);
       const fileExtension = path.extname(filePath).toLowerCase().slice(1);
+      
       if (!this.supportedFormats.includes(fileExtension)) {
         throw new CustomError('UnsupportedFormatError', `Formato de archivo no soportado: ${fileExtension}`);
       }
@@ -50,7 +52,8 @@ class FileValidationService {
       format: metadata.format,
       width: metadata.width,
       height: metadata.height,
-      dpi: metadata.density || 72, // Si no se especifica, asumimos 72 DPI
+      dpi: metadata.density || 72,
+      colorSpace: metadata.space
     };
   }
 
@@ -58,7 +61,6 @@ class FileValidationService {
     const dataBuffer = await readFile(filePath);
     const data = await pdf(dataBuffer);
     
-    // Asumimos que el PDF está en puntos (72 DPI)
     const width = data.pages[0].width * (72 / 25.4); // Convertir a mm
     const height = data.pages[0].height * (72 / 25.4); // Convertir a mm
     
@@ -82,32 +84,30 @@ class FileValidationService {
     }
 
     // Verificar DPI
-    if (fileInfo.dpi < service.minDPI) {
+    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
+    let requiredDPI;
+    if (area < 2) {
+      requiredDPI = 150;
+    } else if (area > 20) {
+      requiredDPI = 72;
+    } else {
+      requiredDPI = 120;
+    }
+
+    if (fileInfo.dpi < requiredDPI) {
       isValid = false;
-      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la mínima requerida (${service.minDPI} DPI). `;
+      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la requerida (${requiredDPI} DPI) para un área de ${area.toFixed(2)} m². `;
     }
 
-    // Verificar tamaño
-    if (service.category === 'Telas PVC' || service.category === 'Banderas' || 
-        service.category === 'Adhesivos' || service.category === 'Adhesivo Vehicular' || 
-        service.category === 'Back Light') {
-      const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
-      if (area < 1) {
-        isValid = false;
-        reason += `El tamaño del archivo (${area.toFixed(2)} m²) es menor que el mínimo requerido (1 m²). `;
-      }
-      if (area > 20 && fileInfo.dpi < 72) {
-        isValid = false;
-        reason += `Para archivos mayores a 20 m², se requiere una resolución mínima de 72 DPI. `;
-      }
-    }
-
-    // Verificar color (solo para imágenes)
+    // Verificar color space (solo para imágenes)
     if (['jpg', 'jpeg', 'png'].includes(fileInfo.format.toLowerCase())) {
-      if (fileInfo.space !== 'cmyk') {
-        reason += 'Recomendación: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
+      if (fileInfo.colorSpace !== 'cmyk') {
+        reason += 'Advertencia: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
       }
     }
+
+    // Verificar acabados de impresión (esto requeriría un análisis más profundo del contenido del archivo)
+    reason += 'Nota: Asegúrese de que los acabados de impresión (cortes, perforaciones, etc.) estén marcados con líneas punteadas color magenta. ';
 
     return {
       isValid,
