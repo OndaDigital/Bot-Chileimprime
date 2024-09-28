@@ -1,29 +1,38 @@
-// modules/userContext.js
-
 import logger from '../utils/logger.js';
 
 class UserContextManager {
   constructor() {
     this.userContexts = new Map();
-    this.globalMenu = null;
-    this.globalAdditionalInfo = null;
+    this.services = null;
+    this.additionalInfo = null;
   }
 
-  setGlobalData(menu, additionalInfo) {
-    this.globalMenu = menu;
-    this.globalAdditionalInfo = additionalInfo;
+
+  setGlobalData(services, additionalInfo) {
+    this.services = services;
+    this.additionalInfo = additionalInfo;
     logger.info('Datos globales actualizados en UserContextManager');
-    logger.info(`Menú global: ${JSON.stringify(this.globalMenu)}`);
-    logger.info(`Información adicional global: ${JSON.stringify(this.globalAdditionalInfo)}`);
   }
 
   getUserContext(userId) {
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
         context: "",
-        currentOrder: { items: [] },
-        menu: this.globalMenu,
-        additionalInfo: this.globalAdditionalInfo
+        currentOrder: {
+          service: null,
+          category: null,
+          type: null,
+          measures: null,
+          finishes: null,
+          quantity: null,
+          filePath: null,
+          fileAnalysis: null,
+          availableWidths: [],
+          availableFinishes: [],
+          fileValidationCriteria: {}
+        },
+        services: this.services,
+        additionalInfo: this.additionalInfo
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
@@ -46,17 +55,34 @@ class UserContextManager {
     }
   }
 
+  updateCurrentOrder(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder = { ...userContext.currentOrder, ...updates };
+    
+    // Actualizar fileValidationCriteria basado en el servicio seleccionado
+    if (updates.service) {
+      const serviceInfo = this.services[updates.service];
+      userContext.currentOrder.fileValidationCriteria = {
+        format: serviceInfo.format,
+        minDPI: serviceInfo.minDPI,
+        // Agregar más criterios según sea necesario
+      };
+    }
+    
+    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+  }
+
   resetContext(userId) {
     this.userContexts.delete(userId);
     logger.info(`Contexto reiniciado para usuario ${userId}`);
   }
 
-  getGlobalMenu() {
-    return this.globalMenu;
+  getGlobalServices() {
+    return this.services;
   }
 
   getGlobalAdditionalInfo() {
-    return this.globalAdditionalInfo;
+    return this.additionalInfo;
   }
 }
 

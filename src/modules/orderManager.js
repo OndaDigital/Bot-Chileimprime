@@ -194,6 +194,24 @@ class OrderManager {
     return formatPrice(total);
   }
 
+  calculatePrice(order, services) {
+    let total = 0;
+    const service = services[order.service];
+
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(order.category)) {
+      const area = order.measures.width * order.measures.height;
+      total = area * service.precio * order.quantity;
+    } else {
+      total = service.precio * order.quantity;
+    }
+
+    if (order.finishes.sellado) total += service.precioSellado * order.quantity;
+    if (order.finishes.ojetillos) total += service.precioOjetillos * order.quantity;
+    if (order.finishes.bolsillo) total += service.precioBolsillo * order.quantity;
+
+    return total;
+  }
+
   isOrderConfirmed(userId) {
     return this.orderConfirmed.has(userId);
   }

@@ -176,19 +176,40 @@ class FlowManager {
     await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ¿Qué medidas necesitas para este servicio?`);
   }
 
-  async handleSetMeasures(ctx, flowDynamic, order) {
-    await flowDynamic(`Medidas registradas: *${order.width}m de ancho x ${order.height}m de alto*. ¿Cuántas unidades necesitas?`);
+  async handleSetMeasures(command, userContext, flowDynamic) {
+    if (userContext.currentOrder.category === 'Telas PVC' || 
+        userContext.currentOrder.category === 'Banderas' || 
+        userContext.currentOrder.category === 'Adhesivos' || 
+        userContext.currentOrder.category === 'Adhesivo Vehicular' || 
+        userContext.currentOrder.category === 'Back Light') {
+      userContextManager.updateCurrentOrder(userContext.userId, {
+        measures: { width: command.width, height: command.height }
+      });
+      await flowDynamic(`Medidas registradas: *${command.width}m de ancho x ${command.height}m de alto*. ¿Cuántas unidades necesitas?`);
+    } else {
+      await flowDynamic(`Este servicio no requiere medidas personalizadas. ¿Cuántas unidades necesitas?`);
+    }
   }
 
-  async handleSetQuantity(ctx, flowDynamic, order) {
-    await flowDynamic(`Cantidad registrada: *${order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+  async handleSetQuantity(command, userContext, flowDynamic) {
+    userContextManager.updateCurrentOrder(userContext.userId, {
+      quantity: command.quantity
+    });
+    await flowDynamic(`Cantidad registrada: *${command.quantity} unidades*. ¿Necesitas algún acabado especial?`);
   }
 
-  async handleSetFinishes(ctx, flowDynamic, order) {
+  async handleSetFinishes(command, userContext, flowDynamic) {
+    userContextManager.updateCurrentOrder(userContext.userId, {
+      finishes: {
+        sellado: command.sellado,
+        ojetillos: command.ojetillos,
+        bolsillo: command.bolsillo
+      }
+    });
     const finishes = [];
-    if (order.sellado) finishes.push("sellado");
-    if (order.ojetillos) finishes.push("ojetillos");
-    if (order.bolsillo) finishes.push("bolsillo");
+    if (command.sellado) finishes.push("sellado");
+    if (command.ojetillos) finishes.push("ojetillos");
+    if (command.bolsillo) finishes.push("bolsillo");
     const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
     await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
   }
@@ -289,6 +310,22 @@ class FlowManager {
     } catch (error) {
       logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
       await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
+    }
+  }
+
+  async handleSelectService(command, userContext, flowDynamic) {
+    userContextManager.updateCurrentOrder(userContext.userId, {
+      service: command.service,
+      category: userContext.services[command.service].category,
+      availableWidths: userContext.services[command.service].availableWidths,
+      availableFinishes: userContext.services[command.service].availableFinishes
+    });
+
+    const serviceCategory = userContext.services[command.service].category;
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory)) {
+      await flowDynamic(`Has seleccionado el servicio: *${command.service}*. Este servicio requiere medidas. Los anchos disponibles son: ${userContext.currentOrder.availableWidths.join(', ')} metros. ¿Qué ancho necesitas?`);
+    } else {
+      await flowDynamic(`Has seleccionado el servicio: *${command.service}*. Este servicio no requiere medidas personalizadas. ¿Cuántas unidades necesitas?`);
     }
   }
 

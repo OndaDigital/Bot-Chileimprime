@@ -73,34 +73,33 @@ class GoogleSheetService {
       const sheet = this.doc.sheetsByIndex[0];
       await sheet.loadCells('A1:Q1000');
   
-      let services = {};
-      let currentRow = 1;
-  
-      while (currentRow < sheet.rowCount) {
-        const id = sheet.getCell(currentRow, 0).value;
+        
+      const services = {};
+      // Asumiendo que cada fila representa un servicio
+      for (let i = 1; i < sheet.rowCount; i++) {
+        const id = sheet.getCell(i, 0).value;
         if (!id) break;
   
-        const service = {
+        services[id] = {
           id: id,
-          category: sheet.getCell(currentRow, 1).value,
-          type: sheet.getCell(currentRow, 2).value,
-          name: sheet.getCell(currentRow, 3).value,
-          sellado: sheet.getCell(currentRow, 4).value === 'Sí',
-          ojetillos: sheet.getCell(currentRow, 5).value === 'Sí',
-          bolsillo: sheet.getCell(currentRow, 6).value === 'Sí',
-          format: sheet.getCell(currentRow, 7).value,
-          minDPI: parseInt(sheet.getCell(currentRow, 8).value),
-          stock: parseInt(sheet.getCell(currentRow, 9).value),
-          status: sheet.getCell(currentRow, 10).value,
-          precio: parseFloat(sheet.getCell(currentRow, 11).value),
-          availableWidths: sheet.getCell(currentRow, 12).value.split(',').map(w => parseFloat(w.trim())),
-          precioSellado: parseFloat(sheet.getCell(currentRow, 14).value) || 0,
-          precioBolsillo: parseFloat(sheet.getCell(currentRow, 15).value) || 0,
-          precioOjetillos: parseFloat(sheet.getCell(currentRow, 16).value) || 0
+          category: sheet.getCell(i, 1).value,
+          type: sheet.getCell(i, 2).value,
+          name: sheet.getCell(i, 3).value,
+          sellado: sheet.getCell(i, 4).value === 'Sí',
+          ojetillos: sheet.getCell(i, 5).value === 'Sí',
+          bolsillo: sheet.getCell(i, 6).value === 'Sí',
+          format: sheet.getCell(i, 7).value,
+          minDPI: parseInt(sheet.getCell(i, 8).value),
+          stock: parseInt(sheet.getCell(i, 9).value),
+          status: sheet.getCell(i, 10).value,
+          precio: parseFloat(sheet.getCell(i, 11).value),
+          availableWidths: sheet.getCell(i, 12).value.split(',').map(w => parseFloat(w.trim())),
+          precioSellado: parseFloat(sheet.getCell(i, 14).value) || 0,
+          precioBolsillo: parseFloat(sheet.getCell(i, 15).value) || 0,
+          precioOjetillos: parseFloat(sheet.getCell(i, 16).value) || 0
         };
   
         services[service.name] = service;
-        currentRow++;
       }
   
       return services;

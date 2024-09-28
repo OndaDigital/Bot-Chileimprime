@@ -29,58 +29,6 @@ class OpenAIService {
     }
   }
 
-  async extractOrder(services, aiResponse) {
-    const systemPrompt = `
-      Eres un asistente especializado en extraer información de cotizaciones de servicios de impresión.
-      Tu tarea es extraer los detalles de la cotización de la respuesta del asistente.
-      Debes proporcionar un resumen de la cotización en el siguiente formato JSON:
-
-      {
-        "items": [
-          {
-            "categoria": "Categoría del servicio",
-            "nombre": "Nombre del servicio",
-            "width": número (si aplica),
-            "height": número (si aplica),
-            "quantity": número,
-            "sellado": booleano,
-            "ojetillos": booleano,
-            "bolsillo": booleano
-          }
-        ],
-        "observaciones": "Observaciones de la cotización"
-      }
-
-      NO realices ningún cálculo. Solo extrae la información proporcionada por el asistente.
-      Si no hay cotización o la información es insuficiente, devuelve un objeto JSON con un array de items vacío.
-      NO incluyas ningún texto adicional, solo el JSON.
-    `;
-
-    const context = `
-      Servicios de impresión disponibles:
-      ${JSON.stringify(services, null, 2)}
-
-      Respuesta del asistente:
-      ${aiResponse}
-    `;
-
-    try {
-      const response = await this.getChatCompletion(systemPrompt, context);
-      let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(response);
-      } catch (parseError) {
-        logger.error("Error al analizar la respuesta JSON:", parseError);
-        logger.info("Respuesta recibida:", response);
-        parsedResponse = { items: [] };
-      }
-      return parsedResponse;
-    } catch (error) {
-      logger.error("Error al extraer la cotización:", error);
-      return { items: [] };
-    }
-  }
-
   async validateFileContent(fileContent, fileType, service) {
     const systemPrompt = `
       Eres un experto en validación de archivos para servicios de impresión.
@@ -113,8 +61,8 @@ class OpenAIService {
     }
   }
 
-  getSystemPrompt(services, additionalInfo, currentOrder) {
-    return `Eres un asistente virtual experto en servicios de impresión llamado "El Bot de la Imprenta". Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
+  getSystemPrompt(services, currentOrder, additionalInfo) {
+    return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
