@@ -135,41 +135,41 @@ class GoogleSheetService {
   async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1];
-      await sheet.loadCells('A1:C100');
+      const sheet = this.doc.sheetsByIndex[2];
+      await sheet.loadCells('A1:H11');
   
       const additionalInfo = {
         horarios: {},
-        terminaciones: [],
-        tiemposEntrega: '',
-        politicaArchivos: '',
-        informacionContacto: ''
+        zonasDespacho: [],
+        direccionRetiro: '',
+        promocionDia: '',
+        metodosPago: '',
+        tiempoPreparacion: ''
       };
   
       // Horarios
-      for (let row = 1; row <= 7; row++) {
-        const dia = sheet.getCell(row, 0).value;
-        const horario = sheet.getCell(row, 1).value;
-        if (dia && horario) {
-          additionalInfo.horarios[dia] = horario;
-        }
+      ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
+        const horario = sheet.getCell(index + 1, 1).value;
+        additionalInfo.horarios[dia] = horario || 'No disponible';
+      });
+  
+      // Zonas de despacho
+      for (let row = 1; row <= 9; row++) {
+        const zona = sheet.getCell(row, 2).value;
+        if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
       }
   
-      // Terminaciones
-      let row = 1;
-      while (sheet.getCell(row, 2).value) {
-        additionalInfo.terminaciones.push(sheet.getCell(row, 2).value);
-        row++;
-      }
+      // Dirección de retiro
+      additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
   
-      // Tiempos de entrega
-      additionalInfo.tiemposEntrega = sheet.getCell(1, 3).value;
+      // Promoción del día
+      additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
   
-      // Política de archivos
-      additionalInfo.politicaArchivos = sheet.getCell(1, 4).value;
+      // Métodos de pago
+      additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
   
-      // Información de contacto
-      additionalInfo.informacionContacto = sheet.getCell(1, 5).value;
+      // Tiempos de preparación
+      additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
   
       logger.info("Información adicional cargada completamente:", JSON.stringify(additionalInfo, null, 2));
   
@@ -186,7 +186,7 @@ class GoogleSheetService {
       await this.doc.loadInfo();
       logger.info('Información del documento cargada exitosamente');
       
-      const sheet = this.doc.sheetsByIndex[2];
+      const sheet = this.doc.sheetsByIndex[1];
       logger.info(`Hoja seleccionada: ${sheet.title}`);
       
       await sheet.loadCells();
@@ -199,8 +199,9 @@ class GoogleSheetService {
         formattedDate,
         censoredPhone,
         data.nombre,
+        data.correo || '',
         data.pedido,
-        data.observaciones,
+        data.archivos || '',
         data.total,
         "Nueva cotización"
       ];

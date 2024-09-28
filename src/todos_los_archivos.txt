@@ -233,8 +233,6 @@ export default createMiddleware;
 
 // modules\flowManager.js
 
-// modules/flowManager.js
-
 import { addKeyword, EVENTS } from '@builderbot/bot';
 import logger from '../utils/logger.js';
 import userContextManager from './userContext.js';
@@ -247,7 +245,6 @@ import inactivityMiddleware from '../core/inactivity-middleware.js';
 import blacklistMiddleware from '../core/blacklist-middleware.js';
 import MessageQueue from './messageQueue.js';
 import fileValidationService from '../services/fileValidationService.js';
-
 
 class FlowManager {
   constructor() {
@@ -274,7 +271,6 @@ class FlowManager {
     this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
     this.flows.promoFlow = this.createPromoFlow();
 
-    // Aplicar middleware a todos los flujos
     Object.values(this.flows).forEach(flow => {
       flow.addAction(inactivityMiddleware(this));
       flow.addAction(blacklistMiddleware(this));
@@ -284,27 +280,8 @@ class FlowManager {
     return Object.values(this.flows);
   }
 
-
   getFlowByName(name) {
     return this.flows[name];
-  }
-
-  modifyPrincipalFlow(newAction) {
-    if (this.flows.principalFlow) {
-      this.flows.principalFlow.addAction(newAction);
-      logger.info('Flujo principal modificado exitosamente');
-    } else {
-      logger.error('No se pudo encontrar el flujo principal para modificar');
-    }
-  }
-
-  modifyVoiceNoteFlow(newAction) {
-    if (this.flows.voiceNoteFlow) {
-      this.flows.voiceNoteFlow.addAction(newAction);
-      logger.info('Flujo de notas de voz modificado exitosamente');
-    } else {
-      logger.error('No se pudo encontrar el flujo de notas de voz para modificar');
-    }
   }
 
   createPrincipalFlow() {
@@ -319,20 +296,19 @@ class FlowManager {
 
   createFileUploadFlow() {
     return addKeyword(EVENTS.DOCUMENT)
-      .addAction(async (ctx, { flowDynamic, state, gotoFlow, endFlow }) => {
+      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         try {
           const filePath = await whatsappService.saveFile(ctx);
-          const validationResult = await fileValidationService.validateFile(filePath);
-          
           const userContext = userContextManager.getUserContext(ctx.from);
-          await userContext.state.update({ fileValidation: validationResult });
+          const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
           
-          if (validationResult.isValid) {
-            await flowDynamic('*Archivo recibido y validado correctamente.* ✅');
-          } else {
-            await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${validationResult.reason}`);
-          }
-
+          const validationResult = await fileValidationService.validateFile(filePath, serviceInfo);
+          
+          await userContextManager.updateCurrentOrder(ctx.from, {
+            filePath: filePath,
+            fileValidation: validationResult
+          });
+          
           this.enqueueMessage(ctx.from, "ARCHIVO_RECIBIDO", async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });
@@ -366,27 +342,6 @@ class FlowManager {
       });
   }
 
-  createVoiceNoteFlow() {
-    return addKeyword(EVENTS.VOICE_NOTE)
-      .addAction(async (ctx, { flowDynamic, state, gotoFlow, endFlow }) => {
-        try {
-          const audioPath = await whatsappService.saveAudioFile(ctx);
-          const transcription = await openaiService.transcribeAudio(audioPath);
-          logger.info(`Transcripción del audio: ${transcription}`);
-          
-          await state.update({ lastTranscription: transcription });
-          await flowDynamic(`*📝 Transcripción:*\n${transcription}`);
-
-          this.enqueueMessage(ctx.from, transcription, async (accumulatedMessage) => {
-            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage, true);
-          });
-        } catch (error) {
-          logger.error(`Error al procesar la nota de voz: ${error.message}`);
-          await flowDynamic('Hubo un error al procesar la nota de voz. Por favor, intenta enviar un mensaje de texto.');
-        }
-      });
-  }
-
   createCatchAllFlow() {
     return addKeyword(EVENTS.ACTION)
       .addAction(this.blacklistMiddleware.bind(this))
@@ -399,71 +354,12 @@ class FlowManager {
       });
   }
 
-  async handleAbuseDetected(ctx, flowDynamic, endFlow) {
-    this.addToBlacklist(ctx.from, config.abuseBlacklistDuration);
-    this.resetConversation(ctx.from);
-    await flowDynamic("*Lo siento* 😔, pero hemos detectado un uso inapropiado del sistema. Tu acceso ha sido *temporalmente suspendido*. Si crees que esto es un error, por favor contacta con nuestro equipo de soporte.");
-    logger.info(`Mal uso detectado para ${ctx.from}. Añadido a la lista negra por ${config.abuseBlacklistDuration/1000} segundos.`);
-    return endFlow();
-  }
-
-  async handleServiceSelection(ctx, flowDynamic, order) {
-    await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ¿Qué medidas necesitas para este servicio?`);
-  }
-
-  async handleSetMeasures(command, userContext, flowDynamic) {
-    if (userContext.currentOrder.category === 'Telas PVC' || 
-        userContext.currentOrder.category === 'Banderas' || 
-        userContext.currentOrder.category === 'Adhesivos' || 
-        userContext.currentOrder.category === 'Adhesivo Vehicular' || 
-        userContext.currentOrder.category === 'Back Light') {
-      userContextManager.updateCurrentOrder(userContext.userId, {
-        measures: { width: command.width, height: command.height }
-      });
-      await flowDynamic(`Medidas registradas: *${command.width}m de ancho x ${command.height}m de alto*. ¿Cuántas unidades necesitas?`);
-    } else {
-      await flowDynamic(`Este servicio no requiere medidas personalizadas. ¿Cuántas unidades necesitas?`);
-    }
-  }
-
-  async handleSetQuantity(command, userContext, flowDynamic) {
-    userContextManager.updateCurrentOrder(userContext.userId, {
-      quantity: command.quantity
-    });
-    await flowDynamic(`Cantidad registrada: *${command.quantity} unidades*. ¿Necesitas algún acabado especial?`);
-  }
-
-  async handleSetFinishes(command, userContext, flowDynamic) {
-    userContextManager.updateCurrentOrder(userContext.userId, {
-      finishes: {
-        sellado: command.sellado,
-        ojetillos: command.ojetillos,
-        bolsillo: command.bolsillo
-      }
-    });
-    const finishes = [];
-    if (command.sellado) finishes.push("sellado");
-    if (command.ojetillos) finishes.push("ojetillos");
-    if (command.bolsillo) finishes.push("bolsillo");
-    const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
-    await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
-  }
-
-  async handleFileValidation(ctx, flowDynamic, order) {
-    if (order.isValid) {
-      await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
-    } else {
-      await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
-    }
-  }
-
-
   createIdleTimeoutFlow() {
     return addKeyword(EVENTS.ACTION)
       .addAction(async (ctx, { endFlow }) => {
         logger.info(`Tiempo de espera agotado para usuario ${ctx.from}`);
         this.resetConversation(ctx.from);
-        return endFlow('*😴 Lo siento, el tiempo de espera ha expirado. Tu pedido ha sido cancelado. Si deseas hacer un nuevo pedido, por favor envía un mensaje.*');
+        return endFlow('*😴 Lo siento, el tiempo de espera ha expirado. Tu cotización ha sido cancelada. Si deseas hacer una nueva cotización, por favor envía un mensaje.*');
       });
   }
 
@@ -479,204 +375,224 @@ class FlowManager {
         }
         return endFlow();
       });
-  }
 
-  enqueueMessage(userId, message, callback) {
-    this.messageQueue.enqueueMessage(userId, message, callback);
-  }
-
-  async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
-    const userId = ctx.from;
-    logger.info(`Procesando mensaje para usuario ${userId}`);
-
-    if (this.isBlacklisted(userId)) {
-      logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-      return endFlow();
     }
 
-    if (orderManager.isOrderConfirmed(userId)) {
-      logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
-      return gotoFlow(this.getFlowByName('confirmedFlow'));
+    enqueueMessage(userId, message, callback) {
+      this.messageQueue.enqueueMessage(userId, message, callback);
     }
-
-    this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-
-    try {
-      const userContext = userContextManager.getUserContext(userId);
-      const aiResponse = await openaiService.getChatCompletion(
-        openaiService.getSystemPrompt(userContext.services, userContext.additionalInfo, userContext.currentOrder),
-        userContext.context + "Usuario: " + message
-      );
-      logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
-
-      userContextManager.updateContext(userId, message, "Usuario");
-      userContextManager.updateContext(userId, aiResponse, "Asistente");
-
-      const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
-
-      switch (action) {
-        case "CONFIRMAR_PEDIDO":
-          await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
-          break;
-        case "SOLICITUD_HUMANO":
-          await this.handleHumanRequest(ctx, flowDynamic, endFlow);
-          break;
-        case "ADVERTENCIA_MAL_USO_DETECTADO":
-          await this.handleAbuseDetected(ctx, flowDynamic, endFlow);
-          break;
-        case "SELECT_SERVICE":
-          await this.handleServiceSelection(ctx, flowDynamic, order);
-          break;
-        case "SET_MEASURES":
-          await this.handleSetMeasures(ctx, flowDynamic, order);
-          break;
-        case "SET_QUANTITY":
-          await this.handleSetQuantity(ctx, flowDynamic, order);
-          break;
-        case "SET_FINISHES":
-          await this.handleSetFinishes(ctx, flowDynamic, order);
-          break;
-        case "VALIDATE_FILE":
-          await this.handleFileValidation(ctx, flowDynamic, order);
-          break;
-        default:
-          await flowDynamic(aiResponse);
-      }
-    } catch (error) {
-      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
-    }
-  }
-
-  async handleSelectService(command, userContext, flowDynamic) {
-    userContextManager.updateCurrentOrder(userContext.userId, {
-      service: command.service,
-      category: userContext.services[command.service].category,
-      availableWidths: userContext.services[command.service].availableWidths,
-      availableFinishes: userContext.services[command.service].availableFinishes
-    });
-
-    const serviceCategory = userContext.services[command.service].category;
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory)) {
-      await flowDynamic(`Has seleccionado el servicio: *${command.service}*. Este servicio requiere medidas. Los anchos disponibles son: ${userContext.currentOrder.availableWidths.join(', ')} metros. ¿Qué ancho necesitas?`);
-    } else {
-      await flowDynamic(`Has seleccionado el servicio: *${command.service}*. Este servicio no requiere medidas personalizadas. ¿Cuántas unidades necesitas?`);
-    }
-  }
-
-  async handleHumanRequest(ctx, flowDynamic, endFlow) {
-    this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
-    this.resetConversation(ctx.from);
-    await flowDynamic("*Entendido* 👍. Un representante se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
-    logger.info(`Solicitud de humano para ${ctx.from}. Añadido a la lista negra por ${config.humanBlacklistDuration/1000} segundos.`);
-    return endFlow();
-  }
-
-
-
-  async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
-    try {
-      const { confirmationMessage, orderSummary, endConversation } = await orderManager.finalizeOrder(ctx.from, ctx.pushName, order);
-      await flowDynamic(orderSummary);
-      await flowDynamic(confirmationMessage);
-      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
-      
-      this.addToBlacklist(ctx.from, config.blacklistDuration);
-      this.clearIdleTimer(ctx.from);
-      
-      setTimeout(() => {
-        gotoFlow(this.getFlowByName('promoFlow'));
-      }, config.promoMessageDelay);
-      
-      if (endConversation) {
+  
+    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
+      const userId = ctx.from;
+      logger.info(`Procesando mensaje para usuario ${userId}`);
+  
+      if (this.isBlacklisted(userId)) {
+        logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
       }
-    } catch (error) {
-      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
-    }
-  }
-
-  async processAIResponse(aiResponse, userId, userContext) {
-    try {
-      const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
-      if (jsonCommandMatch) {
-        const jsonCommand = JSON.parse(jsonCommandMatch[0]);
-        return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
+  
+      if (orderManager.isOrderConfirmed(userId)) {
+        logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
+        return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-      return { action: "CONTINUAR", order: userContext.currentOrder };
-    } catch (error) {
-      logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
-      return { action: "CONTINUAR", order: userContext.currentOrder };
+  
+      this.startIdleTimer(ctx, flowDynamic, gotoFlow);
+  
+      try {
+        const userContext = userContextManager.getUserContext(userId);
+        const chatContext = userContextManager.getChatContext(userId);
+        
+        const aiResponse = await openaiService.getChatCompletion(
+          openaiService.getSystemPrompt(userContext.services, userContext.additionalInfo, userContext.currentOrder, chatContext),
+          [...chatContext, { role: "user", content: message }]
+        );
+        logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
+  
+        userContextManager.updateContext(userId, message, "user");
+        userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+        const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
+  
+        switch (action) {
+          case "SELECT_SERVICE":
+            await this.handleSelectService(ctx, flowDynamic, order);
+            break;
+          case "SET_MEASURES":
+            await this.handleSetMeasures(ctx, flowDynamic, order);
+            break;
+          case "SET_QUANTITY":
+            await this.handleSetQuantity(ctx, flowDynamic, order);
+            break;
+          case "SET_FINISHES":
+            await this.handleSetFinishes(ctx, flowDynamic, order);
+            break;
+          case "VALIDATE_FILE":
+            await this.handleFileValidation(ctx, flowDynamic, order);
+            break;
+          case "CONFIRMAR_PEDIDO":
+            await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
+            break;
+          case "SOLICITUD_HUMANO":
+            await this.handleHumanRequest(ctx, flowDynamic, endFlow);
+            break;
+          case "ADVERTENCIA_MAL_USO_DETECTADO":
+            await this.handleAbuseDetected(ctx, flowDynamic, endFlow);
+            break;
+          default:
+            await flowDynamic(aiResponse);
+        }
+      } catch (error) {
+        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
+      }
     }
-  }
-
-  setIdleTimers(userId, timers) {
-    this.idleTimers.set(userId, timers);
-  }
-
-  addToBlacklist(userId, duration) {
-    this.blacklist.set(userId, Date.now() + duration);
-    logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
-  }
-
-  isBlacklisted(userId) {
-    if (this.blacklist.has(userId)) {
-      const blacklistExpiry = this.blacklist.get(userId);
-      if (Date.now() < blacklistExpiry) {
-        logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
-        return true;
+  
+    async processAIResponse(aiResponse, userId, userContext) {
+      try {
+        const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
+        if (jsonCommandMatch) {
+          const jsonCommand = JSON.parse(jsonCommandMatch[0]);
+          return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
+        }
+        return { action: "CONTINUAR", order: userContext.currentOrder };
+      } catch (error) {
+        logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
+        return { action: "CONTINUAR", order: userContext.currentOrder };
+      }
+    }
+  
+    async handleSelectService(ctx, flowDynamic, order) {
+      await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ${order.category === 'Telas PVC' || order.category === 'Banderas' || order.category === 'Adhesivos' || order.category === 'Adhesivo Vehicular' || order.category === 'Back Light' ? 'Por favor, especifica las medidas que necesitas.' : '¿Cuántas unidades necesitas?'}`);
+    }
+  
+    async handleSetMeasures(ctx, flowDynamic, order) {
+      await flowDynamic(`Medidas registradas: *${order.measures.width}m de ancho x ${order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
+    }
+  
+    async handleSetQuantity(ctx, flowDynamic, order) {
+      await flowDynamic(`Cantidad registrada: *${order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+    }
+  
+    async handleSetFinishes(ctx, flowDynamic, order) {
+      const finishes = [];
+      if (order.finishes.sellado) finishes.push("sellado");
+      if (order.finishes.ojetillos) finishes.push("ojetillos");
+      if (order.finishes.bolsillo) finishes.push("bolsillo");
+      const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
+      await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
+    }
+  
+    async handleFileValidation(ctx, flowDynamic, order) {
+      if (order.fileValidation.isValid) {
+        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
       } else {
-        this.blacklist.delete(userId);
-        this.resetConversation(userId);
-        logger.info(`Usuario ${userId} removido de la lista negra`);
+        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileValidation.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
       }
     }
-    return false;
-  }
-
-  resetConversation(userId) {
-    userContextManager.resetContext(userId);
-    orderManager.resetOrder(userId);
-    this.blacklist.delete(userId);
-    this.clearIdleTimer(userId);
-    logger.info(`Conversación reiniciada para usuario ${userId}`);
-  }
-
-  startIdleTimer(ctx, flowDynamic, gotoFlow) {
-    this.clearIdleTimer(ctx.from);
-    
-    const warningTimer = setTimeout(async () => {
-      await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
-    }, config.idleWarningTime);
-
-    const timeoutTimer = setTimeout(() => {
-      this.resetConversation(ctx.from);
-      gotoFlow(this.getFlowByName('idleTimeoutFlow'));
-    }, config.idleTimeoutTime);
-
-    this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
-  }
-
-  clearIdleTimer(userId) {
-    const timers = this.idleTimers.get(userId);
-    if (timers) {
-      clearTimeout(timers.warningTimer);
-      clearTimeout(timers.timeoutTimer);
-      this.idleTimers.delete(userId);
+  
+    async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
+      try {
+        const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
+        await flowDynamic(summary);
+        await flowDynamic(result.message);
+        logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
+        
+        this.addToBlacklist(ctx.from, config.blacklistDuration);
+        this.clearIdleTimer(ctx.from);
+        
+        setTimeout(() => {
+          gotoFlow(this.getFlowByName('promoFlow'));
+        }, config.promoMessageDelay);
+        
+        return endFlow();
+      } catch (error) {
+        logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
+        await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+      }
     }
-  }
-
-  blacklistMiddleware(ctx, { endFlow }) {
-    if (this.isBlacklisted(ctx.from)) {
-      logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
+  
+    async handleHumanRequest(ctx, flowDynamic, endFlow) {
+      this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
+      this.resetConversation(ctx.from);
+      await flowDynamic("*Entendido* 👍. Un representante se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
+      logger.info(`Solicitud de humano para ${ctx.from}. Añadido a la lista negra por ${config.humanBlacklistDuration/1000} segundos.`);
       return endFlow();
     }
-    return false;
+  
+    async handleAbuseDetected(ctx, flowDynamic, endFlow) {
+      this.addToBlacklist(ctx.from, config.abuseBlacklistDuration);
+      this.resetConversation(ctx.from);
+      await flowDynamic("*Lo siento* 😔, pero hemos detectado un uso inapropiado del sistema. Tu acceso ha sido *temporalmente suspendido*. Si crees que esto es un error, por favor contacta con nuestro equipo de soporte.");
+      logger.info(`Mal uso detectado para ${ctx.from}. Añadido a la lista negra por ${config.abuseBlacklistDuration/1000} segundos.`);
+      return endFlow();
+    }
+  
+    setIdleTimers(userId, timers) {
+      this.idleTimers.set(userId, timers);
+    }
+  
+    addToBlacklist(userId, duration) {
+      this.blacklist.set(userId, Date.now() + duration);
+      logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
+    }
+  
+    isBlacklisted(userId) {
+      if (this.blacklist.has(userId)) {
+        const blacklistExpiry = this.blacklist.get(userId);
+        if (Date.now() < blacklistExpiry) {
+          logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
+          return true;
+        } else {
+          this.blacklist.delete(userId);
+          this.resetConversation(userId);
+          logger.info(`Usuario ${userId} removido de la lista negra`);
+        }
+      }
+      return false;
+    }
+  
+    resetConversation(userId) {
+      userContextManager.resetContext(userId);
+      orderManager.resetOrder(userId);
+      this.blacklist.delete(userId);
+      this.clearIdleTimer(userId);
+      logger.info(`Conversación reiniciada para usuario ${userId}`);
+    }
+  
+    startIdleTimer(ctx, flowDynamic, gotoFlow) {
+      this.clearIdleTimer(ctx.from);
+      
+      const warningTimer = setTimeout(async () => {
+        await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
+      }, config.idleWarningTime);
+  
+      const timeoutTimer = setTimeout(() => {
+        this.resetConversation(ctx.from);
+        gotoFlow(this.getFlowByName('idleTimeoutFlow'));
+      }, config.idleTimeoutTime);
+  
+      this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
+    }
+  
+    clearIdleTimer(userId) {
+      const timers = this.idleTimers.get(userId);
+      if (timers) {
+        clearTimeout(timers.warningTimer);
+        clearTimeout(timers.timeoutTimer);
+        this.idleTimers.delete(userId);
+      }
+    }
+  
+    blacklistMiddleware(ctx, { endFlow }) {
+      if (this.isBlacklisted(ctx.from)) {
+        logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
+        return endFlow();
+      }
+      return false;
+    }
   }
-}
-
-export default new FlowManager();
+  
+  export default new FlowManager();
 
 
 // modules\messageQueue.js
@@ -752,6 +668,7 @@ import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
 import moment from 'moment-timezone';
 import config from '../config/config.js';
 import sheetService from '../services/sheetService.js';
+import userContextManager from './userContext.js';
 import { CustomError } from '../utils/errorHandler.js';
 
 class OrderManager {
@@ -759,218 +676,231 @@ class OrderManager {
     this.orderConfirmed = new Set();
   }
 
-  calculateOrder(order) {
-    let total = 0;
-    const calculatedItems = order.items.map(item => {
-      let subtotal = 0;
-      if (item.width && item.height) {
-        const area = item.width * item.height;
-        subtotal = area * item.precio * item.quantity;
-      } else {
-        subtotal = item.precio * item.quantity;
-      }
-      
-      if (item.sellado) subtotal += item.precioSellado * (item.width * item.height);
-      if (item.ojetillos) subtotal += item.precioOjetillos * (item.width * item.height);
-      if (item.bolsillo) subtotal += item.precioBolsillo * (item.width * item.height);
-      
-      total += subtotal;
-      return { ...item, subtotal };
-    });
-
-    return {
-      items: calculatedItems,
-      total,
-      observaciones: order.observaciones
-    };
-  }
-
-  formatOrderSummary(order) {
-    let summary = "📋 Resumen final de tu cotización:\n\n";
-
-    order.items.forEach(item => {
-      summary += `*${item.categoria}* - ${item.nombre}\n`;
-      if (item.width && item.height) {
-        summary += `Medidas: ${item.width}m x ${item.height}m\n`;
-      }
-      summary += `Cantidad: ${item.quantity}\n`;
-      if (item.sellado) summary += "- Con sellado\n";
-      if (item.ojetillos) summary += "- Con ojetillos\n";
-      if (item.bolsillo) summary += "- Con bolsillo\n";
-      summary += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
-    });
-
-    summary += `💰 Total: $${formatPrice(order.total)}\n`;
-
-    if (order.observaciones) {
-      summary += `\nObservaciones: ${order.observaciones}\n`;
-    }
-
-    return summary;
-  }
-
   async updateOrder(userId, jsonCommand, services, currentOrder) {
     logger.info(`Actualizando orden para usuario ${userId}. Comando: ${JSON.stringify(jsonCommand)}`);
     try {
       switch (jsonCommand.command) {
         case "SELECT_SERVICE":
-          currentOrder.service = jsonCommand.service;
-          currentOrder.category = services[jsonCommand.service].category;
-          currentOrder.availableWidths = services[jsonCommand.service].availableWidths;
-          currentOrder.availableFinishes = services[jsonCommand.service].availableFinishes;
-          return { action: "SELECT_SERVICE", order: currentOrder };
+          return this.handleSelectService(userId, jsonCommand.service);
         case "SET_MEASURES":
-          if (!currentOrder.items) currentOrder.items = [];
-          currentOrder.items.push({
-            categoria: currentOrder.category,
-            nombre: currentOrder.service,
-            width: jsonCommand.width,
-            height: jsonCommand.height,
-            precio: services[currentOrder.service].precio
-          });
-          return { action: "SET_MEASURES", order: currentOrder };
+          return this.handleSetMeasures(userId, jsonCommand.width, jsonCommand.height);
         case "SET_QUANTITY":
-          if (currentOrder.items && currentOrder.items.length > 0) {
-            currentOrder.items[currentOrder.items.length - 1].quantity = jsonCommand.quantity;
-          }
-          return { action: "SET_QUANTITY", order: currentOrder };
+          return this.handleSetQuantity(userId, jsonCommand.quantity);
         case "SET_FINISHES":
-          if (currentOrder.items && currentOrder.items.length > 0) {
-            const currentItem = currentOrder.items[currentOrder.items.length - 1];
-            currentItem.sellado = jsonCommand.sellado;
-            currentItem.ojetillos = jsonCommand.ojetillos;
-            currentItem.bolsillo = jsonCommand.bolsillo;
-            currentItem.precioSellado = services[currentOrder.service].precioSellado;
-            currentItem.precioOjetillos = services[currentOrder.service].precioOjetillos;
-            currentItem.precioBolsillo = services[currentOrder.service].precioBolsillo;
-          }
-          return { action: "SET_FINISHES", order: currentOrder };
+          return this.handleSetFinishes(userId, jsonCommand.sellado, jsonCommand.ojetillos, jsonCommand.bolsillo);
         case "VALIDATE_FILE":
-          currentOrder.fileValidation = {
-            isValid: jsonCommand.isValid,
-            reason: jsonCommand.reason
-          };
-          return { action: "VALIDATE_FILE", order: currentOrder };
-        case "CONFIRM_ORDER":
-          return { action: "CONFIRMAR_PEDIDO", order: currentOrder };
-        default:
-          logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
-          return { action: "CONTINUAR", order: currentOrder };
+          return this.handleValidateFile(userId, jsonCommand.isValid, jsonCommand.reason);
+          case "CONFIRM_ORDER":
+            return this.handleConfirmOrder(userId);
+          default:
+            logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
+            return { action: "CONTINUAR", order: currentOrder };
+        }
+      } catch (error) {
+        logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
+        throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
       }
-    } catch (error) {
-      logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
     }
-  }
-
-  async finalizeOrder(userId, userName, order) {
-    logger.info(`Finalizando orden para usuario ${userId}`);
-    
-    const calculatedOrder = this.calculateOrder(order);
-    logger.info(`Orden calculada para usuario ${userId}: ${JSON.stringify(calculatedOrder)}`);
-    const formattedOrder = this.formatOrderForSheet(calculatedOrder);
-    logger.info(`Orden formateada para hoja de cálculo, usuario ${userId}: ${JSON.stringify(formattedOrder)}`);
   
-    const finalOrder = {
-      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
-      telefono: userId,
-      nombre: userName || 'Cliente',
-      pedido: formattedOrder.details,
-      observaciones: order.observaciones || 'Sin observaciones',
-      total: formattedOrder.total
-    };
+    handleSelectService(userId, serviceName) {
+      const userContext = userContextManager.getUserContext(userId);
+      userContextManager.updateCurrentOrder(userId, { service: serviceName });
+      const serviceInfo = userContextManager.getServiceInfo(serviceName);
+      
+      return {
+        action: "SELECT_SERVICE",
+        order: userContext.currentOrder,
+        serviceInfo: serviceInfo
+      };
+    }
   
-    logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
+    handleSetMeasures(userId, width, height) {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
   
-    try {
-      const result = await sheetService.saveOrder(finalOrder);
-      logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
-
-      if (result.success) {
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
+      }
+  
+      const validWidth = serviceInfo.availableWidths.find(w => w.material === width);
+      if (!validWidth) {
+        throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
+      }
+  
+      if (height <= 1) {
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
+      }
+  
+      userContextManager.updateCurrentOrder(userId, {
+        measures: { width: validWidth.material, height: height }
+      });
+  
+      return {
+        action: "SET_MEASURES",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleSetQuantity(userId, quantity) {
+      if (quantity <= 0) {
+        throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
+      }
+  
+      userContextManager.updateCurrentOrder(userId, { quantity: quantity });
+      const userContext = userContextManager.getUserContext(userId);
+  
+      return {
+        action: "SET_QUANTITY",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+  
+      const finishes = {
+        sellado: sellado && serviceInfo.sellado,
+        ojetillos: ojetillos && serviceInfo.ojetillos,
+        bolsillo: bolsillo && serviceInfo.bolsillo
+      };
+  
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+  
+      return {
+        action: "SET_FINISHES",
+        order: userContext.currentOrder
+      };
+    }
+  
+    handleValidateFile(userId, isValid, reason) {
+      userContextManager.updateCurrentOrder(userId, {
+        fileValidation: { isValid, reason }
+      });
+  
+      const userContext = userContextManager.getUserContext(userId);
+  
+      return {
+        action: "VALIDATE_FILE",
+        order: userContext.currentOrder
+      };
+    }
+  
+    async handleConfirmOrder(userId) {
+      const userContext = userContextManager.getUserContext(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        throw new CustomError('IncompleteOrderError', 'La orden no está completa');
+      }
+  
+      const total = userContextManager.calculatePrice(userId);
+      userContextManager.updateCurrentOrder(userId, { total: total });
+  
+      try {
+        const orderSummary = this.formatOrderSummary(userContext.currentOrder);
+        const result = await this.finalizeOrder(userId, userContext.currentOrder);
+  
         this.orderConfirmed.add(userId);
-        logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
-        
-        return { 
-          confirmationMessage: "*¡Gracias!* 🎉 Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales. 📞",
-          orderSummary: this.formatOrderSummary(calculatedOrder),
-          endConversation: true
+  
+        return {
+          action: "CONFIRMAR_PEDIDO",
+          order: userContext.currentOrder,
+          summary: orderSummary,
+          result: result
         };
-      } else {
-        throw new Error("Error al guardar la cotización");
+      } catch (error) {
+        logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
+        throw new CustomError('OrderConfirmationError', 'Error al confirmar el pedido', error);
       }
-    } catch (error) {
-      logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
-      throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
+    }
+  
+    formatOrderSummary(order) {
+      let summary = "📋 Resumen final de tu cotización:\n\n";
+  
+      const serviceInfo = userContextManager.getServiceInfo(order.service);
+      summary += `*Servicio:* ${order.service} (${serviceInfo.category})\n`;
+  
+      if (order.measures) {
+        summary += `*Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
+      }
+  
+      summary += `*Cantidad:* ${order.quantity}\n`;
+  
+      if (order.finishes) {
+        summary += "*Terminaciones:*\n";
+        if (order.finishes.sellado) summary += "- Sellado\n";
+        if (order.finishes.ojetillos) summary += "- Ojetillos\n";
+        if (order.finishes.bolsillo) summary += "- Bolsillo\n";
+      }
+  
+      summary += `\n💰 *Total:* $${formatPrice(order.total)}\n`;
+  
+      return summary;
+    }
+  
+    async finalizeOrder(userId, order) {
+      logger.info(`Finalizando orden para usuario ${userId}`);
+      
+      const finalOrder = {
+        fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
+        telefono: userId,
+        nombre: order.userName || 'Cliente',
+        pedido: this.formatOrderForSheet(order),
+        observaciones: order.observaciones || 'Sin observaciones',
+        total: `$${formatPrice(order.total)}`
+      };
+    
+      logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
+    
+      try {
+        const result = await sheetService.saveOrder(finalOrder);
+        logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
+  
+        if (result.success) {
+          logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
+          return { 
+            success: true,
+            message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
+            orderNumber: result.rowIndex
+          };
+        } else {
+          throw new Error("Error al guardar la cotización");
+        }
+      } catch (error) {
+        logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
+        throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
+      }
+    }
+  
+    formatOrderForSheet(order) {
+      let details = `Servicio: ${order.service}\n`;
+      
+      if (order.measures) {
+        details += `Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
+      }
+      
+      details += `Cantidad: ${order.quantity}\n`;
+      
+      if (order.finishes) {
+        details += "Terminaciones:\n";
+        if (order.finishes.sellado) details += "- Sellado\n";
+        if (order.finishes.ojetillos) details += "- Ojetillos\n";
+        if (order.finishes.bolsillo) details += "- Bolsillo\n";
+      }
+      
+      return details.trim();
+    }
+  
+    isOrderConfirmed(userId) {
+      return this.orderConfirmed.has(userId);
+    }
+  
+    resetOrder(userId) {
+      this.orderConfirmed.delete(userId);
     }
   }
-
-  formatOrderForSheet(order) {
-    let details = '';
-    let total = 0;
-    
-    order.items.forEach(item => {
-      details += `${item.categoria} - ${item.nombre}\n`;
-      if (item.width && item.height) {
-        details += `Medidas: ${item.width}m x ${item.height}m\n`;
-      }
-      details += `Cantidad: ${item.quantity}\n`;
-      if (item.sellado) details += "- Con sellado\n";
-      if (item.ojetillos) details += "- Con ojetillos\n";
-      if (item.bolsillo) details += "- Con bolsillo\n";
-      details += `Subtotal: $${formatPrice(item.subtotal)}\n\n`;
-      total += item.subtotal;
-    });
-    
-    return {
-      details: details.trim(),
-      total: `$${formatPrice(total)}`
-    };
-  }
-
-  estimateTotal(order) {
-    let total = 0;
-    order.items.forEach(item => {
-      let itemTotal = item.precio * item.quantity;
-      if (item.width && item.height) {
-        const area = item.width * item.height;
-        itemTotal = area * item.precio * item.quantity;
-      }
-      if (item.sellado) itemTotal += item.precioSellado * (item.width * item.height);
-      if (item.ojetillos) itemTotal += item.precioOjetillos * (item.width * item.height);
-      if (item.bolsillo) itemTotal += item.precioBolsillo * (item.width * item.height);
-      total += itemTotal;
-    });
-    return formatPrice(total);
-  }
-
-  calculatePrice(order, services) {
-    let total = 0;
-    const service = services[order.service];
-
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(order.category)) {
-      const area = order.measures.width * order.measures.height;
-      total = area * service.precio * order.quantity;
-    } else {
-      total = service.precio * order.quantity;
-    }
-
-    if (order.finishes.sellado) total += service.precioSellado * order.quantity;
-    if (order.finishes.ojetillos) total += service.precioOjetillos * order.quantity;
-    if (order.finishes.bolsillo) total += service.precioBolsillo * order.quantity;
-
-    return total;
-  }
-
-  isOrderConfirmed(userId) {
-    return this.orderConfirmed.has(userId);
-  }
-
-  resetOrder(userId) {
-    this.orderConfirmed.delete(userId);
-  }
-}
-
-export default new OrderManager();
+  
+  export default new OrderManager();
 
 
 // modules\userContext.js
@@ -984,7 +914,6 @@ class UserContextManager {
     this.additionalInfo = null;
   }
 
-
   setGlobalData(services, additionalInfo) {
     this.services = services;
     this.additionalInfo = additionalInfo;
@@ -995,18 +924,23 @@ class UserContextManager {
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
         context: "",
+        chatContext: [],
         currentOrder: {
           service: null,
           category: null,
           type: null,
           measures: null,
-          finishes: null,
+          finishes: {
+            sellado: false,
+            ojetillos: false,
+            bolsillo: false
+          },
           quantity: null,
           filePath: null,
-          fileAnalysis: null,
+          fileValidation: null,
           availableWidths: [],
-          availableFinishes: [],
-          fileValidationCriteria: {}
+          fileValidationCriteria: {},
+          price: 0
         },
         services: this.services,
         additionalInfo: this.additionalInfo
@@ -1019,34 +953,49 @@ class UserContextManager {
   updateContext(userId, message, role) {
     const userContext = this.getUserContext(userId);
     userContext.context += `${role}: ${message}\n`;
+    userContext.chatContext.push({ role, content: message });
     this.limitContextSize(userId);
-    logger.info(`Contexto actualizado para usuario ${userId}. Palabras: ${userContext.context.split(/\s+/).length}`);
+    logger.info(`Contexto actualizado para usuario ${userId}. Mensajes en contexto: ${userContext.chatContext.length}`);
   }
 
   limitContextSize(userId) {
     const userContext = this.getUserContext(userId);
+    if (userContext.chatContext.length > 10) {
+      userContext.chatContext = userContext.chatContext.slice(-10);
+    }
     const words = userContext.context.split(/\s+/);
     if (words.length > 1500) {
       userContext.context = words.slice(-1500).join(" ");
-      logger.info(`Contexto limitado a 1500 palabras para usuario ${userId}`);
     }
+    logger.info(`Contexto limitado para usuario ${userId}`);
   }
 
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder = { ...userContext.currentOrder, ...updates };
     
-    // Actualizar fileValidationCriteria basado en el servicio seleccionado
     if (updates.service) {
-      const serviceInfo = this.services[updates.service];
+      const serviceInfo = this.getServiceInfo(updates.service);
+      userContext.currentOrder.category = serviceInfo.category;
+      userContext.currentOrder.type = serviceInfo.type;
+      userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
       userContext.currentOrder.fileValidationCriteria = {
         format: serviceInfo.format,
         minDPI: serviceInfo.minDPI,
-        // Agregar más criterios según sea necesario
       };
     }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+  }
+
+  getServiceInfo(serviceName) {
+    for (const category in this.services) {
+      const service = this.services[category].find(s => s.name === serviceName);
+      if (service) {
+        return service;
+      }
+    }
+    throw new Error(`Servicio no encontrado: ${serviceName}`);
   }
 
   resetContext(userId) {
@@ -1060,6 +1009,52 @@ class UserContextManager {
 
   getGlobalAdditionalInfo() {
     return this.additionalInfo;
+  }
+
+  isOrderComplete(userId) {
+    const userContext = this.getUserContext(userId);
+    const order = userContext.currentOrder;
+
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileValidation'];
+    const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
+
+    if (!hasAllRequiredFields) return false;
+
+    const serviceInfo = this.getServiceInfo(order.service);
+    const needsMeasures = ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category);
+
+    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  calculatePrice(userId) {
+    const userContext = this.getUserContext(userId);
+    const order = userContext.currentOrder;
+    const serviceInfo = this.getServiceInfo(order.service);
+
+    let total = 0;
+
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+      const area = order.measures.width * order.measures.height;
+      total = area * serviceInfo.precio * order.quantity;
+    } else {
+      total = serviceInfo.precio * order.quantity;
+    }
+
+    if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
+    if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
+    if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+
+    userContext.currentOrder.price = total;
+    return total;
+  }
+
+  getChatContext(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.chatContext;
   }
 }
 
@@ -1076,6 +1071,7 @@ import { CustomError } from '../utils/errorHandler.js';
 import config from '../config/config.js';
 import sharp from 'sharp';
 import pdf from 'pdf-parse';
+import { fileTypeFromFile } from 'file-type';
 
 const readFile = promisify(fs.readFile);
 
@@ -1085,13 +1081,14 @@ class FileValidationService {
   }
 
   async initialize() {
-    // Cualquier inicialización necesaria
     logger.info('FileValidationService inicializado');
   }
 
   async validateFile(filePath, service) {
     try {
+      const fileType = await fileTypeFromFile(filePath);
       const fileExtension = path.extname(filePath).toLowerCase().slice(1);
+      
       if (!this.supportedFormats.includes(fileExtension)) {
         throw new CustomError('UnsupportedFormatError', `Formato de archivo no soportado: ${fileExtension}`);
       }
@@ -1120,7 +1117,8 @@ class FileValidationService {
       format: metadata.format,
       width: metadata.width,
       height: metadata.height,
-      dpi: metadata.density || 72, // Si no se especifica, asumimos 72 DPI
+      dpi: metadata.density || 72,
+      colorSpace: metadata.space
     };
   }
 
@@ -1128,7 +1126,6 @@ class FileValidationService {
     const dataBuffer = await readFile(filePath);
     const data = await pdf(dataBuffer);
     
-    // Asumimos que el PDF está en puntos (72 DPI)
     const width = data.pages[0].width * (72 / 25.4); // Convertir a mm
     const height = data.pages[0].height * (72 / 25.4); // Convertir a mm
     
@@ -1152,32 +1149,30 @@ class FileValidationService {
     }
 
     // Verificar DPI
-    if (fileInfo.dpi < service.minDPI) {
+    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
+    let requiredDPI;
+    if (area < 2) {
+      requiredDPI = 150;
+    } else if (area > 20) {
+      requiredDPI = 72;
+    } else {
+      requiredDPI = 120;
+    }
+
+    if (fileInfo.dpi < requiredDPI) {
       isValid = false;
-      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la mínima requerida (${service.minDPI} DPI). `;
+      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la requerida (${requiredDPI} DPI) para un área de ${area.toFixed(2)} m². `;
     }
 
-    // Verificar tamaño
-    if (service.category === 'Telas PVC' || service.category === 'Banderas' || 
-        service.category === 'Adhesivos' || service.category === 'Adhesivo Vehicular' || 
-        service.category === 'Back Light') {
-      const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
-      if (area < 1) {
-        isValid = false;
-        reason += `El tamaño del archivo (${area.toFixed(2)} m²) es menor que el mínimo requerido (1 m²). `;
-      }
-      if (area > 20 && fileInfo.dpi < 72) {
-        isValid = false;
-        reason += `Para archivos mayores a 20 m², se requiere una resolución mínima de 72 DPI. `;
-      }
-    }
-
-    // Verificar color (solo para imágenes)
+    // Verificar color space (solo para imágenes)
     if (['jpg', 'jpeg', 'png'].includes(fileInfo.format.toLowerCase())) {
-      if (fileInfo.space !== 'cmyk') {
-        reason += 'Recomendación: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
+      if (fileInfo.colorSpace !== 'cmyk') {
+        reason += 'Advertencia: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
       }
     }
+
+    // Verificar acabados de impresión (esto requeriría un análisis más profundo del contenido del archivo)
+    reason += 'Nota: Asegúrese de que los acabados de impresión (cortes, perforaciones, etc.) estén marcados con líneas punteadas color magenta. ';
 
     return {
       isValid,
@@ -1210,7 +1205,7 @@ class OpenAIService {
         model: config.languageModel,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: context }
+          ...context
         ],
         max_tokens: config.maxTokens,
         temperature: config.temperature,
@@ -1223,44 +1218,14 @@ class OpenAIService {
     }
   }
 
-  async validateFileContent(fileContent, fileType, service) {
-    const systemPrompt = `
-      Eres un experto en validación de archivos para servicios de impresión.
-      Tu tarea es analizar el contenido del archivo y determinar si cumple con los requisitos para el servicio de impresión especificado.
-      Debes proporcionar un resultado en el siguiente formato JSON:
+  getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
+    const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
 
-      {
-        "isValid": booleano,
-        "reason": "Explicación detallada de por qué el archivo es válido o no"
-      }
-
-      Criterios de validación:
-      1. El formato del archivo debe coincidir con el formato requerido por el servicio.
-      2. La resolución (DPI) debe ser igual o superior al mínimo requerido por el servicio.
-      3. Las dimensiones del archivo deben ser apropiadas para el servicio solicitado.
-
-      Servicio solicitado:
-      ${JSON.stringify(service, null, 2)}
-
-      Contenido del archivo (primeros 1000 caracteres):
-      ${fileContent.substring(0, 1000)}
-    `;
-
-    try {
-      const response = await this.getChatCompletion(systemPrompt, "Valida este archivo");
-      return JSON.parse(response);
-    } catch (error) {
-      logger.error("Error al validar el contenido del archivo:", error);
-      return { isValid: false, reason: "Error en la validación del archivo" };
-    }
-  }
-
-  getSystemPrompt(services, currentOrder, additionalInfo) {
     return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileValidation}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -1307,17 +1272,13 @@ class OpenAIService {
 
     5. Subida y Validación de Archivos:
        - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
-       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
+       - Cuando haya un fileValidation en currentOrder, evalúa su validez considerando:
          a) El servicio seleccionado
          b) Las medidas especificadas
-         c) El resultado del análisis del archivo (formato, DPI, dimensiones)
-       - Criterios de validación:
-         ${JSON.stringify(currentOrder.fileValidationCriteria, null, 2)}
-       - Explica detalladamente si el archivo es válido o no, y por qué.
-       - Si el archivo es válido, responde con el comando JSON:
-         {"command": "VALIDATE_FILE", "isValid": true}
-       - Si no es válido, proporciona instrucciones claras sobre cómo corregirlo y responde:
-         {"command": "VALIDATE_FILE", "isValid": false, "reason": "[Explicación]"}
+         c) El resultado del análisis del archivo
+       - Si el archivo es válido, informa al cliente y procede con la confirmación del pedido.
+       - Si no es válido, explica las razones y proporciona instrucciones claras sobre cómo corregirlo.
+         Pide al cliente que envíe un nuevo archivo que cumpla con las especificaciones.
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
@@ -1343,7 +1304,32 @@ class OpenAIService {
     Información adicional (NO la menciones a menos que sea solicitada):
     ${JSON.stringify(additionalInfo, null, 2)}
 
+    Contexto de la conversación:
+    ${contextStr}
+
     Responde al siguiente mensaje del cliente:`;
+  }
+
+  async transcribeAudio(audioFilePath) {
+    try {
+      const stats = await fsPromises.stat(audioFilePath);
+      if (stats.size > config.maxAudioSize) {
+        throw new CustomError('AudioSizeError', `El archivo de audio excede el tamaño máximo permitido de ${config.maxAudioSize / (1024 * 1024)} MB`);
+      }
+
+      const response = await this.openai.audio.transcriptions.create({
+        file: fs.createReadStream(audioFilePath),
+        model: "whisper-1",
+      });
+      logger.info(`Audio transcrito exitosamente: ${audioFilePath}`);
+      return response.text;
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      logger.error(`Error al transcribir audio: ${error.message}`);
+      throw new CustomError('TranscriptionError', 'Error al transcribir el audio', error);
+    }
   }
 }
 
@@ -1427,33 +1413,56 @@ class GoogleSheetService {
       const sheet = this.doc.sheetsByIndex[0];
       await sheet.loadCells('A1:Q1000');
   
-        
       const services = {};
-      // Asumiendo que cada fila representa un servicio
       for (let i = 1; i < sheet.rowCount; i++) {
         const id = sheet.getCell(i, 0).value;
         if (!id) break;
   
-        services[id] = {
-          id: id,
-          category: sheet.getCell(i, 1).value,
-          type: sheet.getCell(i, 2).value,
-          name: sheet.getCell(i, 3).value,
-          sellado: sheet.getCell(i, 4).value === 'Sí',
-          ojetillos: sheet.getCell(i, 5).value === 'Sí',
-          bolsillo: sheet.getCell(i, 6).value === 'Sí',
-          format: sheet.getCell(i, 7).value,
-          minDPI: parseInt(sheet.getCell(i, 8).value),
-          stock: parseInt(sheet.getCell(i, 9).value),
-          status: sheet.getCell(i, 10).value,
-          precio: parseFloat(sheet.getCell(i, 11).value),
-          availableWidths: sheet.getCell(i, 12).value.split(',').map(w => parseFloat(w.trim())),
-          precioSellado: parseFloat(sheet.getCell(i, 14).value) || 0,
-          precioBolsillo: parseFloat(sheet.getCell(i, 15).value) || 0,
-          precioOjetillos: parseFloat(sheet.getCell(i, 16).value) || 0
+        const category = sheet.getCell(i, 1).value;
+        const type = sheet.getCell(i, 2).value;
+        const name = sheet.getCell(i, 3).value;
+        const sellado = sheet.getCell(i, 4).value === 'Sí';
+        const ojetillos = sheet.getCell(i, 5).value === 'Sí';
+        const bolsillo = sheet.getCell(i, 6).value === 'Sí';
+        const format = sheet.getCell(i, 7).value;
+        const minDPI = parseInt(sheet.getCell(i, 8).value);
+        const stock = parseInt(sheet.getCell(i, 9).value);
+        const status = sheet.getCell(i, 10).value;
+        const precio = parseFloat(sheet.getCell(i, 11).value);
+        const availableWidths = sheet.getCell(i, 12).value.split(',').map(w => {
+          const [material, imprimible] = w.split('-').map(s => s.trim());
+          return {
+            material: parseFloat(material.replace('m', '')),
+            imprimible: parseFloat(imprimible.replace('m', ''))
+          };
+        });
+        const precioSellado = parseFloat(sheet.getCell(i, 14).value) || 0;
+        const precioBolsillo = parseFloat(sheet.getCell(i, 15).value) || 0;
+        const precioOjetillos = parseFloat(sheet.getCell(i, 16).value) || 0;
+
+        const service = {
+          id,
+          category,
+          type,
+          name,
+          sellado,
+          ojetillos,
+          bolsillo,
+          format,
+          minDPI,
+          stock,
+          status,
+          precio,
+          availableWidths,
+          precioSellado,
+          precioBolsillo,
+          precioOjetillos
         };
-  
-        services[service.name] = service;
+
+        if (!services[category]) {
+          services[category] = [];
+        }
+        services[category].push(service);
       }
   
       return services;
@@ -1466,41 +1475,41 @@ class GoogleSheetService {
   async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1];
-      await sheet.loadCells('A1:C100');
+      const sheet = this.doc.sheetsByIndex[2];
+      await sheet.loadCells('A1:H11');
   
       const additionalInfo = {
         horarios: {},
-        terminaciones: [],
-        tiemposEntrega: '',
-        politicaArchivos: '',
-        informacionContacto: ''
+        zonasDespacho: [],
+        direccionRetiro: '',
+        promocionDia: '',
+        metodosPago: '',
+        tiempoPreparacion: ''
       };
   
       // Horarios
-      for (let row = 1; row <= 7; row++) {
-        const dia = sheet.getCell(row, 0).value;
-        const horario = sheet.getCell(row, 1).value;
-        if (dia && horario) {
-          additionalInfo.horarios[dia] = horario;
-        }
+      ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
+        const horario = sheet.getCell(index + 1, 1).value;
+        additionalInfo.horarios[dia] = horario || 'No disponible';
+      });
+  
+      // Zonas de despacho
+      for (let row = 1; row <= 9; row++) {
+        const zona = sheet.getCell(row, 2).value;
+        if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
       }
   
-      // Terminaciones
-      let row = 1;
-      while (sheet.getCell(row, 2).value) {
-        additionalInfo.terminaciones.push(sheet.getCell(row, 2).value);
-        row++;
-      }
+      // Dirección de retiro
+      additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
   
-      // Tiempos de entrega
-      additionalInfo.tiemposEntrega = sheet.getCell(1, 3).value;
+      // Promoción del día
+      additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
   
-      // Política de archivos
-      additionalInfo.politicaArchivos = sheet.getCell(1, 4).value;
+      // Métodos de pago
+      additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
   
-      // Información de contacto
-      additionalInfo.informacionContacto = sheet.getCell(1, 5).value;
+      // Tiempos de preparación
+      additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
   
       logger.info("Información adicional cargada completamente:", JSON.stringify(additionalInfo, null, 2));
   
@@ -1511,24 +1520,13 @@ class GoogleSheetService {
     }
   }
 
-  censorPhoneNumber(phoneNumber) {
-    if (phoneNumber.length <= 5) {
-      return phoneNumber;
-    }
-    const firstTwo = phoneNumber.slice(0, 2);
-    const lastThree = phoneNumber.slice(-3);
-    const middleLength = phoneNumber.length - 5;
-    const censoredMiddle = '*'.repeat(middleLength);
-    return `${firstTwo}${censoredMiddle}${lastThree}`;
-  }
-
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
       await this.doc.loadInfo();
       logger.info('Información del documento cargada exitosamente');
       
-      const sheet = this.doc.sheetsByIndex[2];
+      const sheet = this.doc.sheetsByIndex[1];
       logger.info(`Hoja seleccionada: ${sheet.title}`);
       
       await sheet.loadCells();
@@ -1541,8 +1539,9 @@ class GoogleSheetService {
         formattedDate,
         censoredPhone,
         data.nombre,
+        data.correo || '',
         data.pedido,
-        data.observaciones,
+        data.archivos || '',
         data.total,
         "Nueva cotización"
       ];
@@ -1559,7 +1558,6 @@ class GoogleSheetService {
         const firstRow = result[0];
         logger.info(`Tipo de la primera fila: ${typeof firstRow}`);
         
-        // Extraer propiedades seguras individualmente
         const safeProperties = {
           rowIndex: firstRow.rowIndex,
           rowNumber: firstRow._rowNumber || firstRow.rowNumber,
@@ -1580,6 +1578,17 @@ class GoogleSheetService {
       logger.error("Stack trace:", err.stack);
       throw new CustomError('OrderSaveError', `Error al guardar la cotización: ${err.message}`, err);
     }
+  }
+
+  censorPhoneNumber(phoneNumber) {
+    if (phoneNumber.length <= 5) {
+      return phoneNumber;
+    }
+    const firstTwo = phoneNumber.slice(0, 2);
+    const lastThree = phoneNumber.slice(-3);
+    const middleLength = phoneNumber.length - 5;
+    const censoredMiddle = '*'.repeat(middleLength);
+    return `${firstTwo}${censoredMiddle}${lastThree}`;
   }
 
   async reinitialize() {
