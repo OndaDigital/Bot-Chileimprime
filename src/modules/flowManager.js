@@ -74,16 +74,15 @@ class FlowManager {
             fileAnalysis: validationResult
           });
           
-          this.enqueueMessage(ctx.from, "ARCHIVO_RECIBIDO", async (accumulatedMessage) => {
+          this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
-          });
+          });          
         } catch (error) {
           logger.error(`Error al procesar el archivo: ${error.message}`);
           await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
         }
       });
   }
-
 
   createConfirmedFlow() {
     return addKeyword(EVENTS.ACTION)
@@ -141,221 +140,220 @@ class FlowManager {
         }
         return endFlow();
       });
+  }
 
-    }
+  enqueueMessage(userId, message, callback) {
+    this.messageQueue.enqueueMessage(userId, message, callback);
+  }
 
-    enqueueMessage(userId, message, callback) {
-      this.messageQueue.enqueueMessage(userId, message, callback);
-    }
-  
-    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
-      const userId = ctx.from;
-      logger.info(`Procesando mensaje para usuario ${userId}`);
-  
-      if (this.isBlacklisted(userId)) {
-        logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-        return endFlow();
-      }
-  
-      if (orderManager.isOrderConfirmed(userId)) {
-        logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
-        return gotoFlow(this.getFlowByName('confirmedFlow'));
-      }
-  
-      this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-  
-      try {
-        const userContext = userContextManager.getUserContext(userId);
-        const chatContext = userContextManager.getChatContext(userId);
-        
-        const aiResponse = await openaiService.getChatCompletion(
-          openaiService.getSystemPrompt(userContext.services, userContext.additionalInfo, userContext.currentOrder, chatContext),
-          [...chatContext, { role: "user", content: message }]
-        );
-        logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
-  
-        userContextManager.updateContext(userId, message, "user");
-        userContextManager.updateContext(userId, aiResponse, "assistant");
-  
-        const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
-  
-        switch (action) {
-          case "SELECT_SERVICE":
-            await this.handleSelectService(ctx, flowDynamic, order);
-            break;
-          case "SET_MEASURES":
-            await this.handleSetMeasures(ctx, flowDynamic, order);
-            break;
-          case "SET_QUANTITY":
-            await this.handleSetQuantity(ctx, flowDynamic, order);
-            break;
-          case "SET_FINISHES":
-            await this.handleSetFinishes(ctx, flowDynamic, order);
-            break;
-          case "VALIDATE_FILE":
-            await this.handleFileValidation(ctx, flowDynamic, order);
-            break;
-          case "CONFIRM_ORDER":
-            await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
-            break;
-          case "SOLICITUD_HUMANO":
-            await this.handleHumanRequest(ctx, flowDynamic, endFlow);
-            break;
-          case "ADVERTENCIA_MAL_USO_DETECTADO":
-            await this.handleAbuseDetected(ctx, flowDynamic, endFlow);
-            break;
-          default:
-            await flowDynamic(aiResponse);
-        }
-      } catch (error) {
-        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
-      }
-    }
-  
-    async processAIResponse(aiResponse, userId, userContext) {
-      try {
-        const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
-        if (jsonCommandMatch) {
-          const jsonCommand = JSON.parse(jsonCommandMatch[0]);
-          return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
-        }
-        return { action: "CONTINUAR", order: userContext.currentOrder };
-      } catch (error) {
-        logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
-        return { action: "CONTINUAR", order: userContext.currentOrder };
-      }
-    }
-  
-    async handleSelectService(ctx, flowDynamic, order) {
-      await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ${order.category === 'Telas PVC' || order.category === 'Banderas' || order.category === 'Adhesivos' || order.category === 'Adhesivo Vehicular' || order.category === 'Back Light' ? 'Por favor, especifica las medidas que necesitas.' : '¿Cuántas unidades necesitas?'}`);
-    }
-  
-    async handleSetMeasures(ctx, flowDynamic, order) {
-      await flowDynamic(`Medidas registradas: *${order.measures.width}m de ancho x ${order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
-    }
-  
-    async handleSetQuantity(ctx, flowDynamic, order) {
-      await flowDynamic(`Cantidad registrada: *${order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
-    }
-  
-    async handleSetFinishes(ctx, flowDynamic, order) {
-      const finishes = [];
-      if (order.finishes.sellado) finishes.push("sellado");
-      if (order.finishes.ojetillos) finishes.push("ojetillos");
-      if (order.finishes.bolsillo) finishes.push("bolsillo");
-      const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
-      await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
-    }
-  
-    async handleFileValidation(ctx, flowDynamic, order) {
-      if (order.fileAnalysis.isValid) {
-        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
-      } else {
-        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
-      }
-    }
-  
-    async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
-      try {
-        const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
-        await flowDynamic(summary);
-        await flowDynamic(result.message);
-        logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
-        
-        this.addToBlacklist(ctx.from, config.blacklistDuration);
-        this.clearIdleTimer(ctx.from);
-        
-        setTimeout(() => {
-          gotoFlow(this.getFlowByName('promoFlow'));
-        }, config.promoMessageDelay);
-        
-        return endFlow();
-      } catch (error) {
-        logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
-        await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
-      }
-    }
-  
-    async handleHumanRequest(ctx, flowDynamic, endFlow) {
-      this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
-      this.resetConversation(ctx.from);
-      await flowDynamic("*Entendido* 👍. Un representante se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
-      logger.info(`Solicitud de humano para ${ctx.from}. Añadido a la lista negra por ${config.humanBlacklistDuration/1000} segundos.`);
+  async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
+    const userId = ctx.from;
+    logger.info(`Procesando mensaje para usuario ${userId}`);
+
+    if (this.isBlacklisted(userId)) {
+      logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
       return endFlow();
     }
-  
-    async handleAbuseDetected(ctx, flowDynamic, endFlow) {
-      this.addToBlacklist(ctx.from, config.abuseBlacklistDuration);
-      this.resetConversation(ctx.from);
-      await flowDynamic("*Lo siento* 😔, pero hemos detectado un uso inapropiado del sistema. Tu acceso ha sido *temporalmente suspendido*. Si crees que esto es un error, por favor contacta con nuestro equipo de soporte.");
-      logger.info(`Mal uso detectado para ${ctx.from}. Añadido a la lista negra por ${config.abuseBlacklistDuration/1000} segundos.`);
-      return endFlow();
+
+    if (orderManager.isOrderConfirmed(userId)) {
+      logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
+      return gotoFlow(this.getFlowByName('confirmedFlow'));
     }
-  
-    setIdleTimers(userId, timers) {
-      this.idleTimers.set(userId, timers);
-    }
-  
-    addToBlacklist(userId, duration) {
-      this.blacklist.set(userId, Date.now() + duration);
-      logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
-    }
-  
-    isBlacklisted(userId) {
-      if (this.blacklist.has(userId)) {
-        const blacklistExpiry = this.blacklist.get(userId);
-        if (Date.now() < blacklistExpiry) {
-          logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
-          return true;
-        } else {
-          this.blacklist.delete(userId);
-          this.resetConversation(userId);
-          logger.info(`Usuario ${userId} removido de la lista negra`);
-        }
-      }
-      return false;
-    }
-  
-    resetConversation(userId) {
-      userContextManager.resetContext(userId);
-      orderManager.resetOrder(userId);
-      this.blacklist.delete(userId);
-      this.clearIdleTimer(userId);
-      logger.info(`Conversación reiniciada para usuario ${userId}`);
-    }
-  
-    startIdleTimer(ctx, flowDynamic, gotoFlow) {
-      this.clearIdleTimer(ctx.from);
+
+    this.startIdleTimer(ctx, flowDynamic, gotoFlow);
+
+    try {
+      const userContext = userContextManager.getUserContext(userId);
+      const chatContext = userContextManager.getChatContext(userId);
       
-      const warningTimer = setTimeout(async () => {
-        await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
-      }, config.idleWarningTime);
-  
-      const timeoutTimer = setTimeout(() => {
-        this.resetConversation(ctx.from);
-        gotoFlow(this.getFlowByName('idleTimeoutFlow'));
-      }, config.idleTimeoutTime);
-  
-      this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
-    }
-  
-    clearIdleTimer(userId) {
-      const timers = this.idleTimers.get(userId);
-      if (timers) {
-        clearTimeout(timers.warningTimer);
-        clearTimeout(timers.timeoutTimer);
-        this.idleTimers.delete(userId);
+      const aiResponse = await openaiService.getChatCompletion(
+        openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+        [...chatContext, { role: "user", content: message }]
+      );
+      logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
+
+      userContextManager.updateContext(userId, message, "user");
+      userContextManager.updateContext(userId, aiResponse, "assistant");
+
+      const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
+
+      switch (action) {
+        case "SELECT_SERVICE":
+          await this.handleSelectService(ctx, flowDynamic, order);
+          break;
+        case "SET_MEASURES":
+          await this.handleSetMeasures(ctx, flowDynamic, order);
+          break;
+        case "SET_QUANTITY":
+          await this.handleSetQuantity(ctx, flowDynamic, order);
+          break;
+        case "SET_FINISHES":
+          await this.handleSetFinishes(ctx, flowDynamic, order);
+          break;
+        case "VALIDATE_FILE":
+          await this.handleFileValidation(ctx, flowDynamic, order);
+          break;
+        case "CONFIRM_ORDER":
+          await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
+          break;
+        case "SOLICITUD_HUMANO":
+          await this.handleHumanRequest(ctx, flowDynamic, endFlow);
+          break;
+        case "ADVERTENCIA_MAL_USO_DETECTADO":
+          await this.handleAbuseDetected(ctx, flowDynamic, endFlow);
+          break;
+        default:
+          await flowDynamic(aiResponse);
       }
-    }
-  
-    blacklistMiddleware(ctx, { endFlow }) {
-      if (this.isBlacklisted(ctx.from)) {
-        logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
-        return endFlow();
-      }
-      return false;
+    } catch (error) {
+      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
   }
-  
-  export default new FlowManager();
+
+  async processAIResponse(aiResponse, userId, userContext) {
+    try {
+      const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
+      if (jsonCommandMatch) {
+        const jsonCommand = JSON.parse(jsonCommandMatch[0]);
+        return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
+      }
+      return { action: "CONTINUAR", order: userContext.currentOrder };
+    } catch (error) {
+      logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
+      return { action: "CONTINUAR", order: userContext.currentOrder };
+    }
+  }
+
+  async handleSelectService(ctx, flowDynamic, order) {
+    await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ${order.category === 'Telas PVC' || order.category === 'Banderas' || order.category === 'Adhesivos' || order.category === 'Adhesivo Vehicular' || order.category === 'Back Light' ? 'Por favor, especifica las medidas que necesitas.' : '¿Cuántas unidades necesitas?'}`);
+  }
+
+  async handleSetMeasures(ctx, flowDynamic, order) {
+    await flowDynamic(`Medidas registradas: *${order.measures.width}m de ancho x ${order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
+  }
+
+  async handleSetQuantity(ctx, flowDynamic, order) {
+    await flowDynamic(`Cantidad registrada: *${order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+  }
+
+  async handleSetFinishes(ctx, flowDynamic, order) {
+    const finishes = [];
+    if (order.finishes.sellado) finishes.push("sellado");
+    if (order.finishes.ojetillos) finishes.push("ojetillos");
+    if (order.finishes.bolsillo) finishes.push("bolsillo");
+    const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
+    await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
+  }
+
+  async handleFileValidation(ctx, flowDynamic, order) {
+    if (order.fileAnalysis.isValid) {
+      await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
+    } else {
+      await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
+    }
+  }
+
+  async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
+    try {
+      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
+      await flowDynamic(summary);
+      await flowDynamic(result.message);
+      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
+      
+      this.addToBlacklist(ctx.from, config.blacklistDuration);
+      this.clearIdleTimer(ctx.from);
+      
+      setTimeout(() => {
+        gotoFlow(this.getFlowByName('promoFlow'));
+      }, config.promoMessageDelay);
+      
+      return endFlow();
+    } catch (error) {
+      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+    }
+  }
+
+  async handleHumanRequest(ctx, flowDynamic, endFlow) {
+    this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
+    this.resetConversation(ctx.from);
+    await flowDynamic("*Entendido* 👍. Un representante se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
+    logger.info(`Solicitud de humano para ${ctx.from}. Añadido a la lista negra por ${config.humanBlacklistDuration/1000} segundos.`);
+    return endFlow();
+  }
+
+  async handleAbuseDetected(ctx, flowDynamic, endFlow) {
+    this.addToBlacklist(ctx.from, config.abuseBlacklistDuration);
+    this.resetConversation(ctx.from);
+    await flowDynamic("*Lo siento* 😔, pero hemos detectado un uso inapropiado del sistema. Tu acceso ha sido *temporalmente suspendido*. Si crees que esto es un error, por favor contacta con nuestro equipo de soporte.");
+    logger.info(`Mal uso detectado para ${ctx.from}. Añadido a la lista negra por ${config.abuseBlacklistDuration/1000} segundos.`);
+    return endFlow();
+  }
+
+  setIdleTimers(userId, timers) {
+    this.idleTimers.set(userId, timers);
+  }
+
+  addToBlacklist(userId, duration) {
+    this.blacklist.set(userId, Date.now() + duration);
+    logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
+  }
+
+  isBlacklisted(userId) {
+    if (this.blacklist.has(userId)) {
+      const blacklistExpiry = this.blacklist.get(userId);
+      if (Date.now() < blacklistExpiry) {
+        logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
+        return true;
+      } else {
+        this.blacklist.delete(userId);
+        this.resetConversation(userId);
+        logger.info(`Usuario ${userId} removido de la lista negra`);
+      }
+    }
+    return false;
+  }
+
+  resetConversation(userId) {
+    userContextManager.resetContext(userId);
+    orderManager.resetOrder(userId);
+    this.blacklist.delete(userId);
+    this.clearIdleTimer(userId);
+    logger.info(`Conversación reiniciada para usuario ${userId}`);
+  }
+
+  startIdleTimer(ctx, flowDynamic, gotoFlow) {
+    this.clearIdleTimer(ctx.from);
+    
+    const warningTimer = setTimeout(async () => {
+      await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
+    }, config.idleWarningTime);
+
+    const timeoutTimer = setTimeout(() => {
+      this.resetConversation(ctx.from);
+      gotoFlow(this.getFlowByName('idleTimeoutFlow'));
+    }, config.idleTimeoutTime);
+
+    this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
+  }
+
+  clearIdleTimer(userId) {
+    const timers = this.idleTimers.get(userId);
+    if (timers) {
+      clearTimeout(timers.warningTimer);
+      clearTimeout(timers.timeoutTimer);
+      this.idleTimers.delete(userId);
+    }
+  }
+
+  blacklistMiddleware(ctx, { endFlow }) {
+    if (this.isBlacklisted(ctx.from)) {
+      logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
+      return endFlow();
+    }
+    return false;
+  }
+}
+
+export default new FlowManager();

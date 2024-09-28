@@ -76,6 +76,7 @@ class FileValidationService {
   checkFileRequirements(fileInfo, service) {
     let isValid = true;
     let reason = '';
+    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
 
     // Verificar formato
     if (service.format && service.format.toLowerCase() !== fileInfo.format.toLowerCase()) {
@@ -84,7 +85,6 @@ class FileValidationService {
     }
 
     // Verificar DPI
-    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
     let requiredDPI;
     if (area < 2) {
       requiredDPI = 150;
@@ -112,7 +112,8 @@ class FileValidationService {
     return {
       isValid,
       reason: reason.trim() || 'El archivo cumple con todos los requisitos.',
-      fileInfo
+      fileInfo,
+      area
     };
   }
 }

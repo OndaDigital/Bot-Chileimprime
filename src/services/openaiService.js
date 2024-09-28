@@ -82,14 +82,31 @@ class OpenAIService {
          {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
 
     5. Subida y Validación de Archivos:
-       - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
-       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
-         a) El servicio seleccionado
-         b) Las medidas especificadas
-         c) El resultado del análisis del archivo
-       - Si el archivo es válido, informa al cliente y procede con la confirmación del pedido.
-       - Si no es válido, explica las razones y proporciona instrucciones claras sobre cómo corregirlo.
-         Pide al cliente que envíe un nuevo archivo que cumpla con las especificaciones.
+      - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
+      - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
+        a) El servicio seleccionado
+        b) Las medidas especificadas
+        c) El resultado del análisis del archivo (formato, DPI, dimensiones)
+      - Criterios de validación (NO menciones esto al cliente, úsalo sólo para tu evaluación):
+        <criterios_validacion>
+          TAMAÑO DEL DISEÑO: Resolución mínimo 72 dpi y máximo 150 dpi a tamaño real; la resolución dependerá del tamaño del archivo.
+          Los Formatos menores a 2 metros cuadrados a 150 dpi.
+          Los mayores a este tamaño deben estar en mínimo 72 dpi y máximo 120 dpi.
+          Si el diseño final supera los 20 metros cuadrados deberá estar en 72 dpi.
+          IMÁGENES: Las imágenes deben ser procesadas preferentemente en formato CMYK y no en RGB para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime.
+          Para imágenes que demandan exigencias de calidad y que serán observadas a menos de 2 metros de distancia, que sean procesadas a 150 dpi e impresas en alta resolución (1440 dpi).
+          FORMATOS: En cuanto a los programas, te sirve cualquier aplicación profesional como:
+          illustrator (.ai), photoshop (.psd), corel draw (.cdr).
+          RESOLUCIÓN DE IMPRESIÓN: Resolución Standard 720 dpi
+          Ita Resolución 1440 dpi
+          ACABADOS DE IMPRESIÓN: Cortes, perforaciones, sobrantes, dobleces, troqueles u otras labores de acabado deben ser marcadas con LÍNEAS PUNTEADAS COLOR MAGENTA.
+          En pancartas, pendones o lonas que llevaran perforaciones u ojales, tome en cuenta la ubicación para que no interfirieran en el diseño; especifique la ubicación con líneas punteadas color magenta.
+        </criterios_validacion>
+      - Explica detalladamente si el archivo es válido o no, y por qué.
+      - Si el archivo es válido, responde con el comando JSON:
+        {"command": "VALIDATE_FILE", "isValid": true}
+      - Si no es válido, proporciona instrucciones claras sobre cómo corregirlo y responde:
+        {"command": "VALIDATE_FILE", "isValid": false, "reason": "[Explicación]"}
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
