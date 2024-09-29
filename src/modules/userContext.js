@@ -18,30 +18,34 @@ class UserContextManager {
       this.userContexts.set(userId, {
         context: "",
         chatContext: [],
-        currentOrder: {
-          service: null,
-          category: null,
-          type: null,
-          measures: null,
-          finishes: {
-            sellado: false,
-            ojetillos: false,
-            bolsillo: false
-          },
-          quantity: null,
-          filePath: null,
-          fileAnalysis: null,
-          availableWidths: [],
-          availableFinishes: [],
-          fileValidationCriteria: {},
-          price: 0
-        },
+        currentOrder: this.getEmptyOrder(),
         services: this.services,
         additionalInfo: this.additionalInfo
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
     return this.userContexts.get(userId);
+  }
+
+  getEmptyOrder() {
+    return {
+      service: null,
+      category: null,
+      type: null,
+      measures: null,
+      finishes: {
+        sellado: false,
+        ojetillos: false,
+        bolsillo: false
+      },
+      quantity: null,
+      filePath: null,
+      fileAnalysis: null,
+      availableWidths: [],
+      availableFinishes: [],
+      fileValidationCriteria: {},
+      price: 0
+    };
   }
 
   updateContext(userId, message, role) {
@@ -70,19 +74,27 @@ class UserContextManager {
     
     if (updates.service) {
       const serviceInfo = this.getServiceInfo(updates.service);
-      userContext.currentOrder.category = serviceInfo.category;
-      userContext.currentOrder.type = serviceInfo.type;
-      userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
-      userContext.currentOrder.availableFinishes = this.getAvailableFinishes(serviceInfo);
-      userContext.currentOrder.fileValidationCriteria = {
-        format: serviceInfo.format,
-        minDPI: serviceInfo.minDPI,
-      };
+      if (serviceInfo) {
+        userContext.currentOrder.category = serviceInfo.category;
+        userContext.currentOrder.type = serviceInfo.type;
+        userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
+        userContext.currentOrder.availableFinishes = this.getAvailableFinishes(serviceInfo);
+        userContext.currentOrder.fileValidationCriteria = {
+          format: serviceInfo.format,
+          minDPI: serviceInfo.minDPI,
+        };
 
-      logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
+        logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
+      } else {
+        logger.warn(`Servicio no encontrado: ${updates.service}`);
+      }
     }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+  }
+
+  getCurrentOrder(userId) {
+    return this.getUserContext(userId).currentOrder;
   }
 
   getServiceInfo(serviceName) {
@@ -92,6 +104,7 @@ class UserContextManager {
         return service;
       }
     }
+    logger.warn(`Servicio no encontrado: ${serviceName}`);
     return null;
   }
 
@@ -120,8 +133,6 @@ class UserContextManager {
     return allServices;
   }
 
-
-
   getAvailableFinishes(serviceInfo) {
     const finishes = [];
     if (serviceInfo.sellado) finishes.push("sellado");
@@ -144,9 +155,7 @@ class UserContextManager {
   }
 
   isOrderComplete(userId) {
-    const userContext = this.getUserContext(userId);
-    const order = userContext.currentOrder;
-
+    const order = this.getCurrentOrder(userId);
     const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
@@ -162,35 +171,8 @@ class UserContextManager {
     return true;
   }
 
-  calculatePrice(userId) {
-    const userContext = this.getUserContext(userId);
-    const order = userContext.currentOrder;
-    const serviceInfo = this.getServiceInfo(order.service);
-
-    let total = 0;
-
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      const area = order.measures.width * order.measures.height;
-      total = area * serviceInfo.precio * order.quantity;
-
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * area;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * area;
-    } else {
-      total = serviceInfo.precio * order.quantity;
-
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
-    }
-
-    userContext.currentOrder.price = total;
-    return total;
-  }
-
   getChatContext(userId) {
-    const userContext = this.getUserContext(userId);
-    return userContext.chatContext;
+    return this.getUserContext(userId).chatContext;
   }
 }
 

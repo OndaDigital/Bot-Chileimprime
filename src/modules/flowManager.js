@@ -175,7 +175,7 @@ class FlowManager {
       userContextManager.updateContext(userId, message, "user");
       userContextManager.updateContext(userId, aiResponse, "assistant");
 
-      const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
+      const { action, order } = this.processAIResponse(aiResponse, userId, userContext);
 
       switch (action) {
         case "LIST_ALL_SERVICES":
@@ -199,20 +199,14 @@ class FlowManager {
         case "CONFIRM_ORDER":
           await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
           break;
-        case "SOLICITUD_HUMANO":
-          await this.handleHumanRequest(ctx, flowDynamic, endFlow);
-          break;
-        case "ADVERTENCIA_MAL_USO_DETECTADO":
-          await this.handleAbuseDetected(ctx, flowDynamic, endFlow);
-          break;
         default:
           await flowDynamic(aiResponse);
+        }
+      } catch (error) {
+        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
-    } catch (error) {
-      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
-  }
 
   async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order) {
     try {
@@ -255,6 +249,7 @@ class FlowManager {
       const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
       if (jsonCommandMatch) {
         const jsonCommand = JSON.parse(jsonCommandMatch[0]);
+        logger.info(`Comando JSON recibido para ${userId}: ${JSON.stringify(jsonCommand)}`);
         switch (jsonCommand.command) {
           case "LIST_ALL_SERVICES":
             return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
@@ -271,13 +266,13 @@ class FlowManager {
           case "CONFIRM_ORDER":
             return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
           default:
-            logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
+            logger.warn(`Comando desconocido recibido para ${userId}: ${jsonCommand.command}`);
             return { action: "CONTINUAR", order: userContext.currentOrder };
         }
       }
       return { action: "CONTINUAR", order: userContext.currentOrder };
     } catch (error) {
-      logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
+      logger.error(`Error al procesar la respuesta de AI para ${userId}: ${error.message}`);
       return { action: "CONTINUAR", order: userContext.currentOrder };
     }
   }

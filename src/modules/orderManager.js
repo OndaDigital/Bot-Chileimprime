@@ -11,36 +11,9 @@ class OrderManager {
     this.orderConfirmed = new Set();
   }
 
-  async updateOrder(userId, jsonCommand, services, currentOrder) {
-    logger.info(`Actualizando orden para usuario ${userId}. Comando: ${JSON.stringify(jsonCommand)}`);
-    try {
-      switch (jsonCommand.command) {
-        case "SELECT_SERVICE":
-          return this.handleSelectService(userId, jsonCommand.service);
-        case "SET_MEASURES":
-          return this.handleSetMeasures(userId, jsonCommand.width, jsonCommand.height);
-        case "SET_QUANTITY":
-          return this.handleSetQuantity(userId, jsonCommand.quantity);
-        case "SET_FINISHES":
-          return this.handleSetFinishes(userId, jsonCommand.sellado, jsonCommand.ojetillos, jsonCommand.bolsillo);
-        case "VALIDATE_FILE":
-          return this.handleValidateFile(userId, jsonCommand.isValid, jsonCommand.reason);
-        case "CONFIRM_ORDER":
-          return this.handleConfirmOrder(userId);
-        default:
-          logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
-          return { action: "CONTINUAR", order: currentOrder };
-      }
-    } catch (error) {
-      logger.error(`Error al actualizar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError('OrderUpdateError', 'Error al actualizar el pedido', error);
-    }
-  }
-
   async handleSelectService(userId, serviceName) {
     logger.info(`Manejando selección de servicio para usuario ${userId}: ${serviceName}`);
     try {
-      const userContext = userContextManager.getUserContext(userId);
       const serviceInfo = userContextManager.getServiceInfo(serviceName);
       
       if (!serviceInfo) {
@@ -48,18 +21,20 @@ class OrderManager {
         return {
           action: "INVALID_SERVICE",
           similarServices,
-          order: userContext.currentOrder
+          order: userContextManager.getCurrentOrder(userId)
         };
       }
 
       userContextManager.updateCurrentOrder(userId, { 
         service: serviceName,
-        category: serviceInfo.category
+        category: serviceInfo.category,
+        availableWidths: serviceInfo.availableWidths,
+        availableFinishes: userContextManager.getAvailableFinishes(serviceInfo)
       });
       
       return {
         action: "SELECT_SERVICE",
-        order: userContext.currentOrder,
+        order: userContextManager.getCurrentOrder(userId),
         serviceInfo: serviceInfo
       };
     } catch (error) {
@@ -71,8 +46,8 @@ class OrderManager {
   async handleSetMeasures(userId, width, height) {
     logger.info(`Manejando configuración de medidas para usuario ${userId}: ${width}x${height}`);
     try {
-      const userContext = userContextManager.getUserContext(userId);
-      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
 
       if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
         throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
@@ -93,7 +68,7 @@ class OrderManager {
 
       return {
         action: "SET_MEASURES",
-        order: userContext.currentOrder
+        order: userContextManager.getCurrentOrder(userId)
       };
     } catch (error) {
       logger.error(`Error al configurar medidas para usuario ${userId}: ${error.message}`);
@@ -109,11 +84,10 @@ class OrderManager {
       }
 
       userContextManager.updateCurrentOrder(userId, { quantity: quantity });
-      const userContext = userContextManager.getUserContext(userId);
 
       return {
         action: "SET_QUANTITY",
-        order: userContext.currentOrder
+        order: userContextManager.getCurrentOrder(userId)
       };
     } catch (error) {
       logger.error(`Error al configurar cantidad para usuario ${userId}: ${error.message}`);
@@ -124,8 +98,8 @@ class OrderManager {
   async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
     logger.info(`Manejando configuración de acabados para usuario ${userId}`);
     try {
-      const userContext = userContextManager.getUserContext(userId);
-      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
 
       const finishes = {
         sellado: sellado && serviceInfo.sellado,
@@ -137,7 +111,7 @@ class OrderManager {
 
       return {
         action: "SET_FINISHES",
-        order: userContext.currentOrder
+        order: userContextManager.getCurrentOrder(userId)
       };
     } catch (error) {
       logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
@@ -152,11 +126,9 @@ class OrderManager {
         fileAnalysis: { isValid, reason }
       });
       
-      const userContext = userContextManager.getUserContext(userId);
-
       return {
         action: "VALIDATE_FILE",
-        order: userContext.currentOrder
+        order: userContextManager.getCurrentOrder(userId)
       };
     } catch (error) {
       logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
@@ -167,23 +139,23 @@ class OrderManager {
   async handleConfirmOrder(userId) {
     logger.info(`Manejando confirmación de pedido para usuario ${userId}`);
     try {
-      const userContext = userContextManager.getUserContext(userId);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
       
       if (!userContextManager.isOrderComplete(userId)) {
         throw new CustomError('IncompleteOrderError', 'La orden no está completa');
       }
 
-      const total = userContextManager.calculatePrice(userId);
+      const total = this.calculatePrice(currentOrder);
       userContextManager.updateCurrentOrder(userId, { total: total });
 
-      const orderSummary = this.formatOrderSummary(userContext.currentOrder);
-      const result = await this.finalizeOrder(userId, userContext.currentOrder);
+      const orderSummary = this.formatOrderSummary(currentOrder);
+      const result = await this.finalizeOrder(userId, currentOrder);
 
       this.orderConfirmed.add(userId);
 
       return {
         action: "CONFIRM_ORDER",
-        order: userContext.currentOrder,
+        order: currentOrder,
         summary: orderSummary,
         result: result
       };
@@ -191,6 +163,29 @@ class OrderManager {
       logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
       throw new CustomError('OrderConfirmationError', 'Error al confirmar el pedido', error);
     }
+  }
+
+  calculatePrice(order) {
+    const serviceInfo = userContextManager.getServiceInfo(order.service);
+
+    let total = 0;
+
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+      const area = order.measures.width * order.measures.height;
+      total = area * serviceInfo.precio * order.quantity;
+
+      if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
+      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * area;
+      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * area;
+    } else {
+      total = serviceInfo.precio * order.quantity;
+
+      if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
+      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
+      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+    }
+
+    return total;
   }
 
   formatOrderSummary(order) {
@@ -274,7 +269,7 @@ class OrderManager {
     return this.orderConfirmed.has(userId);
   }
 
-  resetOrder(userId) {
+  resetOrderConfirmation(userId) {
     this.orderConfirmed.delete(userId);
   }
 }
