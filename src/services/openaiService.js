@@ -37,7 +37,7 @@ class OpenAIService {
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis, fileAnalysisResponded}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -107,6 +107,7 @@ class OpenAIService {
         </criterios_validacion>
       - Si el archivo es válido para el servicio actual (o en general si aún no se ha seleccionado un servicio), informa al usuario y continúa con el proceso.
       - Si el archivo no es válido, explica detalladamente las razones y proporciona instrucciones claras sobre cómo el usuario puede corregir los problemas.
+      - Utiliza la información en currentOrder.fileAnalysis para validar la compatibilidad con el servicio seleccionado.
       - Si aún no se ha seleccionado un servicio o no se han especificado medidas, informa al usuario que el archivo se ha recibido y se validará una vez que se complete la información del pedido.
       - Después de evaluar la validez del archivo, responde con el comando JSON apropiado:
         {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}

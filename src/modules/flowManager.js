@@ -73,8 +73,11 @@ class FlowManager {
           
           logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
           
-          await flowDynamic('He recibido tu archivo. Lo he analizado y ahora evaluaré si cumple con los requisitos necesarios.');
+          // Generar respuesta inmediata con el análisis del archivo
+          const analysisResponse = this.generateFileAnalysisResponse(fileInfo);
+          await flowDynamic(analysisResponse);
           
+          // Continuar con el flujo normal de la conversación
           this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });          
@@ -83,6 +86,31 @@ class FlowManager {
           await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
         }
       });
+  }
+
+  generateFileAnalysisResponse(fileInfo) {
+    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+    response += `📄 Formato: ${fileInfo.format}\n`;
+    response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
+    response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
+    if (fileInfo.colorSpace) {
+      response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
+    }
+    response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
+    return response;
+  }
+
+  generateFileAnalysisAIResponse(fileAnalysis) {
+    let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
+    response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
+    
+    if (fileAnalysis.colorSpace) {
+      response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
+    }
+
+    response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
+
+    return response;
   }
 
   createConfirmedFlow() {
@@ -167,10 +195,23 @@ class FlowManager {
       const userContext = userContextManager.getUserContext(userId);
       const chatContext = userContextManager.getChatContext(userId);
       
-      const aiResponse = await openaiService.getChatCompletion(
-        openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-        [...chatContext, { role: "user", content: message }]
-      );
+      // Verificar si hay un análisis de archivo reciente
+      const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
+                                    !userContext.currentOrder.fileAnalysisResponded;
+
+      let aiResponse;
+      if (hasRecentFileAnalysis) {
+        // Generar una respuesta específica para el análisis del archivo
+        aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
+        userContext.currentOrder.fileAnalysisResponded = true;
+      } else {
+        // Obtener respuesta normal de OpenAI
+        aiResponse = await openaiService.getChatCompletion(
+          openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+          [...chatContext, { role: "user", content: message }]
+        );
+      }
+
       logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
 
       userContextManager.updateContext(userId, message, "user");

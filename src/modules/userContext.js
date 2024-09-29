@@ -41,6 +41,7 @@ class UserContextManager {
       quantity: null,
       filePath: null,
       fileAnalysis: null,
+      fileAnalysisResponded: false,
       availableWidths: [],
       availableFinishes: [],
       fileValidationCriteria: {},
@@ -94,10 +95,25 @@ class UserContextManager {
         logger.warn(`Servicio no encontrado: ${updates.service}`);
       }
     }
+
+    if (updates.fileAnalysis) {
+      userContext.currentOrder.fileAnalysisResponded = false;
+    }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
+
+  setFileAnalysisResponded(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisResponded = value;
+  }
   
+  hasRecentFileAnalysis(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
+  }
+
+
   getCurrentOrder(userId) {
     return this.getUserContext(userId).currentOrder;
   }
