@@ -42,9 +42,9 @@ class UserContextManager {
       filePath: null,
       fileAnalysis: null,
       fileAnalysisResponded: false,
+      fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
-      fileValidationCriteria: {},
       price: 0
     };
   }
@@ -89,8 +89,6 @@ class UserContextManager {
           minDPI: serviceInfo.minDPI,
         };
         logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
-        logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
-        logger.info(`Terminaciones disponibles para el servicio ${updates.service}: ${JSON.stringify(userContext.currentOrder.availableFinishes)}`);
       } else {
         logger.warn(`Servicio no encontrado: ${updates.service}`);
       }
@@ -98,6 +96,10 @@ class UserContextManager {
 
     if (updates.fileAnalysis) {
       userContext.currentOrder.fileAnalysisResponded = false;
+    }
+
+    if (updates.fileValidation) {
+      userContext.currentOrder.fileValidation = updates.fileValidation;
     }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
@@ -112,7 +114,6 @@ class UserContextManager {
     const userContext = this.getUserContext(userId);
     return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
   }
-
 
   getCurrentOrder(userId) {
     return this.getUserContext(userId).currentOrder;
@@ -146,6 +147,10 @@ class UserContextManager {
     return this.services[category] || [];
   }
 
+  getFileValidationCriteria() {
+    return this.additionalInfo.criteriosValidacion;
+  }
+
   getAllServices() {
     let allServices = [];
     for (const category in this.services) {
@@ -177,7 +182,7 @@ class UserContextManager {
 
   isOrderComplete(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis', 'fileValidation'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
     if (!hasAllRequiredFields) return false;
@@ -189,7 +194,7 @@ class UserContextManager {
       return false;
     }
 
-    return true;
+    return order.fileValidation && order.fileValidation.isValid;
   }
 
   getChatContext(userId) {

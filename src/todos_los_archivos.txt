@@ -312,8 +312,11 @@ class FlowManager {
           
           logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
           
-          await flowDynamic('He recibido tu archivo. Lo he analizado y ahora evaluaré si cumple con los requisitos necesarios.');
+          // Generar respuesta inmediata con el análisis del archivo
+          const analysisResponse = this.generateFileAnalysisResponse(fileInfo);
+          await flowDynamic(analysisResponse);
           
+          // Continuar con el flujo normal de la conversación
           this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });          
@@ -322,6 +325,31 @@ class FlowManager {
           await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
         }
       });
+  }
+
+  generateFileAnalysisResponse(fileInfo) {
+    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+    response += `📄 Formato: ${fileInfo.format}\n`;
+    response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
+    response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
+    if (fileInfo.colorSpace) {
+      response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
+    }
+    response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
+    return response;
+  }
+
+  generateFileAnalysisAIResponse(fileAnalysis) {
+    let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
+    response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
+    
+    if (fileAnalysis.colorSpace) {
+      response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
+    }
+
+    response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
+
+    return response;
   }
 
   createConfirmedFlow() {
@@ -390,31 +418,48 @@ class FlowManager {
     const userId = ctx.from;
     logger.info(`Procesando mensaje para usuario ${userId}`);
 
-    if (this.isBlacklisted(userId)) {
-      logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-      return endFlow();
-    }
-
-    if (orderManager.isOrderConfirmed(userId)) {
-      logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
-      return gotoFlow(this.getFlowByName('confirmedFlow'));
-    }
-
-    this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-
     try {
+      if (this.isBlacklisted(userId)) {
+        logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
+        return endFlow();
+      }
+
+      if (orderManager.isOrderConfirmed(userId)) {
+        logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
+        return gotoFlow(this.getFlowByName('confirmedFlow'));
+      }
+
+      this.startIdleTimer(ctx, flowDynamic, gotoFlow);
+
+      logger.info(`Obteniendo contexto del usuario ${userId}`);
       const userContext = userContextManager.getUserContext(userId);
+      logger.info(`Obteniendo contexto del chat para usuario ${userId}`);
       const chatContext = userContextManager.getChatContext(userId);
       
-      const aiResponse = await openaiService.getChatCompletion(
-        openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-        [...chatContext, { role: "user", content: message }]
-      );
+      logger.info(`Verificando análisis de archivo reciente para usuario ${userId}`);
+      const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
+                                    !userContext.currentOrder.fileAnalysisResponded;
+
+      let aiResponse;
+      if (hasRecentFileAnalysis) {
+        logger.info(`Generando respuesta específica para el análisis del archivo del usuario ${userId}`);
+        aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
+        userContext.currentOrder.fileAnalysisResponded = true;
+      } else {
+        logger.info(`Obteniendo respuesta de OpenAI para usuario ${userId}`);
+        aiResponse = await openaiService.getChatCompletion(
+          openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+          [...chatContext, { role: "user", content: message }]
+        );
+      }
+
       logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
 
+      logger.info(`Actualizando contexto para usuario ${userId}`);
       userContextManager.updateContext(userId, message, "user");
       userContextManager.updateContext(userId, aiResponse, "assistant");
 
+      logger.info(`Procesando respuesta AI para usuario ${userId}`);
       const commands = this.processAIResponse(aiResponse, userId, userContext);
       
       for (const { action, order } of commands) {
@@ -442,7 +487,6 @@ class FlowManager {
             break;
           case "CONTINUAR":
           default:
-            // Eliminar los comandos JSON del mensaje antes de mostrarlo al usuario
             const cleanedResponse = aiResponse.replace(/\{.*?\}/g, '').trim();
             await flowDynamic(cleanedResponse);
         }
@@ -636,6 +680,61 @@ class FlowManager {
       await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
     }
   }
+
+  async handleValidateFileForService(ctx, flowDynamic, order) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+    if (!currentOrder.fileAnalysis) {
+      await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
+      return;
+    }
+
+    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
+
+    try {
+      const validationResult = await openaiService.validateFileForService(
+        currentOrder.fileAnalysis,
+        serviceInfo,
+        currentOrder.measures,
+        currentOrder
+      );
+
+      userContextManager.updateCurrentOrder(userId, {
+        fileValidation: validationResult
+      });
+
+      if (validationResult.isValid) {
+        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
+      } else {
+        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
+      }
+
+      // Generar una nueva respuesta de OpenAI para continuar la conversación
+      const newResponse = await this.getNewAIResponse(userId);
+      await flowDynamic(newResponse);
+
+    } catch (error) {
+      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
+      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+    }
+  }
+
+  async getNewAIResponse(userId) {
+    const userContext = userContextManager.getUserContext(userId);
+    const chatContext = userContextManager.getChatContext(userId);
+    
+    const aiResponse = await openaiService.getChatCompletion(
+      openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+      [...chatContext, { role: "assistant", content: "El archivo ha sido validado. ¿Cómo puedo ayudarte a continuar con tu pedido?" }]
+    );
+
+    userContextManager.updateContext(userId, aiResponse, "assistant");
+    return aiResponse;
+  }
+
+
 
   async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
     try {
@@ -1134,9 +1233,10 @@ class UserContextManager {
       quantity: null,
       filePath: null,
       fileAnalysis: null,
+      fileAnalysisResponded: false,
+      fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
-      fileValidationCriteria: {},
       price: 0
     };
   }
@@ -1181,16 +1281,32 @@ class UserContextManager {
           minDPI: serviceInfo.minDPI,
         };
         logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
-        logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
-        logger.info(`Terminaciones disponibles para el servicio ${updates.service}: ${JSON.stringify(userContext.currentOrder.availableFinishes)}`);
       } else {
         logger.warn(`Servicio no encontrado: ${updates.service}`);
       }
     }
+
+    if (updates.fileAnalysis) {
+      userContext.currentOrder.fileAnalysisResponded = false;
+    }
+
+    if (updates.fileValidation) {
+      userContext.currentOrder.fileValidation = updates.fileValidation;
+    }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
+
+  setFileAnalysisResponded(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisResponded = value;
+  }
   
+  hasRecentFileAnalysis(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
+  }
+
   getCurrentOrder(userId) {
     return this.getUserContext(userId).currentOrder;
   }
@@ -1221,6 +1337,10 @@ class UserContextManager {
 
   getServicesInCategory(category) {
     return this.services[category] || [];
+  }
+
+  getFileValidationCriteria() {
+    return this.additionalInfo.criteriosValidacion;
   }
 
   getAllServices() {
@@ -1254,7 +1374,7 @@ class UserContextManager {
 
   isOrderComplete(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis', 'fileValidation'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
     if (!hasAllRequiredFields) return false;
@@ -1266,7 +1386,7 @@ class UserContextManager {
       return false;
     }
 
-    return true;
+    return order.fileValidation && order.fileValidation.isValid;
   }
 
   getChatContext(userId) {
@@ -1451,12 +1571,23 @@ class OpenAIService {
   getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
+    const criteria = userContextManager.getFileValidationCriteria();
+
+    let fileValidationInfo = "";
+    if (currentOrder.fileValidation) {
+      fileValidationInfo = `
+      Información de validación del archivo:
+      Válido: ${currentOrder.fileValidation.isValid ? 'Sí' : 'No'}
+      Razón: ${currentOrder.fileValidation.reason}
+      `;
+    }
+
 
     return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis, fileAnalysisResponded}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -1502,33 +1633,16 @@ class OpenAIService {
        {"command": "SET_QUANTITY", "quantity": Z}
        {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
  
-5. Validación de Archivos:
-      - Solo valida el archivo cuando currentOrder.fileAnalysis no sea null.
-      - Si currentOrder.fileAnalysis es null, informa al usuario que aún no se ha recibido ningún archivo y solicita que lo envíe.
-      - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
-        a) El servicio seleccionado (si ya se ha seleccionado uno)
-        b) Las medidas especificadas (si ya se han proporcionado)
-        c) La información técnica del archivo (formato, dimensiones, DPI, etc.)
-      - Criterios de validación:
-        <criterios_validacion>
-          TAMAÑO DEL DISEÑO: Resolución mínimo 72 dpi y máximo 150 dpi a tamaño real; la resolución dependerá del tamaño del archivo.
-          Los Formatos menores a 2 metros cuadrados a 150 dpi.
-          Los mayores a este tamaño deben estar en mínimo 72 dpi y máximo 120 dpi.
-          Si el diseño final supera los 20 metros cuadrados deberá estar en 72 dpi.
-          IMÁGENES: Las imágenes deben ser procesadas preferentemente en formato CMYK y no en RGB para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime.
-          Para imágenes que demandan exigencias de calidad y que serán observadas a menos de 2 metros de distancia, que sean procesadas a 150 dpi e impresas en alta resolución (1440 dpi).
-          FORMATOS: En cuanto a los programas, te sirve cualquier aplicación profesional como:
-          illustrator (.ai), photoshop (.psd), corel draw (.cdr).
-          RESOLUCIÓN DE IMPRESIÓN: Resolución Standard 720 dpi
-          Alta Resolución 1440 dpi
-          ACABADOS DE IMPRESIÓN: Cortes, perforaciones, sobrantes, dobleces, troqueles u otras labores de acabado deben ser marcadas con LÍNEAS PUNTEADAS COLOR MAGENTA.
-          En pancartas, pendones o lonas que llevaran perforaciones u ojales, tome en cuenta la ubicación para que no interfirieran en el diseño; especifique la ubicación con líneas punteadas color magenta.
-        </criterios_validacion>
-      - Si el archivo es válido para el servicio actual (o en general si aún no se ha seleccionado un servicio), informa al usuario y continúa con el proceso.
-      - Si el archivo no es válido, explica detalladamente las razones y proporciona instrucciones claras sobre cómo el usuario puede corregir los problemas.
-      - Si aún no se ha seleccionado un servicio o no se han especificado medidas, informa al usuario que el archivo se ha recibido y se validará una vez que se complete la información del pedido.
-      - Después de evaluar la validez del archivo, responde con el comando JSON apropiado:
-        {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
+  5. Validación de Archivos:
+       - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
+         y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
+       - Para solicitar la validación, responde con el comando JSON:
+         {"command": "VALIDATE_FILE_FOR_SERVICE"}
+       - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
+       - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
+       - Los criterios de validación son los siguientes:
+        <criterios_validacion> ${criteria}<criterios_validacion>
+        Informacion de validacion: <file_validation_info> ${fileValidationInfo} <file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
@@ -1582,6 +1696,56 @@ class OpenAIService {
     }
     return allServices;
   }
+
+  async validateFileForService(fileAnalysis, service, measures, currentOrder) {
+    const criteria = userContextManager.getFileValidationCriteria();
+    const prompt = `Eres un experto en análisis de archivos de impresión. 
+    Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
+    Ancho: ${measures.width}m, Alto: ${measures.height}m.
+
+    Información del archivo:
+    ${JSON.stringify(fileAnalysis)}
+
+    Criterios de validación:
+    ${criteria}
+
+    Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
+    Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.
+    
+    Al final de tu análisis, incluye un comando JSON con el siguiente formato:
+    {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
+    
+    Asegúrate de que el valor de "isValid" sea true si el archivo cumple con todos los criterios, y false en caso contrario.`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: config.languageModel,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: "Valida este archivo para el servicio y medidas especificados." }
+        ],
+        max_tokens: config.maxTokens,
+        temperature: 0.7,
+      });
+
+      const analysis = response.choices[0].message.content.trim();
+      const commandMatch = analysis.match(/\{.*\}/);
+      if (!commandMatch) {
+        throw new Error("No se pudo extraer el comando JSON del análisis");
+      }
+
+      const command = JSON.parse(commandMatch[0]);
+      return {
+        analysis: analysis.replace(commandMatch[0], '').trim(),
+        isValid: command.isValid,
+        reason: command.reason
+      };
+    } catch (error) {
+      logger.error("Error al validar el archivo con OpenAI:", error);
+      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
+    }
+  }
+
 
 
   async transcribeAudio(audioFilePath) {
@@ -1646,16 +1810,24 @@ class GoogleSheetService {
 
   async initialize() {
     try {
+      logger.info("Iniciando inicialización de SheetService");
       await this.doc.loadInfo();
+      logger.info("Documento de Google Sheets cargado correctamente");
+      
       await this.retryOperation(() => this.loadServicesWithRetry());
+      logger.info("Servicios cargados correctamente");
+      
       await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
+      logger.info("Información adicional cargada correctamente");
+      
       this.isInitialized = true;
-      logger.info("Servicios e información adicional inicializados correctamente");
+      logger.info("SheetService inicializado completamente");
     } catch (error) {
       logger.error(`Error al inicializar SheetService: ${error.message}`);
       throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
     }
   }
+  
 
   async retryOperation(operation, maxRetries = MAX_RETRIES) {
     let retries = 0;
@@ -1663,7 +1835,10 @@ class GoogleSheetService {
       try {
         return await operation();
       } catch (error) {
-        if (retries === maxRetries - 1) throw error;
+        if (retries === maxRetries - 1) {
+          logger.error(`Error después de ${maxRetries} intentos: ${error.message}`);
+          throw error;
+        }
         const delay = Math.pow(2, retries) * INITIAL_RETRY_DELAY;
         logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -1673,11 +1848,15 @@ class GoogleSheetService {
   }
 
   async loadServicesWithRetry() {
+    logger.info("Iniciando carga de servicios");
     this.services = await this.getServices();
+    logger.info(`Servicios cargados: ${Object.keys(this.services).length} categorías`);
   }
 
   async loadAdditionalInfoWithRetry() {
+    logger.info("Iniciando carga de información adicional");
     this.additionalInfo = await this.getAdditionalInfo();
+    logger.info("Información adicional cargada");
   }
 
   async getServices() {
@@ -1785,11 +1964,13 @@ class GoogleSheetService {
     }).filter(w => w !== null);
   }
 
-  async getAdditionalInfo() {
+ async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
-      await sheet.loadCells('A1:H11');
+      await sheet.loadCells();
+  
+      logger.info("Cargando información adicional de la hoja 'Informacion'");
   
       const additionalInfo = {
         horarios: {},
@@ -1797,12 +1978,15 @@ class GoogleSheetService {
         direccionRetiro: '',
         promocionDia: '',
         metodosPago: '',
-        tiempoPreparacion: ''
+        tiempoPreparacion: '',
+        criteriosValidacion: '',
+        estadoBot: ''
       };
   
       this.extractAdditionalInfo(sheet, additionalInfo);
   
       logger.info("Información adicional cargada completamente");
+      logger.debug(`Información adicional: ${JSON.stringify(additionalInfo)}`);
   
       return additionalInfo;
     } catch (err) {
@@ -1811,21 +1995,38 @@ class GoogleSheetService {
     }
   }
 
+
   extractAdditionalInfo(sheet, additionalInfo) {
+    const safeGetCellValue = (row, col) => {
+      try {
+        const cell = sheet.getCell(row, col);
+        return cell.value || '';
+      } catch (error) {
+        logger.warn(`No se pudo obtener el valor de la celda (${row}, ${col}): ${error.message}`);
+        return '';
+      }
+    };
+
     ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-      additionalInfo.horarios[dia] = sheet.getCell(index + 1, 1).value || 'No disponible';
+      additionalInfo.horarios[dia] = `${safeGetCellValue(index + 1, 0)} ${safeGetCellValue(index + 1, 1)}`.trim() || 'No disponible';
     });
   
     for (let row = 1; row <= 9; row++) {
-      const zona = sheet.getCell(row, 2).value;
+      const zona = safeGetCellValue(row, 2);
       if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
     }
   
-    additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
-    additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
-    additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
-    additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
+    additionalInfo.direccionRetiro = safeGetCellValue(1, 4) || 'No disponible';
+    additionalInfo.promocionDia = safeGetCellValue(1, 5) || 'No hay promociones actualmente';
+    additionalInfo.metodosPago = safeGetCellValue(1, 6) || 'No especificado';
+    additionalInfo.tiempoPreparacion = safeGetCellValue(1, 7) || 'No especificado';
+    additionalInfo.criteriosValidacion = safeGetCellValue(1, 8) || 'No especificado';
+    additionalInfo.estadoBot = safeGetCellValue(1, 9) || 'No especificado';
+  
+    logger.info(`Criterios de validación extraídos: ${additionalInfo.criteriosValidacion}`);
+    logger.info(`Estado del bot: ${additionalInfo.estadoBot}`);
   }
+
 
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);

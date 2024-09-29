@@ -221,6 +221,9 @@ class FlowManager {
       
       for (const { action, order } of commands) {
         switch (action) {
+          case "VALIDATE_FILE_FOR_SERVICE":
+            await this.handleValidateFileForService(ctx, flowDynamic, order);
+            break;
           case "LIST_ALL_SERVICES":
             await this.handleListAllServices(ctx, flowDynamic);
             break;
@@ -251,6 +254,8 @@ class FlowManager {
       }
     } catch (error) {
       logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+      logger.error(`Stack trace: ${error.stack}`);
+      console.error('Error completo:', error);
       await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
   }
@@ -438,6 +443,61 @@ class FlowManager {
       await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
     }
   }
+
+  async handleValidateFileForService(ctx, flowDynamic, order) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+    if (!currentOrder.fileAnalysis) {
+      await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
+      return;
+    }
+
+    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
+
+    try {
+      const validationResult = await openaiService.validateFileForService(
+        currentOrder.fileAnalysis,
+        serviceInfo,
+        currentOrder.measures,
+        currentOrder
+      );
+
+      userContextManager.updateCurrentOrder(userId, {
+        fileValidation: validationResult
+      });
+
+      if (validationResult.isValid) {
+        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
+      } else {
+        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
+      }
+
+      // Generar una nueva respuesta de OpenAI para continuar la conversación
+      const newResponse = await this.getNewAIResponse(userId);
+      await flowDynamic(newResponse);
+
+    } catch (error) {
+      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
+      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+    }
+  }
+
+  async getNewAIResponse(userId) {
+    const userContext = userContextManager.getUserContext(userId);
+    const chatContext = userContextManager.getChatContext(userId);
+    
+    const aiResponse = await openaiService.getChatCompletion(
+      openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+      [...chatContext, { role: "assistant", content: "El archivo ha sido validado. ¿Cómo puedo ayudarte a continuar con tu pedido?" }]
+    );
+
+    userContextManager.updateContext(userId, aiResponse, "assistant");
+    return aiResponse;
+  }
+
+
 
   async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
     try {

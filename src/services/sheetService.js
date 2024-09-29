@@ -32,16 +32,24 @@ class GoogleSheetService {
 
   async initialize() {
     try {
+      logger.info("Iniciando inicialización de SheetService");
       await this.doc.loadInfo();
+      logger.info("Documento de Google Sheets cargado correctamente");
+      
       await this.retryOperation(() => this.loadServicesWithRetry());
+      logger.info("Servicios cargados correctamente");
+      
       await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
+      logger.info("Información adicional cargada correctamente");
+      
       this.isInitialized = true;
-      logger.info("Servicios e información adicional inicializados correctamente");
+      logger.info("SheetService inicializado completamente");
     } catch (error) {
       logger.error(`Error al inicializar SheetService: ${error.message}`);
       throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
     }
   }
+  
 
   async retryOperation(operation, maxRetries = MAX_RETRIES) {
     let retries = 0;
@@ -49,7 +57,10 @@ class GoogleSheetService {
       try {
         return await operation();
       } catch (error) {
-        if (retries === maxRetries - 1) throw error;
+        if (retries === maxRetries - 1) {
+          logger.error(`Error después de ${maxRetries} intentos: ${error.message}`);
+          throw error;
+        }
         const delay = Math.pow(2, retries) * INITIAL_RETRY_DELAY;
         logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -59,11 +70,15 @@ class GoogleSheetService {
   }
 
   async loadServicesWithRetry() {
+    logger.info("Iniciando carga de servicios");
     this.services = await this.getServices();
+    logger.info(`Servicios cargados: ${Object.keys(this.services).length} categorías`);
   }
 
   async loadAdditionalInfoWithRetry() {
+    logger.info("Iniciando carga de información adicional");
     this.additionalInfo = await this.getAdditionalInfo();
+    logger.info("Información adicional cargada");
   }
 
   async getServices() {
@@ -171,11 +186,13 @@ class GoogleSheetService {
     }).filter(w => w !== null);
   }
 
-  async getAdditionalInfo() {
+ async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
-      await sheet.loadCells('A1:H11');
+      await sheet.loadCells();
+  
+      logger.info("Cargando información adicional de la hoja 'Informacion'");
   
       const additionalInfo = {
         horarios: {},
@@ -183,12 +200,15 @@ class GoogleSheetService {
         direccionRetiro: '',
         promocionDia: '',
         metodosPago: '',
-        tiempoPreparacion: ''
+        tiempoPreparacion: '',
+        criteriosValidacion: '',
+        estadoBot: ''
       };
   
       this.extractAdditionalInfo(sheet, additionalInfo);
   
       logger.info("Información adicional cargada completamente");
+      logger.debug(`Información adicional: ${JSON.stringify(additionalInfo)}`);
   
       return additionalInfo;
     } catch (err) {
@@ -197,21 +217,38 @@ class GoogleSheetService {
     }
   }
 
+
   extractAdditionalInfo(sheet, additionalInfo) {
+    const safeGetCellValue = (row, col) => {
+      try {
+        const cell = sheet.getCell(row, col);
+        return cell.value || '';
+      } catch (error) {
+        logger.warn(`No se pudo obtener el valor de la celda (${row}, ${col}): ${error.message}`);
+        return '';
+      }
+    };
+
     ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-      additionalInfo.horarios[dia] = sheet.getCell(index + 1, 1).value || 'No disponible';
+      additionalInfo.horarios[dia] = `${safeGetCellValue(index + 1, 0)} ${safeGetCellValue(index + 1, 1)}`.trim() || 'No disponible';
     });
   
     for (let row = 1; row <= 9; row++) {
-      const zona = sheet.getCell(row, 2).value;
+      const zona = safeGetCellValue(row, 2);
       if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
     }
   
-    additionalInfo.direccionRetiro = sheet.getCell(1, 4).value || 'No disponible';
-    additionalInfo.promocionDia = sheet.getCell(1, 5).value || 'No hay promociones actualmente';
-    additionalInfo.metodosPago = sheet.getCell(1, 6).value || 'No especificado';
-    additionalInfo.tiempoPreparacion = sheet.getCell(1, 7).value || 'No especificado';
+    additionalInfo.direccionRetiro = safeGetCellValue(1, 4) || 'No disponible';
+    additionalInfo.promocionDia = safeGetCellValue(1, 5) || 'No hay promociones actualmente';
+    additionalInfo.metodosPago = safeGetCellValue(1, 6) || 'No especificado';
+    additionalInfo.tiempoPreparacion = safeGetCellValue(1, 7) || 'No especificado';
+    additionalInfo.criteriosValidacion = safeGetCellValue(1, 8) || 'No especificado';
+    additionalInfo.estadoBot = safeGetCellValue(1, 9) || 'No especificado';
+  
+    logger.info(`Criterios de validación extraídos: ${additionalInfo.criteriosValidacion}`);
+    logger.info(`Estado del bot: ${additionalInfo.estadoBot}`);
   }
+
 
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);

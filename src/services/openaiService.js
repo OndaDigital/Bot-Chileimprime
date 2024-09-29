@@ -4,6 +4,7 @@ import { promises as fsPromises } from 'fs';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
+import userContextManager from '../modules/userContext.js';
 
 class OpenAIService {
   constructor() {
@@ -32,6 +33,17 @@ class OpenAIService {
   getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
+    const criteria = userContextManager.getFileValidationCriteria();
+
+    let fileValidationInfo = "";
+    if (currentOrder.fileValidation) {
+      fileValidationInfo = `
+      Información de validación del archivo:
+      Válido: ${currentOrder.fileValidation.isValid ? 'Sí' : 'No'}
+      Razón: ${currentOrder.fileValidation.reason}
+      `;
+    }
+
 
     return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
 
@@ -83,34 +95,16 @@ class OpenAIService {
        {"command": "SET_QUANTITY", "quantity": Z}
        {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
  
-5. Validación de Archivos:
-      - Solo valida el archivo cuando currentOrder.fileAnalysis no sea null.
-      - Si currentOrder.fileAnalysis es null, informa al usuario que aún no se ha recibido ningún archivo y solicita que lo envíe.
-      - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
-        a) El servicio seleccionado (si ya se ha seleccionado uno)
-        b) Las medidas especificadas (si ya se han proporcionado)
-        c) La información técnica del archivo (formato, dimensiones, DPI, etc.)
-      - Criterios de validación:
-        <criterios_validacion>
-          TAMAÑO DEL DISEÑO: Resolución mínimo 72 dpi y máximo 150 dpi a tamaño real; la resolución dependerá del tamaño del archivo.
-          Los Formatos menores a 2 metros cuadrados a 150 dpi.
-          Los mayores a este tamaño deben estar en mínimo 72 dpi y máximo 120 dpi.
-          Si el diseño final supera los 20 metros cuadrados deberá estar en 72 dpi.
-          IMÁGENES: Las imágenes deben ser procesadas preferentemente en formato CMYK y no en RGB para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime.
-          Para imágenes que demandan exigencias de calidad y que serán observadas a menos de 2 metros de distancia, que sean procesadas a 150 dpi e impresas en alta resolución (1440 dpi).
-          FORMATOS: En cuanto a los programas, te sirve cualquier aplicación profesional como:
-          illustrator (.ai), photoshop (.psd), corel draw (.cdr).
-          RESOLUCIÓN DE IMPRESIÓN: Resolución Standard 720 dpi
-          Alta Resolución 1440 dpi
-          ACABADOS DE IMPRESIÓN: Cortes, perforaciones, sobrantes, dobleces, troqueles u otras labores de acabado deben ser marcadas con LÍNEAS PUNTEADAS COLOR MAGENTA.
-          En pancartas, pendones o lonas que llevaran perforaciones u ojales, tome en cuenta la ubicación para que no interfirieran en el diseño; especifique la ubicación con líneas punteadas color magenta.
-        </criterios_validacion>
-      - Si el archivo es válido para el servicio actual (o en general si aún no se ha seleccionado un servicio), informa al usuario y continúa con el proceso.
-      - Si el archivo no es válido, explica detalladamente las razones y proporciona instrucciones claras sobre cómo el usuario puede corregir los problemas.
-      - Utiliza la información en currentOrder.fileAnalysis para validar la compatibilidad con el servicio seleccionado.
-      - Si aún no se ha seleccionado un servicio o no se han especificado medidas, informa al usuario que el archivo se ha recibido y se validará una vez que se complete la información del pedido.
-      - Después de evaluar la validez del archivo, responde con el comando JSON apropiado:
-        {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
+  5. Validación de Archivos:
+       - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
+         y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
+       - Para solicitar la validación, responde con el comando JSON:
+         {"command": "VALIDATE_FILE_FOR_SERVICE"}
+       - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
+       - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
+       - Los criterios de validación son los siguientes:
+        <criterios_validacion> ${criteria}<criterios_validacion>
+        Informacion de validacion: <file_validation_info> ${fileValidationInfo} <file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
@@ -164,6 +158,56 @@ class OpenAIService {
     }
     return allServices;
   }
+
+  async validateFileForService(fileAnalysis, service, measures, currentOrder) {
+    const criteria = userContextManager.getFileValidationCriteria();
+    const prompt = `Eres un experto en análisis de archivos de impresión. 
+    Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
+    Ancho: ${measures.width}m, Alto: ${measures.height}m.
+
+    Información del archivo:
+    ${JSON.stringify(fileAnalysis)}
+
+    Criterios de validación:
+    ${criteria}
+
+    Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
+    Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.
+    
+    Al final de tu análisis, incluye un comando JSON con el siguiente formato:
+    {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
+    
+    Asegúrate de que el valor de "isValid" sea true si el archivo cumple con todos los criterios, y false en caso contrario.`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: config.languageModel,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: "Valida este archivo para el servicio y medidas especificados." }
+        ],
+        max_tokens: config.maxTokens,
+        temperature: 0.7,
+      });
+
+      const analysis = response.choices[0].message.content.trim();
+      const commandMatch = analysis.match(/\{.*\}/);
+      if (!commandMatch) {
+        throw new Error("No se pudo extraer el comando JSON del análisis");
+      }
+
+      const command = JSON.parse(commandMatch[0]);
+      return {
+        analysis: analysis.replace(commandMatch[0], '').trim(),
+        isValid: command.isValid,
+        reason: command.reason
+      };
+    } catch (error) {
+      logger.error("Error al validar el archivo con OpenAI:", error);
+      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
+    }
+  }
+
 
 
   async transcribeAudio(audioFilePath) {
