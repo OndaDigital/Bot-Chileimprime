@@ -18,7 +18,7 @@ const initializeServices = async () => {
 
   try {
     await sheetService.initialize();
-    await fileValidationService.initialize();
+
     services = await sheetService.getServices();
     additionalInfo = await sheetService.getAdditionalInfo();
     

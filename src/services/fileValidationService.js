@@ -1,12 +1,10 @@
-// services/fileValidationService.js
-
 import fs from 'fs';
 import { promisify } from 'util';
 import path from 'path';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
-import config from '../config/config.js';
 import sharp from 'sharp';
+import fileType from 'file-type';
 
 // Importar createRequire para usar require en ES Modules
 import { createRequire } from 'module';
@@ -15,10 +13,6 @@ const require = createRequire(import.meta.url);
 // Importar pdf-parse utilizando require
 const pdfParse = require('pdf-parse');
 
-// Importar file-type
-import fileType from 'file-type';
-const { fileTypeFromFile } = fileType;
-
 const readFile = promisify(fs.readFile);
 
 class FileValidationService {
@@ -26,48 +20,44 @@ class FileValidationService {
     this.supportedFormats = ['jpg', 'jpeg', 'png', 'pdf', 'ai', 'psd', 'cdr'];
   }
 
-  async initialize() {
-    logger.info('FileValidationService inicializado');
-    // Ya no es necesario importar pdf-parse dinámicamente
-  }
-
-  async validateFile(filePath, service) {
+  async analyzeFile(filePath) {
     try {
-      const fileTypeResult = await fileTypeFromFile(filePath);
-
-      let fileExtension;
-      if (fileTypeResult) {
-        fileExtension = fileTypeResult.ext;
-      } else {
-        fileExtension = path.extname(filePath).toLowerCase().slice(1);
+      if (!fs.existsSync(filePath)) {
+        throw new CustomError('FileNotFoundError', `El archivo no existe: ${filePath}`);
       }
 
+      const buffer = await readFile(filePath);
+      const fileTypeResult = await fileType.fromBuffer(buffer);
+      const fileExtension = fileTypeResult ? fileTypeResult.ext : path.extname(filePath).toLowerCase().slice(1);
+
       if (!this.supportedFormats.includes(fileExtension)) {
-        throw new CustomError('UnsupportedFormatError', `Formato de archivo no soportado: ${fileExtension}`);
+        return {
+          format: fileExtension,
+          supported: false,
+          reason: `Formato de archivo no soportado: ${fileExtension}`
+        };
       }
 
       let fileInfo;
       if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
-        fileInfo = await this.validateImage(filePath);
+        fileInfo = await this.analyzeImage(buffer);
       } else if (fileExtension === 'pdf') {
-        fileInfo = await this.validatePDF(filePath);
+        fileInfo = await this.analyzePDF(buffer);
       } else {
         fileInfo = { format: fileExtension };
       }
 
-      if (fileTypeResult) {
-        fileInfo.mimeType = fileTypeResult.mime;
-      }
-
-      return this.checkFileRequirements(fileInfo, service);
+      fileInfo.mimeType = fileTypeResult ? fileTypeResult.mime : '';
+      fileInfo.supported = true;
+      return fileInfo;
     } catch (error) {
-      logger.error(`Error al validar el archivo: ${error.message}`);
-      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
+      logger.error(`Error al analizar el archivo: ${error.message}`);
+      throw new CustomError('FileAnalysisError', 'Error al analizar el archivo', error);
     }
   }
 
-  async validateImage(filePath) {
-    const image = sharp(filePath);
+  async analyzeImage(buffer) {
+    const image = sharp(buffer);
     const metadata = await image.metadata();
 
     return {
@@ -79,25 +69,20 @@ class FileValidationService {
     };
   }
 
-  async validatePDF(filePath) {
+  async analyzePDF(buffer) {
     try {
-      const dataBuffer = await readFile(filePath);
-      const data = await pdfParse(dataBuffer);
-
-      // Asumiendo que data.metadata contiene width y height
-      const width = data.metadata?.width || 0;
-      const height = data.metadata?.height || 0;
+      const data = await pdfParse(buffer);
 
       return {
         format: 'pdf',
-        width,
-        height,
-        dpi: 72, // Asumir 72 DPI si no se puede obtener
-        pages: data.numpages
+        pages: data.numpages,
+        width: data.metadata?.width || 0,
+        height: data.metadata?.height || 0,
+        dpi: 72 // Asumimos 72 DPI para PDFs
       };
     } catch (error) {
-      logger.error(`Error al validar PDF: ${error.message}`);
-      throw new CustomError('PDFValidationError', 'Error al validar el archivo PDF', error);
+      logger.error(`Error al analizar PDF: ${error.message}`);
+      throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
     }
   }
 

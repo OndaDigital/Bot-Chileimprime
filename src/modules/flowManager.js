@@ -64,15 +64,16 @@ class FlowManager {
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         try {
           const filePath = await whatsappService.saveFile(ctx);
-          const userContext = userContextManager.getUserContext(ctx.from);
-          const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
-          
-          const validationResult = await fileValidationService.validateFile(filePath, serviceInfo);
+          const fileInfo = await fileValidationService.analyzeFile(filePath);
           
           await userContextManager.updateCurrentOrder(ctx.from, {
             filePath: filePath,
-            fileAnalysis: validationResult
+            fileAnalysis: fileInfo
           });
+          
+          logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
+          
+          await flowDynamic('He recibido tu archivo. Lo he analizado y ahora evaluaré si cumple con los requisitos necesarios.');
           
           this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
@@ -175,38 +176,43 @@ class FlowManager {
       userContextManager.updateContext(userId, message, "user");
       userContextManager.updateContext(userId, aiResponse, "assistant");
 
-      const { action, order } = this.processAIResponse(aiResponse, userId, userContext);
-
-      switch (action) {
-        case "LIST_ALL_SERVICES":
-          await this.handleListAllServices(ctx, flowDynamic);
-          break;
-        case "SELECT_SERVICE":
-          await this.handleSelectService(ctx, flowDynamic, order);
-          break;
-        case "SET_MEASURES":
-          await this.handleSetMeasures(ctx, flowDynamic, order);
-          break;
-        case "SET_QUANTITY":
-          await this.handleSetQuantity(ctx, flowDynamic, order);
-          break;
-        case "SET_FINISHES":
-          await this.handleSetFinishes(ctx, flowDynamic, order);
-          break;
-        case "VALIDATE_FILE":
-          await this.handleValidateFile(ctx, flowDynamic, order);
-          break;
-        case "CONFIRM_ORDER":
-          await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
-          break;
-        default:
-          await flowDynamic(aiResponse);
+      const commands = this.processAIResponse(aiResponse, userId, userContext);
+      
+      for (const { action, order } of commands) {
+        switch (action) {
+          case "LIST_ALL_SERVICES":
+            await this.handleListAllServices(ctx, flowDynamic);
+            break;
+          case "SELECT_SERVICE":
+            await this.handleSelectService(ctx, flowDynamic, order);
+            break;
+          case "SET_MEASURES":
+            await this.handleSetMeasures(ctx, flowDynamic, order);
+            break;
+          case "SET_QUANTITY":
+            await this.handleSetQuantity(ctx, flowDynamic, order);
+            break;
+          case "SET_FINISHES":
+            await this.handleSetFinishes(ctx, flowDynamic, order);
+            break;
+          case "VALIDATE_FILE":
+            await this.handleValidateFile(ctx, flowDynamic, order);
+            break;
+          case "CONFIRM_ORDER":
+            await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
+            break;
+          case "CONTINUAR":
+          default:
+            // Eliminar los comandos JSON del mensaje antes de mostrarlo al usuario
+            const cleanedResponse = aiResponse.replace(/\{.*?\}/g, '').trim();
+            await flowDynamic(cleanedResponse);
         }
-      } catch (error) {
-        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
+    } catch (error) {
+      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
+  }
 
   async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order) {
     try {
@@ -246,34 +252,40 @@ class FlowManager {
 
   processAIResponse(aiResponse, userId, userContext) {
     try {
-      const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
-      if (jsonCommandMatch) {
-        const jsonCommand = JSON.parse(jsonCommandMatch[0]);
-        logger.info(`Comando JSON recibido para ${userId}: ${JSON.stringify(jsonCommand)}`);
-        switch (jsonCommand.command) {
-          case "LIST_ALL_SERVICES":
-            return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
-          case "SELECT_SERVICE":
-            return { action: "SELECT_SERVICE", order: { ...userContext.currentOrder, service: jsonCommand.service } };
-          case "SET_MEASURES":
-            return { action: "SET_MEASURES", order: { ...userContext.currentOrder, measures: { width: jsonCommand.width, height: jsonCommand.height } } };
-          case "SET_QUANTITY":
-            return { action: "SET_QUANTITY", order: { ...userContext.currentOrder, quantity: jsonCommand.quantity } };
-          case "SET_FINISHES":
-            return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: jsonCommand } };
-          case "VALIDATE_FILE":
-            return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: jsonCommand } };
-          case "CONFIRM_ORDER":
-            return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
-          default:
-            logger.warn(`Comando desconocido recibido para ${userId}: ${jsonCommand.command}`);
-            return { action: "CONTINUAR", order: userContext.currentOrder };
-        }
+      const jsonCommands = aiResponse.match(/\{.*?\}/g);
+      if (jsonCommands) {
+        return jsonCommands.map(jsonCommand => {
+          const parsedCommand = JSON.parse(jsonCommand);
+          logger.info(`Comando JSON recibido para ${userId}: ${JSON.stringify(parsedCommand)}`);
+          return this.processCommand(parsedCommand, userContext);
+        }).filter(result => result !== null);
       }
-      return { action: "CONTINUAR", order: userContext.currentOrder };
+      return [{ action: "CONTINUAR", order: userContext.currentOrder }];
     } catch (error) {
       logger.error(`Error al procesar la respuesta de AI para ${userId}: ${error.message}`);
-      return { action: "CONTINUAR", order: userContext.currentOrder };
+      return [{ action: "CONTINUAR", order: userContext.currentOrder }];
+    }
+  }
+
+  processCommand(command, userContext) {
+    switch (command.command) {
+      case "LIST_ALL_SERVICES":
+        return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
+      case "SELECT_SERVICE":
+        return { action: "SELECT_SERVICE", order: { ...userContext.currentOrder, service: command.service } };
+      case "SET_MEASURES":
+        return { action: "SET_MEASURES", order: { ...userContext.currentOrder, measures: { width: command.width, height: command.height } } };
+      case "SET_QUANTITY":
+        return { action: "SET_QUANTITY", order: { ...userContext.currentOrder, quantity: command.quantity } };
+      case "SET_FINISHES":
+        return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: command } };
+      case "VALIDATE_FILE":
+        return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: command } };
+      case "CONFIRM_ORDER":
+        return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
+      default:
+        logger.warn(`Comando desconocido recibido: ${command.command}`);
+        return null;
     }
   }
 

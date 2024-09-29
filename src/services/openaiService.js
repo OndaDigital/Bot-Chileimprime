@@ -83,13 +83,14 @@ class OpenAIService {
        {"command": "SET_QUANTITY", "quantity": Z}
        {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
  
-5. Subida y Validación de Archivos:
-      - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
+5. Validación de Archivos:
+      - Solo valida el archivo cuando currentOrder.fileAnalysis no sea null.
+      - Si currentOrder.fileAnalysis es null, informa al usuario que aún no se ha recibido ningún archivo y solicita que lo envíe.
       - Cuando haya un fileAnalysis en currentOrder, evalúa su validez considerando:
-        a) El servicio seleccionado
-        b) Las medidas especificadas
-        c) El resultado del análisis del archivo (formato, DPI, dimensiones)
-      - Criterios de validación (NO menciones esto al cliente, úsalo sólo para tu evaluación):
+        a) El servicio seleccionado (si ya se ha seleccionado uno)
+        b) Las medidas especificadas (si ya se han proporcionado)
+        c) La información técnica del archivo (formato, dimensiones, DPI, etc.)
+      - Criterios de validación:
         <criterios_validacion>
           TAMAÑO DEL DISEÑO: Resolución mínimo 72 dpi y máximo 150 dpi a tamaño real; la resolución dependerá del tamaño del archivo.
           Los Formatos menores a 2 metros cuadrados a 150 dpi.
@@ -100,15 +101,16 @@ class OpenAIService {
           FORMATOS: En cuanto a los programas, te sirve cualquier aplicación profesional como:
           illustrator (.ai), photoshop (.psd), corel draw (.cdr).
           RESOLUCIÓN DE IMPRESIÓN: Resolución Standard 720 dpi
-          Ita Resolución 1440 dpi
+          Alta Resolución 1440 dpi
           ACABADOS DE IMPRESIÓN: Cortes, perforaciones, sobrantes, dobleces, troqueles u otras labores de acabado deben ser marcadas con LÍNEAS PUNTEADAS COLOR MAGENTA.
           En pancartas, pendones o lonas que llevaran perforaciones u ojales, tome en cuenta la ubicación para que no interfirieran en el diseño; especifique la ubicación con líneas punteadas color magenta.
         </criterios_validacion>
-      - Explica detalladamente si el archivo es válido o no, y por qué.
-      - Si el archivo es válido, responde con el comando JSON:
-        {"command": "VALIDATE_FILE", "isValid": true}
-      - Si no es válido, proporciona instrucciones claras sobre cómo corregirlo y responde:
-        {"command": "VALIDATE_FILE", "isValid": false, "reason": "[Explicación]"}
+      - Si el archivo es válido para el servicio actual (o en general si aún no se ha seleccionado un servicio), informa al usuario y continúa con el proceso.
+      - Si el archivo no es válido, explica detalladamente las razones y proporciona instrucciones claras sobre cómo el usuario puede corregir los problemas.
+      - Si aún no se ha seleccionado un servicio o no se han especificado medidas, informa al usuario que el archivo se ha recibido y se validará una vez que se complete la información del pedido.
+      - Después de evaluar la validez del archivo, responde con el comando JSON apropiado:
+        {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
+
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
        - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, y confirmación de archivo válido.

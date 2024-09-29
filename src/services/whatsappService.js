@@ -71,6 +71,25 @@ class WhatsAppService {
     }
   }
 
+  async saveFile(ctx) {
+    try {
+      if (!this.provider) {
+        throw new Error('El proveedor de WhatsApp no está inicializado');
+      }
+      const savedFile = await this.provider.saveFile(ctx);
+      if (typeof savedFile === 'string') {
+        return savedFile;
+      } else if (savedFile && savedFile.path) {
+        return savedFile.path;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo');
+      }
+    } catch (error) {
+      logger.error('Error al guardar archivo:', error);
+      throw new CustomError('FileSaveError', 'Error al guardar archivo', error);
+    }
+  }
+
   async processVoiceNote(ctx, audioPath) {
     try {
       logger.info(`Procesando nota de voz para usuario ${ctx.from}`);
