@@ -418,35 +418,33 @@ class FlowManager {
     const userId = ctx.from;
     logger.info(`Procesando mensaje para usuario ${userId}`);
 
+    if (this.isBlacklisted(userId)) {
+      logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
+      return endFlow();
+    }
+
+    if (orderManager.isOrderConfirmed(userId)) {
+      logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
+      return gotoFlow(this.getFlowByName('confirmedFlow'));
+    }
+
+    this.startIdleTimer(ctx, flowDynamic, gotoFlow);
+
     try {
-      if (this.isBlacklisted(userId)) {
-        logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-        return endFlow();
-      }
-
-      if (orderManager.isOrderConfirmed(userId)) {
-        logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
-        return gotoFlow(this.getFlowByName('confirmedFlow'));
-      }
-
-      this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-
-      logger.info(`Obteniendo contexto del usuario ${userId}`);
       const userContext = userContextManager.getUserContext(userId);
-      logger.info(`Obteniendo contexto del chat para usuario ${userId}`);
       const chatContext = userContextManager.getChatContext(userId);
       
-      logger.info(`Verificando análisis de archivo reciente para usuario ${userId}`);
+      // Verificar si hay un análisis de archivo reciente
       const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
                                     !userContext.currentOrder.fileAnalysisResponded;
 
       let aiResponse;
       if (hasRecentFileAnalysis) {
-        logger.info(`Generando respuesta específica para el análisis del archivo del usuario ${userId}`);
+        // Generar una respuesta específica para el análisis del archivo
         aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
         userContext.currentOrder.fileAnalysisResponded = true;
       } else {
-        logger.info(`Obteniendo respuesta de OpenAI para usuario ${userId}`);
+        // Obtener respuesta normal de OpenAI
         aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
           [...chatContext, { role: "user", content: message }]
@@ -455,15 +453,16 @@ class FlowManager {
 
       logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
 
-      logger.info(`Actualizando contexto para usuario ${userId}`);
       userContextManager.updateContext(userId, message, "user");
       userContextManager.updateContext(userId, aiResponse, "assistant");
 
-      logger.info(`Procesando respuesta AI para usuario ${userId}`);
       const commands = this.processAIResponse(aiResponse, userId, userContext);
       
       for (const { action, order } of commands) {
         switch (action) {
+          case "VALIDATE_FILE_FOR_SERVICE":
+            await this.handleValidateFileForService(ctx, flowDynamic, order);
+            break;
           case "LIST_ALL_SERVICES":
             await this.handleListAllServices(ctx, flowDynamic);
             break;
@@ -482,17 +481,23 @@ class FlowManager {
           case "VALIDATE_FILE":
             await this.handleValidateFile(ctx, flowDynamic, order);
             break;
+          case "VALIDATE_FILE_FOR_SERVICE":
+              await this.handleValidateFileForService(ctx, flowDynamic, order);
+            break;
           case "CONFIRM_ORDER":
             await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
             break;
           case "CONTINUAR":
           default:
+            // Eliminar los comandos JSON del mensaje antes de mostrarlo al usuario
             const cleanedResponse = aiResponse.replace(/\{.*?\}/g, '').trim();
             await flowDynamic(cleanedResponse);
         }
       }
     } catch (error) {
       logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+      logger.error(`Stack trace: ${error.stack}`);
+      console.error('Error completo:', error);
       await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
   }
@@ -564,6 +569,8 @@ class FlowManager {
         return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: command } };
       case "VALIDATE_FILE":
         return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: command } };
+      case "VALIDATE_FILE_FOR_SERVICE":
+        return { action: "VALIDATE_FILE_FOR_SERVICE", order: userContext.currentOrder };
       case "CONFIRM_ORDER":
         return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
       default:
@@ -574,7 +581,8 @@ class FlowManager {
 
   async handleSelectService(ctx, flowDynamic, order) {
     try {
-      const result = await orderManager.handleSelectService(ctx.from, order.service);
+      const userId = ctx.from;
+      const result = await orderManager.handleSelectService(userId, order.service);
       if (result.action === "INVALID_SERVICE") {
         if (result.similarServices.length > 0) {
           await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${result.similarServices.join(', ')}`);
@@ -584,7 +592,10 @@ class FlowManager {
         }
       } else {
         const serviceInfo = result.serviceInfo;
-        logger.info(`Información del servicio seleccionado: ${JSON.stringify(serviceInfo)}`);
+        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
+        
+        userContextManager.updateCurrentOrder(userId, { service: order.service });
+        logger.info(`CurrentOrder actualizado para usuario ${userId}: ${JSON.stringify(userContextManager.getCurrentOrder(userId))}`);
         
         await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
         if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
@@ -599,8 +610,6 @@ class FlowManager {
         if (serviceInfo.sellado) availableFinishes.push("sellado");
         if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
         if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
-        
-        logger.info(`Terminaciones disponibles para el servicio: ${JSON.stringify(availableFinishes)}`);
         
         if (availableFinishes.length > 0) {
           await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
@@ -1543,6 +1552,7 @@ import { promises as fsPromises } from 'fs';
 import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
+import userContextManager from '../modules/userContext.js';
 
 class OpenAIService {
   constructor() {
@@ -1590,13 +1600,14 @@ class OpenAIService {
        - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis, fileAnalysisResponded}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
-    2. Inicio y Selección de Servicio:
+  2. Inicio y Selección de Servicio:
        - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
        - Si el cliente solicita la lista completa de servicios o el menú, responde con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
        - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
-       - Si el cliente menciona un servicio válido, responde con el comando JSON:
+       - IMPORTANTE: Siempre que detectes que el cliente ha seleccionado o mencionado un servicio específico, 
+         debes generar el comando JSON correspondiente antes de proporcionar cualquier información adicional:
          {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
        - Si el servicio mencionado no es válido, sugiere servicios similares o muestra las categorías disponibles.
 

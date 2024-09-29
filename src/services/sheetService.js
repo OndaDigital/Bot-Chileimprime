@@ -81,6 +81,23 @@ class GoogleSheetService {
     logger.info("Información adicional cargada");
   }
 
+  getServiceInfo(serviceName) {
+    if (!serviceName || typeof serviceName !== 'string') {
+      logger.warn(`Nombre de servicio inválido: ${serviceName}`);
+      return null;
+    }
+
+    const lowerServiceName = serviceName.toLowerCase();
+    for (const category in this.services) {
+      const service = this.services[category].find(s => s.name.toLowerCase() === lowerServiceName);
+      if (service) {
+        return service;
+      }
+    }
+    logger.warn(`Servicio no encontrado: ${serviceName}`);
+    return null;
+  }
+
   async getServices() {
     try {
       await this.doc.loadInfo();

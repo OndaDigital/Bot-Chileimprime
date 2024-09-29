@@ -14,6 +14,15 @@ class UserContextManager {
   }
 
   getUserContext(userId) {
+    if (typeof userId !== 'string') {
+      logger.warn(`Tipo de userId no válido: ${typeof userId}. Valor: ${JSON.stringify(userId)}`);
+      if (typeof userId === 'object' && userId !== null && userId.from) {
+        userId = userId.from;
+      } else {
+        throw new Error('userId inválido');
+      }
+    }
+
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
         context: "",
@@ -72,6 +81,7 @@ class UserContextManager {
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder = { ...userContext.currentOrder, ...updates };
+    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
     
     if (updates.service) {
       const serviceInfo = this.getServiceInfo(updates.service);
@@ -115,8 +125,10 @@ class UserContextManager {
     return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
   }
 
-  getCurrentOrder(userId) {
-    return this.getUserContext(userId).currentOrder;
+ getCurrentOrder(userId) {
+    const userContext = this.getUserContext(userId);
+    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+    return userContext.currentOrder;
   }
 
   getServiceInfo(serviceName) {

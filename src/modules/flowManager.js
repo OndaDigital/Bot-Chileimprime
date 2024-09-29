@@ -237,13 +237,26 @@ class FlowManager {
             await this.handleSetQuantity(ctx, flowDynamic, order);
             break;
           case "SET_FINISHES":
-            await this.handleSetFinishes(ctx, flowDynamic, order);
+            logger.info(`Llamando a handleSetFinishes para usuario ${userId} con orden: ${JSON.stringify(order)}`);
+            await this.handleSetFinishes(userId, order.sellado, order.ojetillos, order.bolsillo);
             break;
           case "VALIDATE_FILE":
             await this.handleValidateFile(ctx, flowDynamic, order);
             break;
+          case "VALIDATE_FILE_FOR_SERVICE":
+              await this.handleValidateFileForService(ctx, flowDynamic, order);
+            break;
           case "CONFIRM_ORDER":
             await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
+            break;
+          case "SERVICE_NOT_FOUND":
+            await this.handleServiceNotFound(ctx, flowDynamic, order);
+            break;
+          case "MISSING_INFO":
+            await this.handleMissingInfo(ctx, flowDynamic, order);
+            break;
+          case "ERROR":
+            await this.handleGeneralError(ctx, flowDynamic, order);
             break;
           case "CONTINUAR":
           default:
@@ -327,6 +340,8 @@ class FlowManager {
         return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: command } };
       case "VALIDATE_FILE":
         return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: command } };
+      case "VALIDATE_FILE_FOR_SERVICE":
+        return { action: "VALIDATE_FILE_FOR_SERVICE", order: userContext.currentOrder };
       case "CONFIRM_ORDER":
         return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
       default:
@@ -337,7 +352,8 @@ class FlowManager {
 
   async handleSelectService(ctx, flowDynamic, order) {
     try {
-      const result = await orderManager.handleSelectService(ctx.from, order.service);
+      const userId = ctx.from;
+      const result = await orderManager.handleSelectService(userId, order.service);
       if (result.action === "INVALID_SERVICE") {
         if (result.similarServices.length > 0) {
           await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${result.similarServices.join(', ')}`);
@@ -347,7 +363,10 @@ class FlowManager {
         }
       } else {
         const serviceInfo = result.serviceInfo;
-        logger.info(`Información del servicio seleccionado: ${JSON.stringify(serviceInfo)}`);
+        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
+        
+        userContextManager.updateCurrentOrder(userId, { service: order.service });
+        logger.info(`CurrentOrder actualizado para usuario ${userId}: ${JSON.stringify(userContextManager.getCurrentOrder(userId))}`);
         
         await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
         if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
@@ -362,8 +381,6 @@ class FlowManager {
         if (serviceInfo.sellado) availableFinishes.push("sellado");
         if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
         if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
-        
-        logger.info(`Terminaciones disponibles para el servicio: ${JSON.stringify(availableFinishes)}`);
         
         if (availableFinishes.length > 0) {
           await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
@@ -416,24 +433,55 @@ class FlowManager {
     logger.info(`Manejando configuración de acabados para usuario ${userId}`);
     try {
       const currentOrder = userContextManager.getCurrentOrder(userId);
+      logger.info(`Orden actual para usuario ${userId}: ${JSON.stringify(currentOrder)}`);
+
+      if (!currentOrder || !currentOrder.service) {
+        throw new CustomError('InvalidOrderError', 'No hay una orden válida o un servicio seleccionado');
+      }
+
       const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-  
+      logger.info(`Información del servicio para ${currentOrder.service}: ${JSON.stringify(serviceInfo)}`);
+
+      if (!serviceInfo) {
+        throw new CustomError('ServiceNotFoundError', `No se encontró información para el servicio: ${currentOrder.service}`);
+      }
+
       const finishes = {
         sellado: sellado && serviceInfo.sellado,
         ojetillos: ojetillos && serviceInfo.ojetillos,
         bolsillo: bolsillo && serviceInfo.bolsillo
       };
-  
+
       userContextManager.updateCurrentOrder(userId, { finishes: finishes });
-  
+
+      logger.info(`Acabados configurados para usuario ${userId}: ${JSON.stringify(finishes)}`);
+
       return {
         action: "SET_FINISHES",
         order: userContextManager.getCurrentOrder(userId)
       };
     } catch (error) {
       logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
+      logger.error(`Stack trace: ${error.stack}`);
+      if (error instanceof CustomError) {
+        throw error;
+      }
       throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
     }
+  }
+
+
+  async handleServiceNotFound(ctx, flowDynamic, order) {
+    await flowDynamic(`Lo siento, no pude encontrar información sobre el servicio "${order.service}". ¿Podrías verificar el nombre del servicio o elegir uno de nuestra lista de servicios disponibles?`);
+    // Aquí podrías añadir lógica para mostrar la lista de servicios disponibles
+  }
+
+  async handleMissingInfo(ctx, flowDynamic, order) {
+    await flowDynamic(`Parece que falta información importante para completar tu pedido. Específicamente, necesito saber más sobre: ${order.missingField}. ¿Podrías proporcionarme esa información?`);
+  }
+
+  async handleGeneralError(ctx, flowDynamic, order) {
+    await flowDynamic(`Lo siento, ha ocurrido un error inesperado: ${order.message}. Estamos trabajando para resolverlo. Por favor, intenta nuevamente en unos momentos o contacta a nuestro soporte si el problema persiste.`);
   }
 
   async handleFileValidation(ctx, flowDynamic, order) {
