@@ -289,12 +289,29 @@ class FlowManager {
         }
       } else {
         const serviceInfo = result.serviceInfo;
+        logger.info(`Información del servicio seleccionado: ${JSON.stringify(serviceInfo)}`);
+        
         await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
         if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
           const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
           await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
         } else {
           await flowDynamic(`¿Cuántas unidades necesitas?`);
+        }
+        
+        // Añadir información sobre terminaciones disponibles
+        const availableFinishes = [];
+        if (serviceInfo.sellado) availableFinishes.push("sellado");
+        if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
+        if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
+        
+        logger.info(`Terminaciones disponibles para el servicio: ${JSON.stringify(availableFinishes)}`);
+        
+        if (availableFinishes.length > 0) {
+          await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
+        } else {
+          logger.warn(`No se encontraron terminaciones disponibles para el servicio ${order.service}`);
+          await flowDynamic(`Este servicio no tiene terminaciones disponibles.`);
         }
       }
     } catch (error) {
@@ -337,18 +354,27 @@ class FlowManager {
     }
   }
 
-  async handleSetFinishes(ctx, flowDynamic, order) {
+  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+    logger.info(`Manejando configuración de acabados para usuario ${userId}`);
     try {
-      const result = await orderManager.handleSetFinishes(ctx.from, order.finishes.sellado, order.finishes.ojetillos, order.finishes.bolsillo);
-      const finishes = [];
-      if (result.order.finishes.sellado) finishes.push("sellado");
-      if (result.order.finishes.ojetillos) finishes.push("ojetillos");
-      if (result.order.finishes.bolsillo) finishes.push("bolsillo");
-      const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
-      await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+  
+      const finishes = {
+        sellado: sellado && serviceInfo.sellado,
+        ojetillos: ojetillos && serviceInfo.ojetillos,
+        bolsillo: bolsillo && serviceInfo.bolsillo
+      };
+  
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+  
+      return {
+        action: "SET_FINISHES",
+        order: userContextManager.getCurrentOrder(userId)
+      };
     } catch (error) {
-      logger.error(`Error al manejar los acabados: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al registrar los acabados. Por favor, intenta nuevamente.");
+      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
+      throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
     }
   }
 

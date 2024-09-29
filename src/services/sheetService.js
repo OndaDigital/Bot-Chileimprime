@@ -97,15 +97,22 @@ class GoogleSheetService {
     try {
       const widthsString = sheet.getCell(row, 12).value;
       const availableWidths = widthsString ? this.parseAvailableWidths(widthsString) : [];
-
-      return {
+  
+      const sellado = sheet.getCell(row, 4).value.toLowerCase();
+      const ojetillos = sheet.getCell(row, 5).value.toLowerCase();
+      const bolsillo = sheet.getCell(row, 6).value.toLowerCase();
+  
+      logger.info(`Valores leídos para el servicio en la fila ${row}:`);
+      logger.info(`Sellado: ${sellado}, Ojetillos: ${ojetillos}, Bolsillo: ${bolsillo}`);
+  
+      const service = {
         id: sheet.getCell(row, 0).value,
         category: sheet.getCell(row, 1).value,
         type: sheet.getCell(row, 2).value,
         name: sheet.getCell(row, 3).value,
-        sellado: sheet.getCell(row, 4).value === 'Sí',
-        ojetillos: sheet.getCell(row, 5).value === 'Sí',
-        bolsillo: sheet.getCell(row, 6).value === 'Sí',
+        sellado: sellado === 'sí' || sellado === 'si',
+        ojetillos: ojetillos === 'sí' || ojetillos === 'si',
+        bolsillo: bolsillo === 'sí' || bolsillo === 'si',
         format: sheet.getCell(row, 7).value,
         minDPI: parseInt(sheet.getCell(row, 8).value) || 0,
         stock: parseInt(sheet.getCell(row, 9).value) || 0,
@@ -116,6 +123,10 @@ class GoogleSheetService {
         precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
         precioOjetillos: parseFloat(sheet.getCell(row, 16).value) || 0
       };
+  
+      logger.info(`Servicio extraído: ${JSON.stringify(service)}`);
+  
+      return service;
     } catch (error) {
       logger.error(`Error al extraer datos del servicio en la fila ${row}: ${error.message}`);
       return null;

@@ -78,13 +78,18 @@ class UserContextManager {
         userContext.currentOrder.category = serviceInfo.category;
         userContext.currentOrder.type = serviceInfo.type;
         userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
-        userContext.currentOrder.availableFinishes = this.getAvailableFinishes(serviceInfo);
+        userContext.currentOrder.availableFinishes = {
+          sellado: serviceInfo.sellado,
+          ojetillos: serviceInfo.ojetillos,
+          bolsillo: serviceInfo.bolsillo
+        };
         userContext.currentOrder.fileValidationCriteria = {
           format: serviceInfo.format,
           minDPI: serviceInfo.minDPI,
         };
-
+        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
         logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
+        logger.info(`Terminaciones disponibles para el servicio ${updates.service}: ${JSON.stringify(userContext.currentOrder.availableFinishes)}`);
       } else {
         logger.warn(`Servicio no encontrado: ${updates.service}`);
       }
@@ -92,7 +97,7 @@ class UserContextManager {
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
-
+  
   getCurrentOrder(userId) {
     return this.getUserContext(userId).currentOrder;
   }

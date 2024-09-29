@@ -50,38 +50,38 @@ class OpenAIService {
          {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
        - Si el servicio mencionado no es válido, sugiere servicios similares o muestra las categorías disponibles.
 
-    3. Manejo de Categorías y Tipos de Servicios:
-       - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
-       - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
-         a) Solicita ancho, alto y cantidad.
-         b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
-         c) El alto debe ser mayor a 1 metro.
-         d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
-       - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
-         a) Solicita solo la cantidad.
-         b) No trabajes con medidas personalizadas.
-         c) Ofrece terminaciones si el servicio lo permite (revisa currentOrder.availableFinishes).
+3. Manejo de Categorías y Tipos de Servicios:
+     - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
+     - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
+       a) Solicita ancho, alto y cantidad.
+       b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
+       c) El alto debe ser mayor a 1 metro.
+       d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
+     - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
+       a) Solicita solo la cantidad.
+       b) No trabajes con medidas personalizadas.
+       c) Ofrece terminaciones si el servicio lo permite (revisa currentOrder.availableFinishes).
 
 4. Especificación de Medidas y Terminaciones:
-       - Si el servicio requiere medidas (categorías: Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
-         a) Presenta al cliente los anchos disponibles específicos para este servicio:
-            Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
-         b) Guía al cliente para que elija uno de estos anchos válidos.
-         c) Pide al cliente que especifique un alto mayor a 1 metro.
-         d) Solicita la cantidad deseada.
-       - Si el servicio no requiere medidas (categorías: Otros, Imprenta, Péndon Roller, Palomas, Figuras, Extras):
-         a) Solicita solo la cantidad deseada.
-       - Para todos los servicios, ofrece las terminaciones disponibles según:
-         Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
-       - Explica claramente qué terminaciones están disponibles y pide al cliente que elija.
-       - Cuando el cliente proporcione información válida, responde con los comandos JSON apropiados:
-         Para servicios con medidas:
-         {"command": "SET_MEASURES", "width": X, "height": Y}
-         {"command": "SET_QUANTITY", "quantity": Z}
-         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
-         Para servicios sin medidas:
-         {"command": "SET_QUANTITY", "quantity": Z}
-         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+     - Si el servicio requiere medidas (categorías: Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
+       a) Presenta al cliente los anchos disponibles específicos para este servicio:
+          Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
+       b) Guía al cliente para que elija uno de estos anchos válidos.
+       c) Pide al cliente que especifique un alto mayor a 1 metro.
+       d) Solicita la cantidad deseada.
+     - Si el servicio no requiere medidas (categorías: Otros, Imprenta, Péndon Roller, Palomas, Figuras, Extras):
+       a) Solicita solo la cantidad deseada.
+     - Para todos los servicios, ofrece las terminaciones disponibles según:
+       Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
+     - Explica claramente qué terminaciones están disponibles y pide al cliente que elija.
+     - Cuando el cliente proporcione información válida, responde con los comandos JSON apropiados:
+       Para servicios con medidas:
+       {"command": "SET_MEASURES", "width": X, "height": Y}
+       {"command": "SET_QUANTITY", "quantity": Z}
+       {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+       Para servicios sin medidas:
+       {"command": "SET_QUANTITY", "quantity": Z}
+       {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
  
 5. Subida y Validación de Archivos:
       - Si no hay filePath en currentOrder, pide al cliente que envíe el archivo de diseño.
