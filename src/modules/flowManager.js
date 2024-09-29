@@ -178,6 +178,9 @@ class FlowManager {
       const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
 
       switch (action) {
+        case "SELECT_CATEGORY":
+          await this.handleSelectCategory(ctx, flowDynamic, order);
+          break;
         case "SELECT_SERVICE":
           await this.handleSelectService(ctx, flowDynamic, order);
           break;
@@ -226,7 +229,25 @@ class FlowManager {
   }
 
   async handleSelectService(ctx, flowDynamic, order) {
-    await flowDynamic(`Has seleccionado el servicio: *${order.service}*. ${order.category === 'Telas PVC' || order.category === 'Banderas' || order.category === 'Adhesivos' || order.category === 'Adhesivo Vehicular' || order.category === 'Back Light' ? 'Por favor, especifica las medidas que necesitas.' : '¿Cuántas unidades necesitas?'}`);
+    if (order.action === "INVALID_SERVICE") {
+      if (order.similarServices.length > 0) {
+        await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${order.similarServices.join(', ')}`);
+      } else {
+        const categories = Object.keys(userContextManager.getGlobalServices());
+        await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". Estas son nuestras categorías disponibles: ${categories.join(', ')}. ¿En cuál estás interesado?`);
+      }
+      return;
+    }
+
+    const serviceInfo = userContextManager.getServiceInfo(order.service);
+    await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
+
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+      const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
+      await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
+    } else {
+      await flowDynamic(`¿Cuántas unidades necesitas?`);
+    }
   }
 
   async handleSetMeasures(ctx, flowDynamic, order) {

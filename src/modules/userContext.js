@@ -78,6 +78,8 @@ class UserContextManager {
         format: serviceInfo.format,
         minDPI: serviceInfo.minDPI,
       };
+
+      logger.info(`Medidas de ancho disponibles para el servicio ${updates.service}: ${JSON.stringify(serviceInfo.availableWidths)}`);
     }
     
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
@@ -85,13 +87,26 @@ class UserContextManager {
 
   getServiceInfo(serviceName) {
     for (const category in this.services) {
-      const service = this.services[category].find(s => s.name === serviceName);
+      const service = this.services[category].find(s => s.name.toLowerCase() === serviceName.toLowerCase());
       if (service) {
         return service;
       }
     }
-    throw new Error(`Servicio no encontrado: ${serviceName}`);
+    return null;
   }
+
+  findSimilarServices(serviceName) {
+    const allServices = Object.values(this.services).flat();
+    return allServices
+      .filter(service => service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
+                         serviceName.toLowerCase().includes(service.name.toLowerCase()))
+      .map(service => service.name);
+  }
+
+  getServicesInCategory(category) {
+    return this.services[category] || [];
+  }
+
 
   getAvailableFinishes(serviceInfo) {
     const finishes = [];

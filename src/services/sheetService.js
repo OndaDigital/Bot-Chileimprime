@@ -95,6 +95,9 @@ class GoogleSheetService {
 
   extractServiceData(sheet, row) {
     try {
+      const widthsString = sheet.getCell(row, 12).value;
+      const availableWidths = widthsString ? this.parseAvailableWidths(widthsString) : [];
+
       return {
         id: sheet.getCell(row, 0).value,
         category: sheet.getCell(row, 1).value,
@@ -108,7 +111,7 @@ class GoogleSheetService {
         stock: parseInt(sheet.getCell(row, 9).value) || 0,
         status: sheet.getCell(row, 10).value,
         precio: parseFloat(sheet.getCell(row, 11).value) || 0,
-        availableWidths: this.parseAvailableWidths(sheet.getCell(row, 12).value),
+        availableWidths: availableWidths,
         precioSellado: parseFloat(sheet.getCell(row, 14).value) || 0,
         precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
         precioOjetillos: parseFloat(sheet.getCell(row, 16).value) || 0
@@ -121,14 +124,40 @@ class GoogleSheetService {
 
 
   parseAvailableWidths(widthsString) {
-    if (!widthsString) return [];
-    return widthsString.split(',').map(w => {
-      const [material, imprimible] = w.split('-').map(s => s ? s.trim() : '');
-      return {
-        material: parseFloat(material ? material.replace('m', '') : 0) || 0,
-        imprimible: parseFloat(imprimible ? imprimible.replace('m', '') : 0) || 0
+    if (!widthsString || widthsString.toLowerCase().includes('no tiene rollos')) {
+      return [];
+    }
+    
+    logger.info(`Procesando medidas: ${widthsString}`);
+    
+    // Eliminar la línea de encabezado
+    const lines = widthsString.split('\n').filter(line => !line.includes('Ancho material'));
+    
+    return lines.map(line => {
+      const [material, imprimible] = line.split('-').map(part => part.trim());
+      
+      const parseMeasure = (measure) => {
+        if (typeof measure !== 'string') {
+          logger.warn(`Medida no es un string: ${measure}`);
+          return 0;
+        }
+        return parseFloat(measure.replace('m', '').replace(',', '.')) || 0;
       };
-    });
+      
+      const parsedMaterial = parseMeasure(material);
+      const parsedImprimible = parseMeasure(imprimible);
+      
+      if (parsedMaterial && parsedImprimible) {
+        logger.info(`Medida procesada: material ${parsedMaterial}m, imprimible ${parsedImprimible}m`);
+        return {
+          material: parsedMaterial,
+          imprimible: parsedImprimible
+        };
+      } else {
+        logger.warn(`No se pudo procesar la medida: ${line}`);
+        return null;
+      }
+    }).filter(w => w !== null);
   }
 
   async getAdditionalInfo() {

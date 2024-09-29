@@ -29,7 +29,7 @@ class OpenAIService {
     }
   }
 
-  getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
+   getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
 
     return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
@@ -41,12 +41,13 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
-       - Si no hay un servicio seleccionado, presenta los servicios disponibles y pide al cliente que elija uno.
-       - Servicios disponibles:
-         ${JSON.stringify(services, null, 2)}
-       - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio directamente.
-       - Cuando el cliente seleccione un servicio válido, responde con el comando JSON:
+       - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
+       - Categorías disponibles:
+         ${Object.keys(services).join(', ')}
+       - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
+       - Cuando detectes un posible servicio, responde con el comando JSON:
          {"command": "SELECT_SERVICE", "service": "[Nombre del Servicio]"}
+       - Si el cliente menciona una categoría, muestra los servicios disponibles en esa categoría.
 
     3. Manejo de Categorías y Tipos de Servicios:
        - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
@@ -128,6 +129,7 @@ class OpenAIService {
     - No calcules precios. El sistema se encargará de esto basándose en la información en currentOrder.
     - Maneja solo un servicio por conversación.
     - Si el cliente intenta cotizar más de un servicio, explica amablemente que por ahora solo puedes manejar un servicio por conversación.
+    - Si el sistema indica que un servicio es inválido, explica al cliente que no se encontró el servicio y ofrece alternativas o categorías disponibles.
 
     Información adicional (NO la menciones a menos que sea solicitada):
     ${JSON.stringify(additionalInfo, null, 2)}
@@ -137,6 +139,7 @@ class OpenAIService {
 
     Responde al siguiente mensaje del cliente:`;
   }
+
 
   async transcribeAudio(audioFilePath) {
     try {

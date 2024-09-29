@@ -39,8 +39,21 @@ class OrderManager {
 
   handleSelectService(userId, serviceName) {
     const userContext = userContextManager.getUserContext(userId);
-    userContextManager.updateCurrentOrder(userId, { service: serviceName });
     const serviceInfo = userContextManager.getServiceInfo(serviceName);
+    
+    if (!serviceInfo) {
+      const similarServices = userContextManager.findSimilarServices(serviceName);
+      return {
+        action: "INVALID_SERVICE",
+        similarServices,
+        order: userContext.currentOrder
+      };
+    }
+
+    userContextManager.updateCurrentOrder(userId, { 
+      service: serviceName,
+      category: serviceInfo.category
+    });
     
     return {
       action: "SELECT_SERVICE",
@@ -57,17 +70,17 @@ class OrderManager {
       throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
     }
 
-    const validWidth = serviceInfo.availableWidths.find(w => w.material === width);
+    const validWidth = serviceInfo.availableWidths.find(w => w.material === parseFloat(width));
     if (!validWidth) {
       throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
     }
 
-    if (height <= 1) {
+    if (parseFloat(height) <= 1) {
       throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
     }
 
     userContextManager.updateCurrentOrder(userId, {
-      measures: { width: validWidth.material, height: height }
+      measures: { width: validWidth.material, height: parseFloat(height) }
     });
 
     return {
