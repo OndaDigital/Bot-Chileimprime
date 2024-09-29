@@ -37,114 +37,145 @@ class OrderManager {
     }
   }
 
-  handleSelectService(userId, serviceName) {
-    const userContext = userContextManager.getUserContext(userId);
-    const serviceInfo = userContextManager.getServiceInfo(serviceName);
-    
-    if (!serviceInfo) {
-      const similarServices = userContextManager.findSimilarServices(serviceName);
+  async handleSelectService(userId, serviceName) {
+    logger.info(`Manejando selección de servicio para usuario ${userId}: ${serviceName}`);
+    try {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(serviceName);
+      
+      if (!serviceInfo) {
+        const similarServices = userContextManager.findSimilarServices(serviceName);
+        return {
+          action: "INVALID_SERVICE",
+          similarServices,
+          order: userContext.currentOrder
+        };
+      }
+
+      userContextManager.updateCurrentOrder(userId, { 
+        service: serviceName,
+        category: serviceInfo.category
+      });
+      
       return {
-        action: "INVALID_SERVICE",
-        similarServices,
+        action: "SELECT_SERVICE",
+        order: userContext.currentOrder,
+        serviceInfo: serviceInfo
+      };
+    } catch (error) {
+      logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
+      throw new CustomError('ServiceSelectionError', 'Error al seleccionar el servicio', error);
+    }
+  }
+
+  async handleSetMeasures(userId, width, height) {
+    logger.info(`Manejando configuración de medidas para usuario ${userId}: ${width}x${height}`);
+    try {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
+      }
+
+      const validWidth = serviceInfo.availableWidths.find(w => w.material === parseFloat(width));
+      if (!validWidth) {
+        throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
+      }
+
+      if (parseFloat(height) <= 1) {
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
+      }
+
+      userContextManager.updateCurrentOrder(userId, {
+        measures: { width: validWidth.material, height: parseFloat(height) }
+      });
+
+      return {
+        action: "SET_MEASURES",
         order: userContext.currentOrder
       };
+    } catch (error) {
+      logger.error(`Error al configurar medidas para usuario ${userId}: ${error.message}`);
+      throw new CustomError('MeasuresSetupError', 'Error al configurar las medidas', error);
     }
-
-    userContextManager.updateCurrentOrder(userId, { 
-      service: serviceName,
-      category: serviceInfo.category
-    });
-    
-    return {
-      action: "SELECT_SERVICE",
-      order: userContext.currentOrder,
-      serviceInfo: serviceInfo
-    };
   }
 
-  handleSetMeasures(userId, width, height) {
-    const userContext = userContextManager.getUserContext(userId);
-    const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+  async handleSetQuantity(userId, quantity) {
+    logger.info(`Manejando configuración de cantidad para usuario ${userId}: ${quantity}`);
+    try {
+      if (quantity <= 0) {
+        throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
+      }
 
-    if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
+      userContextManager.updateCurrentOrder(userId, { quantity: quantity });
+      const userContext = userContextManager.getUserContext(userId);
+
+      return {
+        action: "SET_QUANTITY",
+        order: userContext.currentOrder
+      };
+    } catch (error) {
+      logger.error(`Error al configurar cantidad para usuario ${userId}: ${error.message}`);
+      throw new CustomError('QuantitySetupError', 'Error al configurar la cantidad', error);
     }
-
-    const validWidth = serviceInfo.availableWidths.find(w => w.material === parseFloat(width));
-    if (!validWidth) {
-      throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
-    }
-
-    if (parseFloat(height) <= 1) {
-      throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
-    }
-
-    userContextManager.updateCurrentOrder(userId, {
-      measures: { width: validWidth.material, height: parseFloat(height) }
-    });
-
-    return {
-      action: "SET_MEASURES",
-      order: userContext.currentOrder
-    };
   }
 
-  handleSetQuantity(userId, quantity) {
-    if (quantity <= 0) {
-      throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
+  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+    logger.info(`Manejando configuración de acabados para usuario ${userId}`);
+    try {
+      const userContext = userContextManager.getUserContext(userId);
+      const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+
+      const finishes = {
+        sellado: sellado && serviceInfo.sellado,
+        ojetillos: ojetillos && serviceInfo.ojetillos,
+        bolsillo: bolsillo && serviceInfo.bolsillo
+      };
+
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+
+      return {
+        action: "SET_FINISHES",
+        order: userContext.currentOrder
+      };
+    } catch (error) {
+      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
+      throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
     }
-
-    userContextManager.updateCurrentOrder(userId, { quantity: quantity });
-    const userContext = userContextManager.getUserContext(userId);
-
-    return {
-      action: "SET_QUANTITY",
-      order: userContext.currentOrder
-    };
   }
 
-  handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
-    const userContext = userContextManager.getUserContext(userId);
-    const serviceInfo = userContextManager.getServiceInfo(userContext.currentOrder.service);
+  async handleValidateFile(userId, isValid, reason) {
+    logger.info(`Manejando validación de archivo para usuario ${userId}`);
+    try {
+      userContextManager.updateCurrentOrder(userId, {
+        fileAnalysis: { isValid, reason }
+      });
+      
+      const userContext = userContextManager.getUserContext(userId);
 
-    const finishes = {
-      sellado: sellado && serviceInfo.sellado,
-      ojetillos: ojetillos && serviceInfo.ojetillos,
-      bolsillo: bolsillo && serviceInfo.bolsillo
-    };
-
-    userContextManager.updateCurrentOrder(userId, { finishes: finishes });
-
-    return {
-      action: "SET_FINISHES",
-      order: userContext.currentOrder
-    };
-  }
-
-  handleValidateFile(userId, isValid, reason) {
-    userContextManager.updateCurrentOrder(userId, {
-      fileAnalysis: { isValid, reason }
-    });
-    
-    const userContext = userContextManager.getUserContext(userId);
-
-    return {
-      action: "VALIDATE_FILE",
-      order: userContext.currentOrder
-    };
+      return {
+        action: "VALIDATE_FILE",
+        order: userContext.currentOrder
+      };
+    } catch (error) {
+      logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
+      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
+    }
   }
 
   async handleConfirmOrder(userId) {
-    const userContext = userContextManager.getUserContext(userId);
-    
-    if (!userContextManager.isOrderComplete(userId)) {
-      throw new CustomError('IncompleteOrderError', 'La orden no está completa');
-    }
-
-    const total = userContextManager.calculatePrice(userId);
-    userContextManager.updateCurrentOrder(userId, { total: total });
-
+    logger.info(`Manejando confirmación de pedido para usuario ${userId}`);
     try {
+      const userContext = userContextManager.getUserContext(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        throw new CustomError('IncompleteOrderError', 'La orden no está completa');
+      }
+
+      const total = userContextManager.calculatePrice(userId);
+      userContextManager.updateCurrentOrder(userId, { total: total });
+
       const orderSummary = this.formatOrderSummary(userContext.currentOrder);
       const result = await this.finalizeOrder(userId, userContext.currentOrder);
 

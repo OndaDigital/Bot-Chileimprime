@@ -417,6 +417,12 @@ class FlowManager {
       const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
 
       switch (action) {
+        case "LIST_ALL_SERVICES":
+          await this.handleListAllServices(ctx, flowDynamic);
+          break;
+        case "FIND_SIMILAR_SERVICES":
+          await this.handleFindSimilarServices(ctx, flowDynamic, order);
+          break;
         case "SELECT_CATEGORY":
           await this.handleSelectCategory(ctx, flowDynamic, order);
           break;
@@ -453,12 +459,17 @@ class FlowManager {
     }
   }
 
-  async processAIResponse(aiResponse, userId, userContext) {
+  processAIResponse(aiResponse, userId, userContext) {
     try {
       const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
       if (jsonCommandMatch) {
         const jsonCommand = JSON.parse(jsonCommandMatch[0]);
-        return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
+        switch (jsonCommand.command) {
+          case "LIST_ALL_SERVICES":
+            return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
+          default:
+            return { action: "CONTINUAR", order: userContext.currentOrder };
+        }
       }
       return { action: "CONTINUAR", order: userContext.currentOrder };
     } catch (error) {
@@ -487,6 +498,15 @@ class FlowManager {
     } else {
       await flowDynamic(`¿Cuántas unidades necesitas?`);
     }
+  }
+
+  async handleListAllServices(ctx, flowDynamic) {
+    const allServices = userContextManager.getAllServices();
+    let serviceList = "Aquí tienes la lista completa de nuestros servicios:\n\n";
+    allServices.forEach(service => {
+      serviceList += `- ${service.name} (${service.category})\n`;
+    });
+    await flowDynamic(serviceList);
   }
 
   async handleSetMeasures(ctx, flowDynamic, order) {
@@ -1040,16 +1060,30 @@ class UserContextManager {
   }
 
   findSimilarServices(serviceName) {
-    const allServices = Object.values(this.services).flat();
+    const allServices = this.getAllServices();
     return allServices
-      .filter(service => service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
-                         serviceName.toLowerCase().includes(service.name.toLowerCase()))
-      .map(service => service.name);
+      .filter(service => 
+        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
+        serviceName.toLowerCase().includes(service.name.toLowerCase())
+      )
+      .map(service => ({
+        name: service.name,
+        category: service.category
+      }));
   }
 
   getServicesInCategory(category) {
     return this.services[category] || [];
   }
+
+  getAllServices() {
+    let allServices = [];
+    for (const category in this.services) {
+      allServices = allServices.concat(this.services[category]);
+    }
+    return allServices;
+  }
+
 
 
   getAvailableFinishes(serviceInfo) {
@@ -1326,12 +1360,12 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
+       - Si el cliente solicita la lista completa de servicios o el menú, responde con el comando JSON:
+         {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
        - Categorías disponibles:
          ${Object.keys(services).join(', ')}
        - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
-       - Cuando detectes un posible servicio, responde con el comando JSON:
-         {"command": "SELECT_SERVICE", "service": "[Nombre del Servicio]"}
        - Si el cliente menciona una categoría, muestra los servicios disponibles en esa categoría.
 
     3. Manejo de Categorías y Tipos de Servicios:

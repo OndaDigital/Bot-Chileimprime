@@ -178,8 +178,8 @@ class FlowManager {
       const { action, order } = await this.processAIResponse(aiResponse, userId, userContext);
 
       switch (action) {
-        case "SELECT_CATEGORY":
-          await this.handleSelectCategory(ctx, flowDynamic, order);
+        case "LIST_ALL_SERVICES":
+          await this.handleListAllServices(ctx, flowDynamic);
           break;
         case "SELECT_SERVICE":
           await this.handleSelectService(ctx, flowDynamic, order);
@@ -194,10 +194,10 @@ class FlowManager {
           await this.handleSetFinishes(ctx, flowDynamic, order);
           break;
         case "VALIDATE_FILE":
-          await this.handleFileValidation(ctx, flowDynamic, order);
+          await this.handleValidateFile(ctx, flowDynamic, order);
           break;
         case "CONFIRM_ORDER":
-          await this.handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order);
+          await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
           break;
         case "SOLICITUD_HUMANO":
           await this.handleHumanRequest(ctx, flowDynamic, endFlow);
@@ -214,12 +214,66 @@ class FlowManager {
     }
   }
 
-  async processAIResponse(aiResponse, userId, userContext) {
+  async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order) {
+    try {
+      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
+      await flowDynamic(summary);
+      await flowDynamic(result.message);
+      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
+      
+      this.addToBlacklist(ctx.from, config.blacklistDuration);
+      this.clearIdleTimer(ctx.from);
+      
+      setTimeout(() => {
+        gotoFlow(this.getFlowByName('promoFlow'));
+      }, config.promoMessageDelay);
+      
+      return endFlow();
+    } catch (error) {
+      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+    }
+  }
+
+
+  async handleValidateFile(ctx, flowDynamic, order) {
+    try {
+      const result = await orderManager.handleValidateFile(ctx.from, order.fileValidation.isValid, order.fileValidation.reason);
+      if (result.order.fileAnalysis.isValid) {
+        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
+      } else {
+        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${result.order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
+      }
+    } catch (error) {
+      logger.error(`Error al validar el archivo: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al validar tu archivo. Por favor, intenta enviarlo nuevamente.");
+    }
+  }
+
+  processAIResponse(aiResponse, userId, userContext) {
     try {
       const jsonCommandMatch = aiResponse.match(/\{.*\}/s);
       if (jsonCommandMatch) {
         const jsonCommand = JSON.parse(jsonCommandMatch[0]);
-        return await orderManager.updateOrder(userId, jsonCommand, userContext.services, userContext.currentOrder);
+        switch (jsonCommand.command) {
+          case "LIST_ALL_SERVICES":
+            return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
+          case "SELECT_SERVICE":
+            return { action: "SELECT_SERVICE", order: { ...userContext.currentOrder, service: jsonCommand.service } };
+          case "SET_MEASURES":
+            return { action: "SET_MEASURES", order: { ...userContext.currentOrder, measures: { width: jsonCommand.width, height: jsonCommand.height } } };
+          case "SET_QUANTITY":
+            return { action: "SET_QUANTITY", order: { ...userContext.currentOrder, quantity: jsonCommand.quantity } };
+          case "SET_FINISHES":
+            return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: jsonCommand } };
+          case "VALIDATE_FILE":
+            return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: jsonCommand } };
+          case "CONFIRM_ORDER":
+            return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
+          default:
+            logger.warn(`Comando desconocido recibido: ${jsonCommand.command}`);
+            return { action: "CONTINUAR", order: userContext.currentOrder };
+        }
       }
       return { action: "CONTINUAR", order: userContext.currentOrder };
     } catch (error) {
@@ -229,42 +283,78 @@ class FlowManager {
   }
 
   async handleSelectService(ctx, flowDynamic, order) {
-    if (order.action === "INVALID_SERVICE") {
-      if (order.similarServices.length > 0) {
-        await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${order.similarServices.join(', ')}`);
+    try {
+      const result = await orderManager.handleSelectService(ctx.from, order.service);
+      if (result.action === "INVALID_SERVICE") {
+        if (result.similarServices.length > 0) {
+          await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${result.similarServices.join(', ')}`);
+        } else {
+          const categories = Object.keys(userContextManager.getGlobalServices());
+          await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". Estas son nuestras categorías disponibles: ${categories.join(', ')}. ¿En cuál estás interesado?`);
+        }
       } else {
-        const categories = Object.keys(userContextManager.getGlobalServices());
-        await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". Estas son nuestras categorías disponibles: ${categories.join(', ')}. ¿En cuál estás interesado?`);
+        const serviceInfo = result.serviceInfo;
+        await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
+        if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+          const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
+          await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
+        } else {
+          await flowDynamic(`¿Cuántas unidades necesitas?`);
+        }
       }
-      return;
+    } catch (error) {
+      logger.error(`Error al manejar la selección de servicio: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu selección. Por favor, intenta nuevamente.");
     }
+  }
 
-    const serviceInfo = userContextManager.getServiceInfo(order.service);
-    await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
-
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
-      await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
-    } else {
-      await flowDynamic(`¿Cuántas unidades necesitas?`);
+  async handleListAllServices(ctx, flowDynamic) {
+    try {
+      const allServices = userContextManager.getAllServices();
+      let serviceList = "Aquí tienes la lista completa de nuestros servicios:\n\n";
+      allServices.forEach(service => {
+        serviceList += `- ${service.name} (${service.category})\n`;
+      });
+      await flowDynamic(serviceList);
+    } catch (error) {
+      logger.error(`Error al listar todos los servicios: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al obtener la lista de servicios. Por favor, intenta nuevamente.");
     }
   }
 
   async handleSetMeasures(ctx, flowDynamic, order) {
-    await flowDynamic(`Medidas registradas: *${order.measures.width}m de ancho x ${order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
+    try {
+      const result = await orderManager.handleSetMeasures(ctx.from, order.measures.width, order.measures.height);
+      await flowDynamic(`Medidas registradas: *${result.order.measures.width}m de ancho x ${result.order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
+    } catch (error) {
+      logger.error(`Error al manejar las medidas: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al registrar las medidas. Por favor, asegúrate de proporcionar medidas válidas e intenta nuevamente.");
+    }
   }
 
   async handleSetQuantity(ctx, flowDynamic, order) {
-    await flowDynamic(`Cantidad registrada: *${order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+    try {
+      const result = await orderManager.handleSetQuantity(ctx.from, order.quantity);
+      await flowDynamic(`Cantidad registrada: *${result.order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+    } catch (error) {
+      logger.error(`Error al manejar la cantidad: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al registrar la cantidad. Por favor, asegúrate de proporcionar un número válido e intenta nuevamente.");
+    }
   }
 
   async handleSetFinishes(ctx, flowDynamic, order) {
-    const finishes = [];
-    if (order.finishes.sellado) finishes.push("sellado");
-    if (order.finishes.ojetillos) finishes.push("ojetillos");
-    if (order.finishes.bolsillo) finishes.push("bolsillo");
-    const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
-    await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
+    try {
+      const result = await orderManager.handleSetFinishes(ctx.from, order.finishes.sellado, order.finishes.ojetillos, order.finishes.bolsillo);
+      const finishes = [];
+      if (result.order.finishes.sellado) finishes.push("sellado");
+      if (result.order.finishes.ojetillos) finishes.push("ojetillos");
+      if (result.order.finishes.bolsillo) finishes.push("bolsillo");
+      const finishesText = finishes.length > 0 ? finishes.join(", ") : "ninguno";
+      await flowDynamic(`Acabados registrados: *${finishesText}*. Por favor, envía tu archivo de diseño.`);
+    } catch (error) {
+      logger.error(`Error al manejar los acabados: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al registrar los acabados. Por favor, intenta nuevamente.");
+    }
   }
 
   async handleFileValidation(ctx, flowDynamic, order) {

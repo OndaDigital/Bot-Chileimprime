@@ -41,12 +41,12 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
+       - Si el cliente solicita la lista completa de servicios o el menú, responde con el comando JSON:
+         {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
        - Categorías disponibles:
          ${Object.keys(services).join(', ')}
        - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
-       - Cuando detectes un posible servicio, responde con el comando JSON:
-         {"command": "SELECT_SERVICE", "service": "[Nombre del Servicio]"}
        - Si el cliente menciona una categoría, muestra los servicios disponibles en esa categoría.
 
     3. Manejo de Categorías y Tipos de Servicios:

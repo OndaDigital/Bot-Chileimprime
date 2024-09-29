@@ -96,16 +96,30 @@ class UserContextManager {
   }
 
   findSimilarServices(serviceName) {
-    const allServices = Object.values(this.services).flat();
+    const allServices = this.getAllServices();
     return allServices
-      .filter(service => service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
-                         serviceName.toLowerCase().includes(service.name.toLowerCase()))
-      .map(service => service.name);
+      .filter(service => 
+        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
+        serviceName.toLowerCase().includes(service.name.toLowerCase())
+      )
+      .map(service => ({
+        name: service.name,
+        category: service.category
+      }));
   }
 
   getServicesInCategory(category) {
     return this.services[category] || [];
   }
+
+  getAllServices() {
+    let allServices = [];
+    for (const category in this.services) {
+      allServices = allServices.concat(this.services[category]);
+    }
+    return allServices;
+  }
+
 
 
   getAvailableFinishes(serviceInfo) {
