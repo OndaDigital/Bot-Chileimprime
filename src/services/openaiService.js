@@ -177,7 +177,8 @@ class OpenAIService {
   }
 
   async validateFileForService(fileAnalysis, service, measures, currentOrder) {
-    const criteria = userContextManager.getFileValidationCriteria();
+    const validationCriteria = userContextManager.getFileValidationCriteria();
+    
     const prompt = `Eres un experto en análisis de archivos de impresión. 
     Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
     Ancho: ${measures.width}m, Alto: ${measures.height}m.
@@ -186,7 +187,7 @@ class OpenAIService {
     ${JSON.stringify(fileAnalysis)}
 
     Criterios de validación:
-    ${criteria}
+    ${validationCriteria}
 
     Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
     Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.

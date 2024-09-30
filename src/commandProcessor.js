@@ -1,5 +1,5 @@
 import logger from './utils/logger.js';
-import userContextManager from './modules/orderManager.js';
+import userContextManager from './modules/userContext.js';
 import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
@@ -20,8 +20,6 @@ class CommandProcessor {
           return this.handleSetQuantity(ctx, flowDynamic, command.quantity);
         case "SET_FINISHES":
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
-        case "VALIDATE_FILE":
-          return this.handleValidateFile(ctx, flowDynamic, command);
         case "VALIDATE_FILE_FOR_SERVICE":
           return this.handleValidateFileForService(ctx, flowDynamic);
         case "CONFIRM_ORDER":
@@ -140,37 +138,41 @@ class CommandProcessor {
   async handleValidateFileForService(ctx, flowDynamic) {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
-    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+    const fileAnalysis = currentOrder.fileAnalysis;
 
-    if (!currentOrder.fileAnalysis) {
+    if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
       return;
     }
 
-    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
-
-    try {
-      const validationResult = await openaiService.validateFileForService(
-        currentOrder.fileAnalysis,
-        serviceInfo,
-        currentOrder.measures,
-        currentOrder
-      );
-
-      userContextManager.updateCurrentOrder(userId, {
-        fileValidation: validationResult
-      });
-
-      if (validationResult.isValid) {
-        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
-      } else {
-        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
-      }
-
-    } catch (error) {
-      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
-      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+    if (currentOrder.fileAnalysisHandled) {
+      logger.info(`Análisis de archivo ya manejado para usuario ${userId}. Ignorando solicitud duplicada.`);
+      return;
     }
+
+    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+    response += `📄 Formato: ${fileAnalysis.format}\n`;
+    response += `📏 Dimensiones: ${fileAnalysis.width}x${fileAnalysis.height}\n`;
+    response += `🔍 Resolución: ${fileAnalysis.dpi} DPI\n`;
+    if (fileAnalysis.colorSpace) {
+      response += `🎨 Espacio de color: ${fileAnalysis.colorSpace}\n`;
+    }
+
+    if (!currentOrder.service) {
+      response += "\nPara determinar si este archivo es adecuado para tu proyecto, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
+    } else {
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+      if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        response += `\nYa tenemos seleccionado el servicio ${currentOrder.service}. Para validar completamente el archivo, necesito que me proporciones las medidas que necesitas. ¿Podrías indicarme el ancho y alto requeridos?`;
+      } else {
+        response += "\nCon esta información, puedo determinar si el archivo es adecuado para tu proyecto. ¿Necesitas que revise algo más específico del archivo?";
+      }
+    }
+
+    await flowDynamic(response);
+    userContextManager.updateFileAnalysisResponded(userId, true);
+    userContextManager.updateFileAnalysisHandled(userId, true);
+    logger.info(`Análisis de archivo manejado y respuesta enviada para usuario ${userId}`);
   }
 
   async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow) {

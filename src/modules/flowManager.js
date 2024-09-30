@@ -185,56 +185,65 @@ class FlowManager {
     async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
       const userId = ctx.from;
       logger.info(`Procesando mensaje para usuario ${userId}`);
-  
+    
       if (this.isBlacklisted(userId)) {
         logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
       }
-  
+    
       if (orderManager.isOrderConfirmed(userId)) {
         logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
         return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-  
+    
       this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-  
+    
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
         
         const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
                                       !userContext.currentOrder.fileAnalysisResponded;
-  
-        let aiResponse;
+    
         if (hasRecentFileAnalysis) {
-          aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
-          userContext.currentOrder.fileAnalysisResponded = true;
-        } else {
-          aiResponse = await openaiService.getChatCompletion(
-            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-            [...chatContext, { role: "user", content: message }]
-          );
+          logger.info(`Análisis de archivo reciente detectado para usuario ${userId}`);
+          if (!userContext.currentOrder.fileAnalysisHandled) {
+            logger.info(`Delegando manejo de análisis de archivo a commandProcessor para usuario ${userId}`);
+            await commandProcessor.handleValidateFileForService(ctx, flowDynamic);
+            userContextManager.updateFileAnalysisHandled(userId, true);
+          } else {
+            logger.info(`Análisis de archivo ya manejado para usuario ${userId}. Ignorando.`);
+          }
+          return; // Terminamos aquí para evitar procesamiento adicional
         }
   
+        let aiResponse = await openaiService.getChatCompletion(
+          openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+          [...chatContext, { role: "user", content: message }]
+        );
+    
         logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
-  
+    
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
-  
+    
         const commands = this.processAIResponse(aiResponse);
         
         for (const command of commands) {
           await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
         }
-  
-        if (commands.length === 0) {
+    
+        if (commands.length === 0 && !hasRecentFileAnalysis) {
           await flowDynamic(aiResponse);
         }
-  
+    
+        if (userContextManager.isOrderComplete(userId)) {
+          return gotoFlow(this.getFlowByName('confirmedFlow'));
+        }
+    
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);
-        console.error('Error completo:', error);
         await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
     }
@@ -264,18 +273,6 @@ class FlowManager {
       return response;
     }
   
-    generateFileAnalysisAIResponse(fileAnalysis) {
-      let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
-      response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
-      
-      if (fileAnalysis.colorSpace) {
-        response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
-      }
-  
-      response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
-  
-      return response;
-    }
   
     setIdleTimers(userId, timers) {
       this.idleTimers.set(userId, timers);

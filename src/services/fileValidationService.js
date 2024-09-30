@@ -5,12 +5,8 @@ import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 import sharp from 'sharp';
 import fileType from 'file-type';
-
-// Importar createRequire para usar require en ES Modules
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-
-// Importar pdf-parse utilizando require
 const pdfParse = require('pdf-parse');
 
 const readFile = promisify(fs.readFile);
@@ -84,50 +80,6 @@ class FileValidationService {
       logger.error(`Error al analizar PDF: ${error.message}`);
       throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
     }
-  }
-
-  checkFileRequirements(fileInfo, service) {
-    let isValid = true;
-    let reason = '';
-    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
-
-    // Verificar formato
-    if (service.format && service.format.toLowerCase() !== fileInfo.format.toLowerCase()) {
-      isValid = false;
-      reason += `El formato del archivo (${fileInfo.format}) no coincide con el requerido (${service.format}). `;
-    }
-
-    // Verificar DPI
-    let requiredDPI;
-    if (area < 2) {
-      requiredDPI = 150;
-    } else if (area > 20) {
-      requiredDPI = 72;
-    } else {
-      requiredDPI = 120;
-    }
-
-    if (fileInfo.dpi < requiredDPI) {
-      isValid = false;
-      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la requerida (${requiredDPI} DPI) para un área de ${area.toFixed(2)} m². `;
-    }
-
-    // Verificar color space (solo para imágenes)
-    if (['jpg', 'jpeg', 'png'].includes(fileInfo.format.toLowerCase())) {
-      if (fileInfo.colorSpace !== 'cmyk') {
-        reason += 'Advertencia: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
-      }
-    }
-
-    // Verificar acabados de impresión (esto requeriría un análisis más profundo del contenido del archivo)
-    reason += 'Nota: Asegúrese de que los acabados de impresión (cortes, perforaciones, etc.) estén marcados con líneas punteadas color magenta. ';
-
-    return {
-      isValid,
-      reason: reason.trim() || 'El archivo cumple con todos los requisitos.',
-      fileInfo,
-      area
-    };
   }
 }
 

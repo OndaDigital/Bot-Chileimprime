@@ -35,6 +35,7 @@ class UserContextManager {
       filePath: null,
       fileAnalysis: null,
       fileAnalysisResponded: false,
+      fileAnalysisHandled: false,
       fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
@@ -69,7 +70,6 @@ class UserContextManager {
     logger.info(`Menú global: ${JSON.stringify(this.services)}`);
     logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
   }
-
 
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
@@ -108,6 +108,30 @@ class UserContextManager {
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
 
+  // Nuevo método para actualizar fileAnalysisResponded
+  updateFileAnalysisResponded(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisResponded = value;
+    logger.info(`FileAnalysisResponded actualizado para usuario ${userId}: ${value}`);
+  }
+
+  updateFileAnalysisHandled(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisHandled = value;
+    logger.info(`FileAnalysisHandled actualizado para usuario ${userId}: ${value}`);
+  }
+
+  hasFileAnalysisBeenResponded(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisResponded;
+  }
+
+  hasFileAnalysisBeenHandled(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisHandled;
+  }
+
+
   getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
     logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
@@ -132,7 +156,11 @@ class UserContextManager {
   }
 
   getAllServices() {
-    return sheetService.getAllServices();
+    if (!this.services) {
+      logger.warn('Los servicios no han sido inicializados');
+      return [];
+    }
+    return Object.values(this.services).flat();
   }
 
   findSimilarServices(serviceName) {

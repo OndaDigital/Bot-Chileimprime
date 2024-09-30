@@ -62,9 +62,10 @@ class OrderManager {
         throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
       }
 
-      userContextManager.updateCurrentOrder(userId, {
-        measures: { width: validWidth.material, height: parseFloat(height) }
-      });
+      const measures = { width: validWidth.material, height: parseFloat(height) };
+      const { total, area } = this.calculatePrice({ ...currentOrder, measures });
+
+      userContextManager.updateCurrentOrder(userId, { measures, total, area });
 
       return {
         action: "SET_MEASURES",
@@ -83,7 +84,16 @@ class OrderManager {
         throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
       }
 
-      userContextManager.updateCurrentOrder(userId, { quantity: quantity });
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        // Para categorías sin medidas personalizadas, calculamos el precio directamente
+        const { total } = this.calculatePrice({ ...currentOrder, quantity });
+        userContextManager.updateCurrentOrder(userId, { quantity, total });
+      } else {
+        userContextManager.updateCurrentOrder(userId, { quantity });
+      }
 
       return {
         action: "SET_QUANTITY",
@@ -169,9 +179,10 @@ class OrderManager {
     const serviceInfo = userContextManager.getServiceInfo(order.service);
 
     let total = 0;
+    let area = 0;
 
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      const area = order.measures.width * order.measures.height;
+      area = order.measures.width * order.measures.height;
       total = area * serviceInfo.precio * order.quantity;
 
       if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
@@ -185,7 +196,7 @@ class OrderManager {
       if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
     }
 
-    return total;
+    return { total, area };
   }
 
   formatOrderSummary(order) {

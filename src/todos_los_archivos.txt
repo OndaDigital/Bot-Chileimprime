@@ -102,7 +102,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // commandProcessor.js
 
 import logger from './utils/logger.js';
-import userContextManager from './modules/orderManager.js';
+import userContextManager from './modules/userContext.js';
 import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
@@ -123,8 +123,6 @@ class CommandProcessor {
           return this.handleSetQuantity(ctx, flowDynamic, command.quantity);
         case "SET_FINISHES":
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
-        case "VALIDATE_FILE":
-          return this.handleValidateFile(ctx, flowDynamic, command);
         case "VALIDATE_FILE_FOR_SERVICE":
           return this.handleValidateFileForService(ctx, flowDynamic);
         case "CONFIRM_ORDER":
@@ -243,37 +241,41 @@ class CommandProcessor {
   async handleValidateFileForService(ctx, flowDynamic) {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
-    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+    const fileAnalysis = currentOrder.fileAnalysis;
 
-    if (!currentOrder.fileAnalysis) {
+    if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
       return;
     }
 
-    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
-
-    try {
-      const validationResult = await openaiService.validateFileForService(
-        currentOrder.fileAnalysis,
-        serviceInfo,
-        currentOrder.measures,
-        currentOrder
-      );
-
-      userContextManager.updateCurrentOrder(userId, {
-        fileValidation: validationResult
-      });
-
-      if (validationResult.isValid) {
-        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
-      } else {
-        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
-      }
-
-    } catch (error) {
-      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
-      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+    if (currentOrder.fileAnalysisHandled) {
+      logger.info(`Análisis de archivo ya manejado para usuario ${userId}. Ignorando solicitud duplicada.`);
+      return;
     }
+
+    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+    response += `📄 Formato: ${fileAnalysis.format}\n`;
+    response += `📏 Dimensiones: ${fileAnalysis.width}x${fileAnalysis.height}\n`;
+    response += `🔍 Resolución: ${fileAnalysis.dpi} DPI\n`;
+    if (fileAnalysis.colorSpace) {
+      response += `🎨 Espacio de color: ${fileAnalysis.colorSpace}\n`;
+    }
+
+    if (!currentOrder.service) {
+      response += "\nPara determinar si este archivo es adecuado para tu proyecto, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
+    } else {
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+      if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        response += `\nYa tenemos seleccionado el servicio ${currentOrder.service}. Para validar completamente el archivo, necesito que me proporciones las medidas que necesitas. ¿Podrías indicarme el ancho y alto requeridos?`;
+      } else {
+        response += "\nCon esta información, puedo determinar si el archivo es adecuado para tu proyecto. ¿Necesitas que revise algo más específico del archivo?";
+      }
+    }
+
+    await flowDynamic(response);
+    userContextManager.updateFileAnalysisResponded(userId, true);
+    userContextManager.updateFileAnalysisHandled(userId, true);
+    logger.info(`Análisis de archivo manejado y respuesta enviada para usuario ${userId}`);
   }
 
   async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow) {
@@ -635,56 +637,65 @@ class FlowManager {
     async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
       const userId = ctx.from;
       logger.info(`Procesando mensaje para usuario ${userId}`);
-  
+    
       if (this.isBlacklisted(userId)) {
         logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
       }
-  
+    
       if (orderManager.isOrderConfirmed(userId)) {
         logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
         return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-  
+    
       this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-  
+    
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
         
         const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
                                       !userContext.currentOrder.fileAnalysisResponded;
-  
-        let aiResponse;
+    
         if (hasRecentFileAnalysis) {
-          aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
-          userContext.currentOrder.fileAnalysisResponded = true;
-        } else {
-          aiResponse = await openaiService.getChatCompletion(
-            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-            [...chatContext, { role: "user", content: message }]
-          );
+          logger.info(`Análisis de archivo reciente detectado para usuario ${userId}`);
+          if (!userContext.currentOrder.fileAnalysisHandled) {
+            logger.info(`Delegando manejo de análisis de archivo a commandProcessor para usuario ${userId}`);
+            await commandProcessor.handleValidateFileForService(ctx, flowDynamic);
+            userContextManager.updateFileAnalysisHandled(userId, true);
+          } else {
+            logger.info(`Análisis de archivo ya manejado para usuario ${userId}. Ignorando.`);
+          }
+          return; // Terminamos aquí para evitar procesamiento adicional
         }
   
+        let aiResponse = await openaiService.getChatCompletion(
+          openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+          [...chatContext, { role: "user", content: message }]
+        );
+    
         logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
-  
+    
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
-  
+    
         const commands = this.processAIResponse(aiResponse);
         
         for (const command of commands) {
           await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
         }
-  
-        if (commands.length === 0) {
+    
+        if (commands.length === 0 && !hasRecentFileAnalysis) {
           await flowDynamic(aiResponse);
         }
-  
+    
+        if (userContextManager.isOrderComplete(userId)) {
+          return gotoFlow(this.getFlowByName('confirmedFlow'));
+        }
+    
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);
-        console.error('Error completo:', error);
         await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
     }
@@ -714,18 +725,6 @@ class FlowManager {
       return response;
     }
   
-    generateFileAnalysisAIResponse(fileAnalysis) {
-      let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
-      response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
-      
-      if (fileAnalysis.colorSpace) {
-        response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
-      }
-  
-      response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
-  
-      return response;
-    }
   
     setIdleTimers(userId, timers) {
       this.idleTimers.set(userId, timers);
@@ -927,9 +926,10 @@ class OrderManager {
         throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
       }
 
-      userContextManager.updateCurrentOrder(userId, {
-        measures: { width: validWidth.material, height: parseFloat(height) }
-      });
+      const measures = { width: validWidth.material, height: parseFloat(height) };
+      const { total, area } = this.calculatePrice({ ...currentOrder, measures });
+
+      userContextManager.updateCurrentOrder(userId, { measures, total, area });
 
       return {
         action: "SET_MEASURES",
@@ -948,7 +948,16 @@ class OrderManager {
         throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
       }
 
-      userContextManager.updateCurrentOrder(userId, { quantity: quantity });
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        // Para categorías sin medidas personalizadas, calculamos el precio directamente
+        const { total } = this.calculatePrice({ ...currentOrder, quantity });
+        userContextManager.updateCurrentOrder(userId, { quantity, total });
+      } else {
+        userContextManager.updateCurrentOrder(userId, { quantity });
+      }
 
       return {
         action: "SET_QUANTITY",
@@ -1034,9 +1043,10 @@ class OrderManager {
     const serviceInfo = userContextManager.getServiceInfo(order.service);
 
     let total = 0;
+    let area = 0;
 
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      const area = order.measures.width * order.measures.height;
+      area = order.measures.width * order.measures.height;
       total = area * serviceInfo.precio * order.quantity;
 
       if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
@@ -1050,7 +1060,7 @@ class OrderManager {
       if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
     }
 
-    return total;
+    return { total, area };
   }
 
   formatOrderSummary(order) {
@@ -1182,6 +1192,7 @@ class UserContextManager {
       filePath: null,
       fileAnalysis: null,
       fileAnalysisResponded: false,
+      fileAnalysisHandled: false,
       fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
@@ -1216,7 +1227,6 @@ class UserContextManager {
     logger.info(`Menú global: ${JSON.stringify(this.services)}`);
     logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
   }
-
 
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
@@ -1255,6 +1265,30 @@ class UserContextManager {
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
 
+  // Nuevo método para actualizar fileAnalysisResponded
+  updateFileAnalysisResponded(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisResponded = value;
+    logger.info(`FileAnalysisResponded actualizado para usuario ${userId}: ${value}`);
+  }
+
+  updateFileAnalysisHandled(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisHandled = value;
+    logger.info(`FileAnalysisHandled actualizado para usuario ${userId}: ${value}`);
+  }
+
+  hasFileAnalysisBeenResponded(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisResponded;
+  }
+
+  hasFileAnalysisBeenHandled(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisHandled;
+  }
+
+
   getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
     logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
@@ -1279,7 +1313,11 @@ class UserContextManager {
   }
 
   getAllServices() {
-    return sheetService.getAllServices();
+    if (!this.services) {
+      logger.warn('Los servicios no han sido inicializados');
+      return [];
+    }
+    return Object.values(this.services).flat();
   }
 
   findSimilarServices(serviceName) {
@@ -1336,12 +1374,8 @@ import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 import sharp from 'sharp';
 import fileType from 'file-type';
-
-// Importar createRequire para usar require en ES Modules
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-
-// Importar pdf-parse utilizando require
 const pdfParse = require('pdf-parse');
 
 const readFile = promisify(fs.readFile);
@@ -1415,50 +1449,6 @@ class FileValidationService {
       logger.error(`Error al analizar PDF: ${error.message}`);
       throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
     }
-  }
-
-  checkFileRequirements(fileInfo, service) {
-    let isValid = true;
-    let reason = '';
-    const area = (fileInfo.width / 1000) * (fileInfo.height / 1000); // Convertir a metros cuadrados
-
-    // Verificar formato
-    if (service.format && service.format.toLowerCase() !== fileInfo.format.toLowerCase()) {
-      isValid = false;
-      reason += `El formato del archivo (${fileInfo.format}) no coincide con el requerido (${service.format}). `;
-    }
-
-    // Verificar DPI
-    let requiredDPI;
-    if (area < 2) {
-      requiredDPI = 150;
-    } else if (area > 20) {
-      requiredDPI = 72;
-    } else {
-      requiredDPI = 120;
-    }
-
-    if (fileInfo.dpi < requiredDPI) {
-      isValid = false;
-      reason += `La resolución del archivo (${fileInfo.dpi} DPI) es menor que la requerida (${requiredDPI} DPI) para un área de ${area.toFixed(2)} m². `;
-    }
-
-    // Verificar color space (solo para imágenes)
-    if (['jpg', 'jpeg', 'png'].includes(fileInfo.format.toLowerCase())) {
-      if (fileInfo.colorSpace !== 'cmyk') {
-        reason += 'Advertencia: Las imágenes deben estar en formato CMYK para una mejor calidad de impresión. ';
-      }
-    }
-
-    // Verificar acabados de impresión (esto requeriría un análisis más profundo del contenido del archivo)
-    reason += 'Nota: Asegúrese de que los acabados de impresión (cortes, perforaciones, etc.) estén marcados con líneas punteadas color magenta. ';
-
-    return {
-      isValid,
-      reason: reason.trim() || 'El archivo cumple con todos los requisitos.',
-      fileInfo,
-      area
-    };
   }
 }
 
@@ -1646,7 +1636,8 @@ class OpenAIService {
   }
 
   async validateFileForService(fileAnalysis, service, measures, currentOrder) {
-    const criteria = userContextManager.getFileValidationCriteria();
+    const validationCriteria = userContextManager.getFileValidationCriteria();
+    
     const prompt = `Eres un experto en análisis de archivos de impresión. 
     Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
     Ancho: ${measures.width}m, Alto: ${measures.height}m.
@@ -1655,7 +1646,7 @@ class OpenAIService {
     ${JSON.stringify(fileAnalysis)}
 
     Criterios de validación:
-    ${criteria}
+    ${validationCriteria}
 
     Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
     Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.
