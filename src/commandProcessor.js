@@ -80,36 +80,48 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
     const fileAnalysis = currentOrder.fileAnalysis;
-
+  
     if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para analizar. Por favor, envía un archivo primero.");
       return;
     }
-
+  
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
-    response += `📄 Formato: ${fileAnalysis.format}\n`;
-    response += `📏 Dimensiones: ${fileAnalysis.width}x${fileAnalysis.height}\n`;
-    response += `🔍 Resolución: ${fileAnalysis.dpi} DPI\n`;
+    response += `📄 Formato: *${fileAnalysis.format}*\n`;
+    response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
+    
+    const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
+    const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
+    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
+    
+    response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
+    response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
+    
     if (fileAnalysis.colorSpace) {
-      response += `🎨 Espacio de color: ${fileAnalysis.colorSpace}\n`;
+      response += `🎨 Espacio de color: *${fileAnalysis.colorSpace}*\n`;
     }
-
+    
+    if (fileAnalysis.fileSize) {
+      response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
+    }
+  
     if (!currentOrder.service) {
       response += "\nPor favor, indícame qué servicio de impresión necesitas para poder validar si el archivo es compatible.";
     } else {
       const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
       if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        response += `\nYa has seleccionado el servicio ${currentOrder.service}. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
+        response += `\nYa has seleccionado el servicio *${currentOrder.service}*. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
       } else {
         // Tenemos toda la información, procedemos a validar
         await this.checkAndValidateFile(ctx, flowDynamic);
         return; // Evitamos enviar una respuesta adicional
       }
     }
-
+  
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
   }
+  
 
   async handleListAllServices(userId) {
     const services = sheetService.getServices();
