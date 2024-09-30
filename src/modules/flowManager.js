@@ -27,7 +27,9 @@ class FlowManager {
     this.blacklist = new Map();
     this.idleTimers = new Map();
     this.messageQueue = new MessageQueue({ gapSeconds: config.messageQueueGapSeconds });
+    this.cooldowns = new Map();
   }
+
   async initializeFlows() {
     try {
       this.flows.principalFlow = this.createPrincipalFlow();
@@ -98,22 +100,19 @@ class FlowManager {
       return addKeyword(EVENTS.DOCUMENT)
         .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
           try {
+            const userId = ctx.from;
             const filePath = await whatsappService.saveFile(ctx);
             const fileInfo = await fileValidationService.analyzeFile(filePath);
             
-            await userContextManager.updateCurrentOrder(ctx.from, {
+            await userContextManager.updateCurrentOrder(userId, {
               filePath: filePath,
               fileAnalysis: fileInfo
             });
             
-            logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
+            logger.info(`Archivo analizado para usuario ${userId}: ${JSON.stringify(fileInfo)}`);
             
-            const analysisResponse = this.generateFileAnalysisResponse(fileInfo);
-            await flowDynamic(analysisResponse);
+            await commandProcessor.handleFileAnalysis(ctx, flowDynamic);
             
-            this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
-              await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
-            });          
           } catch (error) {
             logger.error(`Error al procesar el archivo: ${error.message}`);
             await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
@@ -202,21 +201,6 @@ class FlowManager {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
         
-        const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
-                                      !userContext.currentOrder.fileAnalysisResponded;
-    
-        if (hasRecentFileAnalysis) {
-          logger.info(`Análisis de archivo reciente detectado para usuario ${userId}`);
-          if (!userContext.currentOrder.fileAnalysisHandled) {
-            logger.info(`Delegando manejo de análisis de archivo a commandProcessor para usuario ${userId}`);
-            await commandProcessor.handleValidateFileForService(ctx, flowDynamic);
-            userContextManager.updateFileAnalysisHandled(userId, true);
-          } else {
-            logger.info(`Análisis de archivo ya manejado para usuario ${userId}. Ignorando.`);
-          }
-          return; // Terminamos aquí para evitar procesamiento adicional
-        }
-  
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
           [...chatContext, { role: "user", content: message }]
@@ -228,14 +212,17 @@ class FlowManager {
         userContextManager.updateContext(userId, aiResponse, "assistant");
     
         const commands = this.processAIResponse(aiResponse);
-        
+      
         for (const command of commands) {
           await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
         }
     
-        if (commands.length === 0 && !hasRecentFileAnalysis) {
+        if (commands.length === 0) {
           await flowDynamic(aiResponse);
         }
+    
+        // Verificar si podemos validar el archivo después de procesar los comandos
+        await commandProcessor.checkAndValidateFile(ctx, flowDynamic);
     
         if (userContextManager.isOrderComplete(userId)) {
           return gotoFlow(this.getFlowByName('confirmedFlow'));

@@ -205,7 +205,7 @@ class OpenAIService {
           { role: "user", content: "Valida este archivo para el servicio y medidas especificados." }
         ],
         max_tokens: config.maxTokens,
-        temperature: 0.7,
+        temperature: 0.5,
       });
 
       const analysis = response.choices[0].message.content.trim();

@@ -40,18 +40,53 @@ class CommandProcessor {
     }
   }
 
-  async handleListAllServices(ctx, flowDynamic) {
-    try {
-      const allServices = userContextManager.getAllServices();
-      let serviceList = "Aquí tienes la lista completa de nuestros servicios:\n\n";
-      allServices.forEach(service => {
-        serviceList += `- ${service.name} (${service.category})\n`;
-      });
-      await flowDynamic(serviceList);
-    } catch (error) {
-      logger.error(`Error al listar todos los servicios: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al obtener la lista de servicios. Por favor, intenta nuevamente.");
+
+  async handleFileAnalysis(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    const fileAnalysis = currentOrder.fileAnalysis;
+
+    if (!fileAnalysis) {
+      await flowDynamic("Lo siento, parece que no hay un archivo para analizar. Por favor, envía un archivo primero.");
+      return;
     }
+
+    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+    response += `📄 Formato: ${fileAnalysis.format}\n`;
+    response += `📏 Dimensiones: ${fileAnalysis.width}x${fileAnalysis.height}\n`;
+    response += `🔍 Resolución: ${fileAnalysis.dpi} DPI\n`;
+    if (fileAnalysis.colorSpace) {
+      response += `🎨 Espacio de color: ${fileAnalysis.colorSpace}\n`;
+    }
+
+    if (!currentOrder.service) {
+      response += "\nPor favor, indícame qué servicio de impresión necesitas para poder validar si el archivo es compatible.";
+    } else {
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+      if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        response += `\nYa has seleccionado el servicio ${currentOrder.service}. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
+      } else {
+        // Tenemos toda la información, procedemos a validar
+        await this.checkAndValidateFile(ctx, flowDynamic);
+        return; // Evitamos enviar una respuesta adicional
+      }
+    }
+
+    await flowDynamic(response);
+    userContextManager.updateFileAnalysisResponded(userId, true);
+  }
+
+  async handleListAllServices(ctx, flowDynamic) {
+    const services = userContextManager.getGlobalServices();
+    let serviceList = "Aquí tienes la lista de nuestros servicios:\n\n";
+    for (const category in services) {
+      serviceList += `*${category}*:\n`;
+      services[category].forEach(service => {
+        serviceList += `- ${service.name}\n`;
+      });
+      serviceList += "\n";
+    }
+    await flowDynamic(serviceList);
   }
 
   async handleSelectService(ctx, flowDynamic, serviceName) {
@@ -73,17 +108,6 @@ class CommandProcessor {
         } else {
           await flowDynamic(`¿Cuántas unidades necesitas?`);
         }
-        
-        const availableFinishes = [];
-        if (serviceInfo.sellado) availableFinishes.push("sellado");
-        if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
-        if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
-        
-        if (availableFinishes.length > 0) {
-          await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
-        } else {
-          await flowDynamic(`Este servicio no tiene terminaciones disponibles.`);
-        }
       }
     } catch (error) {
       logger.error(`Error al manejar la selección de servicio: ${error.message}`);
@@ -98,6 +122,43 @@ class CommandProcessor {
     } catch (error) {
       logger.error(`Error al manejar las medidas: ${error.message}`);
       await flowDynamic("Lo siento, ha ocurrido un error al registrar las medidas. Por favor, asegúrate de proporcionar medidas válidas e intenta nuevamente.");
+    }
+  }
+
+  async checkAndValidateFile(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    
+    if (currentOrder.fileAnalysis && currentOrder.service) {
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category) || 
+          (currentOrder.measures && currentOrder.measures.width && currentOrder.measures.height)) {
+        // Tenemos toda la información necesaria, procedemos a validar
+        try {
+          const validationResult = await openaiService.validateFileForService(
+            currentOrder.fileAnalysis,
+            serviceInfo,
+            currentOrder.measures,
+            currentOrder
+          );
+
+          let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
+          response += validationResult.analysis + "\n\n";
+
+          if (validationResult.isValid) {
+            response += "✅ El archivo es válido para este servicio y medidas.";
+          } else {
+            response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
+            response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
+          }
+
+          await flowDynamic(response);
+          userContextManager.updateCurrentOrder(userId, { fileValidation: validationResult });
+        } catch (error) {
+          logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
+          await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
+        }
+      }
     }
   }
 
@@ -121,17 +182,21 @@ class CommandProcessor {
     }
   }
 
-  async handleValidateFile(ctx, flowDynamic, command) {
+  async handleValidateFile(ctx, flowDynamic, isValid, reason) {
+    const userId = ctx.from;
     try {
-      const result = await orderManager.handleValidateFile(ctx.from, command.isValid, command.reason);
-      if (result.order.fileAnalysis.isValid) {
-        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
+      await userContextManager.updateCurrentOrder(userId, {
+        fileValidation: { isValid, reason }
+      });
+      
+      if (isValid) {
+        await flowDynamic("✅ El archivo es válido para este servicio y medidas.");
       } else {
-        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${result.order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
+        await flowDynamic(`❌ El archivo no cumple con los requisitos: ${reason}\nPor favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.`);
       }
     } catch (error) {
-      logger.error(`Error al validar el archivo: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al validar tu archivo. Por favor, intenta enviarlo nuevamente.");
+      logger.error(`Error al manejar la validación del archivo para usuario ${userId}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar la validación del archivo. Por favor, intenta nuevamente.");
     }
   }
 
@@ -165,7 +230,19 @@ class CommandProcessor {
       if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
         response += `\nYa tenemos seleccionado el servicio ${currentOrder.service}. Para validar completamente el archivo, necesito que me proporciones las medidas que necesitas. ¿Podrías indicarme el ancho y alto requeridos?`;
       } else {
-        response += "\nCon esta información, puedo determinar si el archivo es adecuado para tu proyecto. ¿Necesitas que revise algo más específico del archivo?";
+        try {
+          const validationResult = await openaiService.validateFileForService(fileAnalysis, serviceInfo, currentOrder.measures, currentOrder);
+          response += `\n${validationResult.analysis}\n`;
+          if (validationResult.isValid) {
+            response += "\n✅ El archivo es válido para este servicio y medidas.";
+          } else {
+            response += `\n❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
+            response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
+          }
+        } catch (error) {
+          logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
+          response += "\nLo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.";
+        }
       }
     }
 
@@ -175,21 +252,49 @@ class CommandProcessor {
     logger.info(`Análisis de archivo manejado y respuesta enviada para usuario ${userId}`);
   }
 
+  async validateFileForService(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+    try {
+      const validationResult = await openaiService.validateFileForService(
+        currentOrder.fileAnalysis,
+        serviceInfo,
+        currentOrder.measures,
+        currentOrder
+      );
+
+      let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
+      response += validationResult.analysis + "\n\n";
+
+      if (validationResult.isValid) {
+        response += "✅ El archivo es válido para este servicio y medidas.";
+      } else {
+        response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
+        response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
+      }
+
+      await flowDynamic(response);
+      return response;
+    } catch (error) {
+      logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
+      return "Error en la validación del archivo";
+    }
+  }
+
+
   async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow) {
     try {
-      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
-      await flowDynamic(summary);
+      const result = await orderManager.handleConfirmOrder(ctx.from);
       await flowDynamic(result.message);
-      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
-      
-      setTimeout(() => {
-        gotoFlow('promoFlow');
-      }, config.promoMessageDelay);
-      
-      return endFlow();
+      if (result.success) {
+        return gotoFlow('promoFlow');
+      }
     } catch (error) {
-      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+      logger.error(`Error al confirmar el pedido para ${ctx.from}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al confirmar tu pedido. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
     }
   }
 
@@ -204,6 +309,7 @@ class CommandProcessor {
   async handleGeneralError(ctx, flowDynamic, errorMessage) {
     await flowDynamic(`Lo siento, ha ocurrido un error inesperado: ${errorMessage}. Estamos trabajando para resolverlo. Por favor, intenta nuevamente en unos momentos o contacta a nuestro soporte si el problema persiste.`);
   }
+  
 }
 
 export default new CommandProcessor();
