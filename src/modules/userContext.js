@@ -12,8 +12,8 @@ class UserContextManager {
         context: "",
         chatContext: [],
         currentOrder: this.getEmptyOrder(),
-        services: this.services,
-        additionalInfo: this.additionalInfo
+        services: sheetService.getServices(),
+        additionalInfo: sheetService.getAdditionalInfo()
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
@@ -108,7 +108,6 @@ class UserContextManager {
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
 
-  // Nuevo método para actualizar fileAnalysisResponded
   updateFileAnalysisResponded(userId, value) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder.fileAnalysisResponded = value;
@@ -130,7 +129,6 @@ class UserContextManager {
     const userContext = this.getUserContext(userId);
     return userContext.currentOrder.fileAnalysisHandled;
   }
-
 
   getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
@@ -156,11 +154,7 @@ class UserContextManager {
   }
 
   getAllServices() {
-    if (!this.services) {
-      logger.warn('Los servicios no han sido inicializados');
-      return [];
-    }
-    return Object.values(this.services).flat();
+    return sheetService.getAllServices();
   }
 
   findSimilarServices(serviceName) {

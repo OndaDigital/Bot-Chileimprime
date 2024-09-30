@@ -22,6 +22,8 @@ class GoogleSheetService {
     this.services = null;
     this.additionalInfo = null;
     this.isInitialized = false;
+    this.lastFetchTime = null;
+    this.cacheDuration = 60 * 60 * 1000; // 1 hour
   }
 
   async initialize() {
@@ -30,11 +32,13 @@ class GoogleSheetService {
       await this.doc.loadInfo();
       logger.info("Documento de Google Sheets cargado correctamente");
       
-      await this.retryOperation(() => this.loadServicesWithRetry());
-      logger.info("Servicios cargados correctamente");await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
+      await this.loadServices();
+      logger.info("Servicios cargados correctamente");
+      await this.loadAdditionalInfo();
       logger.info("Información adicional cargada correctamente");
       
       this.isInitialized = true;
+      this.lastFetchTime = Date.now();
       logger.info("SheetService inicializado completamente");
     } catch (error) {
       logger.error(`Error al inicializar SheetService: ${error.message}`);
@@ -42,42 +46,34 @@ class GoogleSheetService {
     }
   }
 
-  async retryOperation(operation, maxRetries = 5) {
-    let retries = 0;
-    while (retries < maxRetries) {
-      try {
-        return await operation();
-      } catch (error) {
-        if (retries === maxRetries - 1) {
-          logger.error(`Error después de ${maxRetries} intentos: ${error.message}`);
-          throw error;
-        }
-        const delay = Math.pow(2, retries) * 1000;
-        logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        retries++;
-      }
-    }
-  }
-
-  async loadServicesWithRetry() {
+  async loadServices() {
     logger.info("Iniciando carga de servicios");
-    this.services = await this.getServices();
+    this.services = await this.fetchServices();
     logger.info(`Servicios cargados: ${Object.keys(this.services).length} categorías`);
   }
 
-  async loadAdditionalInfoWithRetry() {
+  async loadAdditionalInfo() {
     logger.info("Iniciando carga de información adicional");
-    this.additionalInfo = await this.getAdditionalInfo();
+    this.additionalInfo = await this.fetchAdditionalInfo();
     logger.info("Información adicional cargada");
   }
 
   getServices() {
+    if (!this.services || this.shouldRefreshCache()) {
+      this.loadServices();
+    }
     return this.services;
   }
 
   getAdditionalInfo() {
+    if (!this.additionalInfo || this.shouldRefreshCache()) {
+      this.loadAdditionalInfo();
+    }
     return this.additionalInfo;
+  }
+
+  shouldRefreshCache() {
+    return !this.lastFetchTime || (Date.now() - this.lastFetchTime > this.cacheDuration);
   }
 
   getServiceInfo(serviceName) {
@@ -86,9 +82,10 @@ class GoogleSheetService {
       return null;
     }
 
+    const services = this.getServices();
     const lowerServiceName = serviceName.toLowerCase();
-    for (const category in this.services) {
-      const service = this.services[category].find(s => s.name.toLowerCase() === lowerServiceName);
+    for (const category in services) {
+      const service = services[category].find(s => s.name.toLowerCase() === lowerServiceName);
       if (service) {
         return service;
       }
@@ -98,19 +95,18 @@ class GoogleSheetService {
   }
 
   getAllServices() {
-    let allServices = [];
-    for (const category in this.services) {
-      allServices = allServices.concat(this.services[category]);
-    }
-    return allServices;
+    const services = this.getServices();
+    return Object.values(services).flat();
   }
 
   getServicesInCategory(category) {
-    return this.services[category] || [];
+    const services = this.getServices();
+    return services[category] || [];
   }
 
   getFileValidationCriteria() {
-    return this.additionalInfo.criteriosValidacion;
+    const additionalInfo = this.getAdditionalInfo();
+    return additionalInfo.criteriosValidacion;
   }
 
   findSimilarServices(serviceName) {
@@ -126,7 +122,7 @@ class GoogleSheetService {
       }));
   }
 
-  async getServices() {
+  async fetchServices() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[0];
@@ -229,7 +225,7 @@ class GoogleSheetService {
     }).filter(w => w !== null);
   }
 
-  async getAdditionalInfo() {
+  async fetchAdditionalInfo() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
@@ -342,18 +338,6 @@ class GoogleSheetService {
     const lastThree = phoneNumber.slice(-3);
     const middleLength = phoneNumber.length - 5;
     return `${firstTwo}${'*'.repeat(middleLength)}${lastThree}`;
-  }
-
-  async reinitialize() {
-    try {
-      logger.info("Reinicializando servicios e información adicional");
-      await this.retryOperation(() => this.loadServicesWithRetry());
-      await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
-      logger.info("Servicios e información adicional reinicializados correctamente");
-    } catch (error) {
-      logger.error(`Error al reinicializar SheetService: ${error.message}`);
-      throw new CustomError('SheetServiceReinitError', 'Error al reinicializar el servicio de Google Sheets', error);
-    }
   }
 }
 

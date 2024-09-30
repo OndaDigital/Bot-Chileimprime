@@ -3,6 +3,7 @@ import userContextManager from './modules/userContext.js';
 import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
+import sheetService from './services/sheetService.js'
 
 class CommandProcessor {
   constructor() {}
@@ -77,8 +78,9 @@ class CommandProcessor {
   }
 
   async handleListAllServices(ctx, flowDynamic) {
-    const services = userContextManager.getGlobalServices();
+    const services = sheetService.getServices();
     let serviceList = "Aquí tienes la lista de nuestros servicios:\n\n";
+    
     for (const category in services) {
       serviceList += `*${category}*:\n`;
       services[category].forEach(service => {
@@ -86,7 +88,13 @@ class CommandProcessor {
       });
       serviceList += "\n";
     }
+    
+    if (serviceList === "Aquí tienes la lista de nuestros servicios:\n\n") {
+      serviceList = "Lo siento, parece que no hay servicios disponibles en este momento. Por favor, intenta de nuevo más tarde o contacta con nuestro soporte.";
+    }
+    
     await flowDynamic(serviceList);
+    logger.info(`Lista de servicios enviada a ${ctx.from}`);
   }
 
   async handleSelectService(ctx, flowDynamic, serviceName) {
