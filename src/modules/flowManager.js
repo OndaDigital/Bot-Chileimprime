@@ -212,51 +212,56 @@ class FlowManager {
         logger.info(`Comandos extraídos para ${userId}: ${JSON.stringify(commands)}`);
         let currentOrderUpdated = false;
   
-      for (const command of commands) {
-        const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-        if (result && result.currentOrderUpdated) {
-          currentOrderUpdated = true;
-          logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
+        for (const command of commands) {
+          const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
+          if (result && result.currentOrderUpdated) {
+            currentOrderUpdated = true;
+            logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
+          }
         }
-      }
   
-      // Si se actualizó el currentOrder, generamos una nueva respuesta
-      if (currentOrderUpdated) {
-        const updatedUserContext = userContextManager.getUserContext(userId);
-        const instruction = "El currentOrder ha sido actualizado. Por favor, responde al cliente de manera natural, teniendo en cuenta los cambios realizados.";
-        
-        aiResponse = await openaiService.getChatCompletion(
-          openaiService.getSystemPrompt(updatedUserContext.services, updatedUserContext.currentOrder, updatedUserContext.additionalInfo, chatContext),
-          [...chatContext, { role: "user", content: message }],
-          instruction
-        );
-        
-        logger.info(`Respuesta actualizada de AI para ${userId}: ${aiResponse}`);
+        // Verificar si es necesario solicitar el archivo de diseño
+        if (this.isOrderReadyForFileUpload(userContext.currentOrder)) {
+          const instruction = "El pedido está completo. Por favor, solicita al cliente que envíe el archivo de diseño para continuar con el proceso.";
+          aiResponse = await openaiService.getChatCompletion(
+            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+            [...chatContext, { role: "user", content: message }],
+            instruction
+          );
+          logger.info(`Solicitando archivo de diseño para ${userId}`);
+        }
+  
+        userContextManager.updateContext(userId, message, "user");
+        userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+        // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
+        const filteredResponse = this.filterJsonCommands(aiResponse);
+        await flowDynamic(filteredResponse);
+  
+        logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
+  
+        // Verificar si la orden está completa
+        if (userContextManager.isOrderComplete(userId)) {
+          logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
+          return gotoFlow(this.getFlowByName('confirmedFlow'));
+        }
+  
+      } catch (error) {
+        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+        logger.error(`Stack trace: ${error.stack}`);
+        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
-
-      userContextManager.updateContext(userId, message, "user");
-      userContextManager.updateContext(userId, aiResponse, "assistant");
-
-      // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
-      const filteredResponse = this.filterJsonCommands(aiResponse);
-      await flowDynamic(filteredResponse);
-
-      logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
-
-      // Verificar si podemos validar el archivo después de procesar los comandos
-      await commandProcessor.checkAndValidateFile(ctx, flowDynamic);
-
-      if (userContextManager.isOrderComplete(userId)) {
-        logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
-        return gotoFlow(this.getFlowByName('confirmedFlow'));
-      }
-
-    } catch (error) {
-      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-      logger.error(`Stack trace: ${error.stack}`);
-      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
-  }
+
+    isOrderReadyForFileUpload(currentOrder) {
+      return currentOrder.service &&
+             currentOrder.measures &&
+             currentOrder.quantity &&
+             currentOrder.finishes &&
+             !currentOrder.filePath &&
+             !currentOrder.fileAnalysis;
+    }
+  
   
     processAIResponse(aiResponse) {
       try {

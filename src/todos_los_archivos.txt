@@ -183,36 +183,48 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
     const fileAnalysis = currentOrder.fileAnalysis;
-
+  
     if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para analizar. Por favor, envía un archivo primero.");
       return;
     }
-
+  
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
-    response += `📄 Formato: ${fileAnalysis.format}\n`;
-    response += `📏 Dimensiones: ${fileAnalysis.width}x${fileAnalysis.height}\n`;
-    response += `🔍 Resolución: ${fileAnalysis.dpi} DPI\n`;
+    response += `📄 Formato: *${fileAnalysis.format}*\n`;
+    response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
+    
+    const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
+    const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
+    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
+    
+    response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
+    response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
+    
     if (fileAnalysis.colorSpace) {
-      response += `🎨 Espacio de color: ${fileAnalysis.colorSpace}\n`;
+      response += `🎨 Espacio de color: *${fileAnalysis.colorSpace}*\n`;
     }
-
+    
+    if (fileAnalysis.fileSize) {
+      response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
+    }
+  
     if (!currentOrder.service) {
       response += "\nPor favor, indícame qué servicio de impresión necesitas para poder validar si el archivo es compatible.";
     } else {
       const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
       if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        response += `\nYa has seleccionado el servicio ${currentOrder.service}. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
+        response += `\nYa has seleccionado el servicio *${currentOrder.service}*. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
       } else {
         // Tenemos toda la información, procedemos a validar
         await this.checkAndValidateFile(ctx, flowDynamic);
         return; // Evitamos enviar una respuesta adicional
       }
     }
-
+  
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
   }
+  
 
   async handleListAllServices(userId) {
     const services = sheetService.getServices();
@@ -723,51 +735,56 @@ class FlowManager {
         logger.info(`Comandos extraídos para ${userId}: ${JSON.stringify(commands)}`);
         let currentOrderUpdated = false;
   
-      for (const command of commands) {
-        const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-        if (result && result.currentOrderUpdated) {
-          currentOrderUpdated = true;
-          logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
+        for (const command of commands) {
+          const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
+          if (result && result.currentOrderUpdated) {
+            currentOrderUpdated = true;
+            logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
+          }
         }
-      }
   
-      // Si se actualizó el currentOrder, generamos una nueva respuesta
-      if (currentOrderUpdated) {
-        const updatedUserContext = userContextManager.getUserContext(userId);
-        const instruction = "El currentOrder ha sido actualizado. Por favor, responde al cliente de manera natural, teniendo en cuenta los cambios realizados.";
-        
-        aiResponse = await openaiService.getChatCompletion(
-          openaiService.getSystemPrompt(updatedUserContext.services, updatedUserContext.currentOrder, updatedUserContext.additionalInfo, chatContext),
-          [...chatContext, { role: "user", content: message }],
-          instruction
-        );
-        
-        logger.info(`Respuesta actualizada de AI para ${userId}: ${aiResponse}`);
+        // Verificar si es necesario solicitar el archivo de diseño
+        if (this.isOrderReadyForFileUpload(userContext.currentOrder)) {
+          const instruction = "El pedido está completo. Por favor, solicita al cliente que envíe el archivo de diseño para continuar con el proceso.";
+          aiResponse = await openaiService.getChatCompletion(
+            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+            [...chatContext, { role: "user", content: message }],
+            instruction
+          );
+          logger.info(`Solicitando archivo de diseño para ${userId}`);
+        }
+  
+        userContextManager.updateContext(userId, message, "user");
+        userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+        // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
+        const filteredResponse = this.filterJsonCommands(aiResponse);
+        await flowDynamic(filteredResponse);
+  
+        logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
+  
+        // Verificar si la orden está completa
+        if (userContextManager.isOrderComplete(userId)) {
+          logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
+          return gotoFlow(this.getFlowByName('confirmedFlow'));
+        }
+  
+      } catch (error) {
+        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+        logger.error(`Stack trace: ${error.stack}`);
+        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
-
-      userContextManager.updateContext(userId, message, "user");
-      userContextManager.updateContext(userId, aiResponse, "assistant");
-
-      // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
-      const filteredResponse = this.filterJsonCommands(aiResponse);
-      await flowDynamic(filteredResponse);
-
-      logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
-
-      // Verificar si podemos validar el archivo después de procesar los comandos
-      await commandProcessor.checkAndValidateFile(ctx, flowDynamic);
-
-      if (userContextManager.isOrderComplete(userId)) {
-        logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
-        return gotoFlow(this.getFlowByName('confirmedFlow'));
-      }
-
-    } catch (error) {
-      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-      logger.error(`Stack trace: ${error.stack}`);
-      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
     }
-  }
+
+    isOrderReadyForFileUpload(currentOrder) {
+      return currentOrder.service &&
+             currentOrder.measures &&
+             currentOrder.quantity &&
+             currentOrder.finishes &&
+             !currentOrder.filePath &&
+             !currentOrder.fileAnalysis;
+    }
+  
   
     processAIResponse(aiResponse) {
       try {
@@ -1459,6 +1476,9 @@ class FileValidationService {
         throw new CustomError('FileNotFoundError', `El archivo no existe: ${filePath}`);
       }
 
+      const fileStats = fs.statSync(filePath);
+      const fileSize = this.formatFileSize(fileStats.size);
+
       const buffer = await readFile(filePath);
       const fileTypeResult = await fileType.fromBuffer(buffer);
       const fileExtension = fileTypeResult ? fileTypeResult.ext : path.extname(filePath).toLowerCase().slice(1);
@@ -1467,7 +1487,8 @@ class FileValidationService {
         return {
           format: fileExtension,
           supported: false,
-          reason: `Formato de archivo no soportado: ${fileExtension}`
+          reason: `Formato de archivo no soportado: ${fileExtension}`,
+          fileSize: fileSize
         };
       }
 
@@ -1482,6 +1503,7 @@ class FileValidationService {
 
       fileInfo.mimeType = fileTypeResult ? fileTypeResult.mime : '';
       fileInfo.supported = true;
+      fileInfo.fileSize = fileSize;
       return fileInfo;
     } catch (error) {
       logger.error(`Error al analizar el archivo: ${error.message}`);
@@ -1493,30 +1515,74 @@ class FileValidationService {
     const image = sharp(buffer);
     const metadata = await image.metadata();
 
+    const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
+    const area = this.calculateDesignArea(physicalWidth, physicalHeight);
+
+    const colorSpace = metadata.space || 'desconocido';
+    const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
+      ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
+      : colorSpace;
+
     return {
       format: metadata.format,
       width: metadata.width,
       height: metadata.height,
       dpi: metadata.density || 72,
-      colorSpace: metadata.space
+      colorSpace: colorSpaceInfo,
+      physicalWidth,
+      physicalHeight,
+      area
     };
   }
 
   async analyzePDF(buffer) {
     try {
       const data = await pdfParse(buffer);
+      const width = data.metadata?.width || 0;
+      const height = data.metadata?.height || 0;
+      const dpi = 72; // Asumimos 72 DPI para PDFs
+
+      const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
+      const area = this.calculateDesignArea(physicalWidth, physicalHeight);
 
       return {
         format: 'pdf',
         pages: data.numpages,
-        width: data.metadata?.width || 0,
-        height: data.metadata?.height || 0,
-        dpi: 72 // Asumimos 72 DPI para PDFs
+        width,
+        height,
+        dpi,
+        physicalWidth,
+        physicalHeight,
+        area
       };
     } catch (error) {
       logger.error(`Error al analizar PDF: ${error.message}`);
       throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
     }
+  }
+
+  calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
+    const widthInches = widthPixels / dpi;
+    const heightInches = heightPixels / dpi;
+    const physicalWidth = widthInches * 2.54; // Convertir a centímetros
+    const physicalHeight = heightInches * 2.54; // Convertir a centímetros
+    return { 
+      physicalWidth: Number(physicalWidth.toFixed(2)),
+      physicalHeight: Number(physicalHeight.toFixed(2))
+    };
+  }
+
+  calculateDesignArea(widthCm, heightCm) {
+    const areaM2 = (widthCm / 100) * (heightCm / 100);
+    return Number(areaM2.toFixed(4));
+  }
+
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 }
 
@@ -1679,7 +1745,7 @@ class OpenAIService {
        - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
 
     13. Confirmación del Pedido:
-       - IMPORTANTE: Solo genera el comando {"command": "CONFIRM_ORDER"} cuando se cumplan TODAS las siguientes condiciones:
+       - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
          a) El servicio está seleccionado y es válido.
          b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
             - Las medidas (ancho y alto) están especificadas y son válidas.

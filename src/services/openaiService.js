@@ -152,7 +152,7 @@ class OpenAIService {
        - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
 
     13. Confirmación del Pedido:
-       - IMPORTANTE: Solo genera el comando {"command": "CONFIRM_ORDER"} cuando se cumplan TODAS las siguientes condiciones:
+       - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
          a) El servicio está seleccionado y es válido.
          b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
             - Las medidas (ancho y alto) están especificadas y son válidas.
