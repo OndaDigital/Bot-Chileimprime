@@ -1,28 +1,12 @@
 import logger from '../utils/logger.js';
+import sheetService from '../services/sheetService.js';
 
 class UserContextManager {
   constructor() {
     this.userContexts = new Map();
-    this.services = null;
-    this.additionalInfo = null;
-  }
-
-  setGlobalData(services, additionalInfo) {
-    this.services = services;
-    this.additionalInfo = additionalInfo;
-    logger.info('Datos globales actualizados en UserContextManager');
   }
 
   getUserContext(userId) {
-    if (typeof userId !== 'string') {
-      logger.warn(`Tipo de userId no válido: ${typeof userId}. Valor: ${JSON.stringify(userId)}`);
-      if (typeof userId === 'object' && userId !== null && userId.from) {
-        userId = userId.from;
-      } else {
-        throw new Error('userId inválido');
-      }
-    }
-
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
         context: "",
@@ -78,13 +62,22 @@ class UserContextManager {
     logger.info(`Contexto limitado para usuario ${userId}`);
   }
 
+  setGlobalData(services, additionalInfo) {
+    this.services = services;
+    this.additionalInfo = additionalInfo;
+    logger.info('Datos globales actualizados en UserContextManager');
+    logger.info(`Menú global: ${JSON.stringify(this.services)}`);
+    logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
+  }
+
+
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder = { ...userContext.currentOrder, ...updates };
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
     
     if (updates.service) {
-      const serviceInfo = this.getServiceInfo(updates.service);
+      const serviceInfo = sheetService.getServiceInfo(updates.service);
       if (serviceInfo) {
         userContext.currentOrder.category = serviceInfo.category;
         userContext.currentOrder.type = serviceInfo.type;
@@ -115,68 +108,10 @@ class UserContextManager {
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
 
-  setFileAnalysisResponded(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.currentOrder.fileAnalysisResponded = value;
-  }
-  
-  hasRecentFileAnalysis(userId) {
-    const userContext = this.getUserContext(userId);
-    return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
-  }
-
- getCurrentOrder(userId) {
+  getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
     logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
     return userContext.currentOrder;
-  }
-
-  getServiceInfo(serviceName) {
-    for (const category in this.services) {
-      const service = this.services[category].find(s => s.name.toLowerCase() === serviceName.toLowerCase());
-      if (service) {
-        return service;
-      }
-    }
-    logger.warn(`Servicio no encontrado: ${serviceName}`);
-    return null;
-  }
-
-  findSimilarServices(serviceName) {
-    const allServices = this.getAllServices();
-    return allServices
-      .filter(service => 
-        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
-        serviceName.toLowerCase().includes(service.name.toLowerCase())
-      )
-      .map(service => ({
-        name: service.name,
-        category: service.category
-      }));
-  }
-
-  getServicesInCategory(category) {
-    return this.services[category] || [];
-  }
-
-  getFileValidationCriteria() {
-    return this.additionalInfo.criteriosValidacion;
-  }
-
-  getAllServices() {
-    let allServices = [];
-    for (const category in this.services) {
-      allServices = allServices.concat(this.services[category]);
-    }
-    return allServices;
-  }
-
-  getAvailableFinishes(serviceInfo) {
-    const finishes = [];
-    if (serviceInfo.sellado) finishes.push("sellado");
-    if (serviceInfo.ojetillos) finishes.push("ojetillos");
-    if (serviceInfo.bolsillo) finishes.push("bolsillo");
-    return finishes;
   }
 
   resetContext(userId) {
@@ -185,11 +120,39 @@ class UserContextManager {
   }
 
   getGlobalServices() {
-    return this.services;
+    return sheetService.getServices();
   }
 
   getGlobalAdditionalInfo() {
-    return this.additionalInfo;
+    return sheetService.getAdditionalInfo();
+  }
+
+  getServiceInfo(serviceName) {
+    return sheetService.getServiceInfo(serviceName);
+  }
+
+  getAllServices() {
+    return sheetService.getAllServices();
+  }
+
+  findSimilarServices(serviceName) {
+    return sheetService.findSimilarServices(serviceName);
+  }
+
+  getServicesInCategory(category) {
+    return sheetService.getServicesInCategory(category);
+  }
+
+  getFileValidationCriteria() {
+    return sheetService.getFileValidationCriteria();
+  }
+
+  getAvailableFinishes(serviceInfo) {
+    const finishes = [];
+    if (serviceInfo.sellado) finishes.push("sellado");
+    if (serviceInfo.ojetillos) finishes.push("ojetillos");
+    if (serviceInfo.bolsillo) finishes.push("bolsillo");
+    return finishes;
   }
 
   isOrderComplete(userId) {

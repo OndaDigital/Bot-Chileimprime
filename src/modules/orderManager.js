@@ -95,7 +95,7 @@ class OrderManager {
     }
   }
 
-  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+  async setFinishes(userId, sellado, ojetillos, bolsillo) {
     logger.info(`Manejando configuración de acabados para usuario ${userId}`);
     try {
       const currentOrder = userContextManager.getCurrentOrder(userId);
@@ -107,7 +107,7 @@ class OrderManager {
         bolsillo: bolsillo && serviceInfo.bolsillo
       };
 
-      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes});
 
       return {
         action: "SET_FINISHES",
@@ -245,6 +245,7 @@ class OrderManager {
       throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
     }
   }
+
 
   formatOrderForSheet(order) {
     let details = `Servicio: ${order.service}\n`;

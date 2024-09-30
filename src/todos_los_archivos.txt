@@ -99,6 +99,217 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 
+// commandProcessor.js
+
+import logger from './utils/logger.js';
+import userContextManager from './modules/orderManager.js';
+import orderManager from './modules/orderManager.js';
+import openaiService from './services/openaiService.js';
+import config from './config/config.js';
+
+class CommandProcessor {
+  constructor() {}
+
+  async processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
+    try {
+      switch (command.command) {
+        case "LIST_ALL_SERVICES":
+          return this.handleListAllServices(ctx, flowDynamic);
+        case "SELECT_SERVICE":
+          return this.handleSelectService(ctx, flowDynamic, command.service);
+        case "SET_MEASURES":
+          return this.handleSetMeasures(ctx, flowDynamic, command.width, command.height);
+        case "SET_QUANTITY":
+          return this.handleSetQuantity(ctx, flowDynamic, command.quantity);
+        case "SET_FINISHES":
+          return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
+        case "VALIDATE_FILE":
+          return this.handleValidateFile(ctx, flowDynamic, command);
+        case "VALIDATE_FILE_FOR_SERVICE":
+          return this.handleValidateFileForService(ctx, flowDynamic);
+        case "CONFIRM_ORDER":
+          return this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow);
+        case "SERVICE_NOT_FOUND":
+          return this.handleServiceNotFound(ctx, flowDynamic, command.service);
+        case "MISSING_INFO":
+          return this.handleMissingInfo(ctx, flowDynamic, command.missingField);
+        case "ERROR":
+          return this.handleGeneralError(ctx, flowDynamic, command.message);
+        default:
+          logger.warn(`Comando desconocido recibido: ${command.command}`);
+          return null;
+      }
+    } catch (error) {
+      logger.error(`Error al procesar comando: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
+    }
+  }
+
+  async handleListAllServices(ctx, flowDynamic) {
+    try {
+      const allServices = userContextManager.getAllServices();
+      let serviceList = "Aquí tienes la lista completa de nuestros servicios:\n\n";
+      allServices.forEach(service => {
+        serviceList += `- ${service.name} (${service.category})\n`;
+      });
+      await flowDynamic(serviceList);
+    } catch (error) {
+      logger.error(`Error al listar todos los servicios: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al obtener la lista de servicios. Por favor, intenta nuevamente.");
+    }
+  }
+
+  async handleSelectService(ctx, flowDynamic, serviceName) {
+    try {
+      const result = await orderManager.handleSelectService(ctx.from, serviceName);
+      if (result.action === "INVALID_SERVICE") {
+        if (result.similarServices.length > 0) {
+          await flowDynamic(`Lo siento, no pude encontrar el servicio "${serviceName}". ¿Quizás te refieres a uno de estos? ${result.similarServices.join(', ')}`);
+        } else {
+          const categories = Object.keys(userContextManager.getGlobalServices());
+          await flowDynamic(`Lo siento, no pude encontrar el servicio "${serviceName}". Estas son nuestras categorías disponibles: ${categories.join(', ')}. ¿En cuál estás interesado?`);
+        }
+      } else {
+        const serviceInfo = result.serviceInfo;
+        await flowDynamic(`Has seleccionado el servicio: *${serviceName}* de la categoría *${serviceInfo.category}*.`);
+        if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+          const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
+          await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
+        } else {
+          await flowDynamic(`¿Cuántas unidades necesitas?`);
+        }
+        
+        const availableFinishes = [];
+        if (serviceInfo.sellado) availableFinishes.push("sellado");
+        if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
+        if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
+        
+        if (availableFinishes.length > 0) {
+          await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
+        } else {
+          await flowDynamic(`Este servicio no tiene terminaciones disponibles.`);
+        }
+      }
+    } catch (error) {
+      logger.error(`Error al manejar la selección de servicio: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu selección. Por favor, intenta nuevamente.");
+    }
+  }
+
+  async handleSetMeasures(ctx, flowDynamic, width, height) {
+    try {
+      const result = await orderManager.handleSetMeasures(ctx.from, width, height);
+      await flowDynamic(`Medidas registradas: *${result.order.measures.width}m de ancho x ${result.order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
+    } catch (error) {
+      logger.error(`Error al manejar las medidas: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al registrar las medidas. Por favor, asegúrate de proporcionar medidas válidas e intenta nuevamente.");
+    }
+  }
+
+  async handleSetQuantity(ctx, flowDynamic, quantity) {
+    try {
+      const result = await orderManager.handleSetQuantity(ctx.from, quantity);
+      await flowDynamic(`Cantidad registrada: *${result.order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
+    } catch (error) {
+      logger.error(`Error al manejar la cantidad: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al registrar la cantidad. Por favor, asegúrate de proporcionar un número válido e intenta nuevamente.");
+    }
+  }
+
+  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+    try {
+      const result = await orderManager.setFinishes(userId, sellado, ojetillos, bolsillo);
+      return result;
+    } catch (error) {
+      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async handleValidateFile(ctx, flowDynamic, command) {
+    try {
+      const result = await orderManager.handleValidateFile(ctx.from, command.isValid, command.reason);
+      if (result.order.fileAnalysis.isValid) {
+        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
+      } else {
+        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${result.order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
+      }
+    } catch (error) {
+      logger.error(`Error al validar el archivo: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al validar tu archivo. Por favor, intenta enviarlo nuevamente.");
+    }
+  }
+
+  async handleValidateFileForService(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+    if (!currentOrder.fileAnalysis) {
+      await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
+      return;
+    }
+
+    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
+
+    try {
+      const validationResult = await openaiService.validateFileForService(
+        currentOrder.fileAnalysis,
+        serviceInfo,
+        currentOrder.measures,
+        currentOrder
+      );
+
+      userContextManager.updateCurrentOrder(userId, {
+        fileValidation: validationResult
+      });
+
+      if (validationResult.isValid) {
+        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
+      } else {
+        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
+      }
+
+    } catch (error) {
+      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
+      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+    }
+  }
+
+  async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow) {
+    try {
+      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
+      await flowDynamic(summary);
+      await flowDynamic(result.message);
+      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
+      
+      setTimeout(() => {
+        gotoFlow('promoFlow');
+      }, config.promoMessageDelay);
+      
+      return endFlow();
+    } catch (error) {
+      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
+      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+    }
+  }
+
+  async handleServiceNotFound(ctx, flowDynamic, serviceName) {
+    await flowDynamic(`Lo siento, no pude encontrar información sobre el servicio "${serviceName}". ¿Podrías verificar el nombre del servicio o elegir uno de nuestra lista de servicios disponibles?`);
+  }
+
+  async handleMissingInfo(ctx, flowDynamic, missingField) {
+    await flowDynamic(`Parece que falta información importante para completar tu pedido. Específicamente, necesito saber más sobre: ${missingField}. ¿Podrías proporcionarme esa información?`);
+  }
+
+  async handleGeneralError(ctx, flowDynamic, errorMessage) {
+    await flowDynamic(`Lo siento, ha ocurrido un error inesperado: ${errorMessage}. Estamos trabajando para resolverlo. Por favor, intenta nuevamente en unos momentos o contacta a nuestro soporte si el problema persiste.`);
+  }
+}
+
+export default new CommandProcessor();
+
+
 // config\config.js
 
 // config/config.js
@@ -249,6 +460,7 @@ import inactivityMiddleware from '../core/inactivity-middleware.js';
 import blacklistMiddleware from '../core/blacklist-middleware.js';
 import MessageQueue from './messageQueue.js';
 import fileValidationService from '../services/fileValidationService.js';
+import commandProcessor from '../commandProcessor.js';
 
 class FlowManager {
   constructor() {
@@ -257,6 +469,7 @@ class FlowManager {
       confirmedFlow: null,
       restartBotFlow: null,
       documentFlow: null,
+      voiceNoteFlow: null,
       catchAllFlow: null,
       idleTimeoutFlow: null,
       promoFlow: null
@@ -265,24 +478,34 @@ class FlowManager {
     this.idleTimers = new Map();
     this.messageQueue = new MessageQueue({ gapSeconds: config.messageQueueGapSeconds });
   }
-
   async initializeFlows() {
-    this.flows.principalFlow = this.createPrincipalFlow();
-    this.flows.confirmedFlow = this.createConfirmedFlow();
-    this.flows.restartBotFlow = this.createRestartBotFlow();
-    this.flows.documentFlow = this.createDocumentFlow();
-    this.flows.catchAllFlow = this.createCatchAllFlow();
-    this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
-    this.flows.promoFlow = this.createPromoFlow();
+    try {
+      this.flows.principalFlow = this.createPrincipalFlow();
+      this.flows.confirmedFlow = this.createConfirmedFlow();
+      this.flows.restartBotFlow = this.createRestartBotFlow();
+      this.flows.documentFlow = this.createDocumentFlow();
+      this.flows.voiceNoteFlow = this.createVoiceNoteFlow();
+      this.flows.catchAllFlow = this.createCatchAllFlow();
+      this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
+      this.flows.promoFlow = this.createPromoFlow();
 
-    Object.values(this.flows).forEach(flow => {
-      flow.addAction(inactivityMiddleware(this));
-      flow.addAction(blacklistMiddleware(this));
-    });
+      Object.values(this.flows).forEach(flow => {
+        if (flow && typeof flow.addAction === 'function') {
+          flow.addAction(inactivityMiddleware(this));
+          flow.addAction(blacklistMiddleware(this));
+        } else {
+          logger.warn(`Un flujo no tiene el método addAction o es nulo`);
+        }
+      });
 
-    logger.info('Flujos inicializados correctamente');
-    return Object.values(this.flows);
+      logger.info('Flujos inicializados correctamente');
+      return Object.values(this.flows).filter(flow => flow !== null);
+    } catch (error) {
+      logger.error(`Error al inicializar flujos: ${error.message}`);
+      throw new CustomError('FlowInitializationError', 'Error al inicializar los flujos', error);
+    }
   }
+
 
   getFlowByName(name) {
     return this.flows[name];
@@ -298,60 +521,6 @@ class FlowManager {
       });
   }
 
-  createDocumentFlow() {
-    return addKeyword(EVENTS.DOCUMENT)
-      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-        try {
-          const filePath = await whatsappService.saveFile(ctx);
-          const fileInfo = await fileValidationService.analyzeFile(filePath);
-          
-          await userContextManager.updateCurrentOrder(ctx.from, {
-            filePath: filePath,
-            fileAnalysis: fileInfo
-          });
-          
-          logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
-          
-          // Generar respuesta inmediata con el análisis del archivo
-          const analysisResponse = this.generateFileAnalysisResponse(fileInfo);
-          await flowDynamic(analysisResponse);
-          
-          // Continuar con el flujo normal de la conversación
-          this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
-            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
-          });          
-        } catch (error) {
-          logger.error(`Error al procesar el archivo: ${error.message}`);
-          await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
-        }
-      });
-  }
-
-  generateFileAnalysisResponse(fileInfo) {
-    let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
-    response += `📄 Formato: ${fileInfo.format}\n`;
-    response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
-    response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
-    if (fileInfo.colorSpace) {
-      response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
-    }
-    response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
-    return response;
-  }
-
-  generateFileAnalysisAIResponse(fileAnalysis) {
-    let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
-    response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
-    
-    if (fileAnalysis.colorSpace) {
-      response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
-    }
-
-    response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
-
-    return response;
-  }
-
   createConfirmedFlow() {
     return addKeyword(EVENTS.ACTION)
       .addAction(this.blacklistMiddleware.bind(this))
@@ -362,492 +531,268 @@ class FlowManager {
         return endFlow("Un representante se pondrá en contacto contigo pronto para finalizar tu cotización. Gracias por tu paciencia.");
       });
   }
-
-  createRestartBotFlow() {
-    return addKeyword(['bot', 'Bot', 'BOT'])
-      .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-        const userId = ctx.from;
-        logger.info(`Intento de reinicio de bot por usuario ${userId}`);
-        this.resetConversation(userId);
-        logger.info(`Bot reiniciado para usuario ${userId}`);
-        await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
-        return gotoFlow(this.flows.principalFlow);
-      });
-  }
-
-  createCatchAllFlow() {
-    return addKeyword(EVENTS.ACTION)
-      .addAction(this.blacklistMiddleware.bind(this))
-      .addAction(async (ctx, { gotoFlow }) => {
-        if (orderManager.isOrderConfirmed(ctx.from)) {
-          return gotoFlow(this.flows.confirmedFlow);
-        } else {
+  
+    createRestartBotFlow() {
+      return addKeyword(['bot', 'Bot', 'BOT'])
+        .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
+          const userId = ctx.from;
+          logger.info(`Intento de reinicio de bot por usuario ${userId}`);
+          this.resetConversation(userId);
+          logger.info(`Bot reiniciado para usuario ${userId}`);
+          await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
           return gotoFlow(this.flows.principalFlow);
-        }
-      });
-  }
-
-  createIdleTimeoutFlow() {
-    return addKeyword(EVENTS.ACTION)
-      .addAction(async (ctx, { endFlow }) => {
-        logger.info(`Tiempo de espera agotado para usuario ${ctx.from}`);
-        this.resetConversation(ctx.from);
-        return endFlow('*😴 Lo siento, el tiempo de espera ha expirado. Tu cotización ha sido cancelada. Si deseas hacer una nueva cotización, por favor envía un mensaje.*');
-      });
-  }
-
-  createPromoFlow() {
-    return addKeyword(EVENTS.ACTION)
-      .addAction(async (ctx, { flowDynamic, endFlow }) => {
-        const promoMessage = whatsappService.getPromoMessage();
-        try {
-          await flowDynamic(promoMessage);
-          logger.info(`Mensaje promocional enviado a ${ctx.from}`);
-        } catch (error) {
-          logger.error(`Error al enviar mensaje promocional a ${ctx.from}: ${error.message}`);
-        }
-        return endFlow();
-      });
-  }
-
-  enqueueMessage(userId, message, callback) {
-    this.messageQueue.enqueueMessage(userId, message, callback);
-  }
-
-  async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
-    const userId = ctx.from;
-    logger.info(`Procesando mensaje para usuario ${userId}`);
-
-    if (this.isBlacklisted(userId)) {
-      logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-      return endFlow();
+        });
+    }
+  
+    createDocumentFlow() {
+      return addKeyword(EVENTS.DOCUMENT)
+        .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
+          try {
+            const filePath = await whatsappService.saveFile(ctx);
+            const fileInfo = await fileValidationService.analyzeFile(filePath);
+            
+            await userContextManager.updateCurrentOrder(ctx.from, {
+              filePath: filePath,
+              fileAnalysis: fileInfo
+            });
+            
+            logger.info(`Archivo analizado para usuario ${ctx.from}: ${JSON.stringify(fileInfo)}`);
+            
+            const analysisResponse = this.generateFileAnalysisResponse(fileInfo);
+            await flowDynamic(analysisResponse);
+            
+            this.enqueueMessage(ctx.from, "", async (accumulatedMessage) => {
+              await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
+            });          
+          } catch (error) {
+            logger.error(`Error al procesar el archivo: ${error.message}`);
+            await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
+          }
+        });
     }
 
-    if (orderManager.isOrderConfirmed(userId)) {
-      logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
-      return gotoFlow(this.getFlowByName('confirmedFlow'));
+    createVoiceNoteFlow() {
+      return addKeyword(EVENTS.VOICE_NOTE)
+        .addAction(async (ctx, { flowDynamic, state, gotoFlow, endFlow }) => {
+          try {
+            const audioPath = await whatsappService.saveAudioFile(ctx);
+            const transcription = await openaiService.transcribeAudio(audioPath);
+            logger.info(`Transcripción del audio: ${transcription}`);
+            
+            await state.update({ lastTranscription: transcription });
+            await flowDynamic(`*📝 Transcripción:*\n${transcription}`);
+  
+            this.enqueueMessage(ctx.from, transcription, async (accumulatedMessage) => {
+              await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage, true);
+            });
+          } catch (error) {
+            logger.error(`Error al procesar la nota de voz: ${error.message}`);
+            await flowDynamic('Hubo un error al procesar la nota de voz. Por favor, intenta enviar un mensaje de texto.');
+          }
+        });
     }
-
-    this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-
-    try {
-      const userContext = userContextManager.getUserContext(userId);
-      const chatContext = userContextManager.getChatContext(userId);
-      
-      // Verificar si hay un análisis de archivo reciente
-      const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
-                                    !userContext.currentOrder.fileAnalysisResponded;
-
-      let aiResponse;
-      if (hasRecentFileAnalysis) {
-        // Generar una respuesta específica para el análisis del archivo
-        aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
-        userContext.currentOrder.fileAnalysisResponded = true;
-      } else {
-        // Obtener respuesta normal de OpenAI
-        aiResponse = await openaiService.getChatCompletion(
-          openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-          [...chatContext, { role: "user", content: message }]
-        );
-      }
-
-      logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
-
-      userContextManager.updateContext(userId, message, "user");
-      userContextManager.updateContext(userId, aiResponse, "assistant");
-
-      const commands = this.processAIResponse(aiResponse, userId, userContext);
-      
-      for (const { action, order } of commands) {
-        switch (action) {
-          case "VALIDATE_FILE_FOR_SERVICE":
-            await this.handleValidateFileForService(ctx, flowDynamic, order);
-            break;
-          case "LIST_ALL_SERVICES":
-            await this.handleListAllServices(ctx, flowDynamic);
-            break;
-          case "SELECT_SERVICE":
-            await this.handleSelectService(ctx, flowDynamic, order);
-            break;
-          case "SET_MEASURES":
-            await this.handleSetMeasures(ctx, flowDynamic, order);
-            break;
-          case "SET_QUANTITY":
-            await this.handleSetQuantity(ctx, flowDynamic, order);
-            break;
-          case "SET_FINISHES":
-            await this.handleSetFinishes(ctx, flowDynamic, order);
-            break;
-          case "VALIDATE_FILE":
-            await this.handleValidateFile(ctx, flowDynamic, order);
-            break;
-          case "VALIDATE_FILE_FOR_SERVICE":
-              await this.handleValidateFileForService(ctx, flowDynamic, order);
-            break;
-          case "CONFIRM_ORDER":
-            await this.handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order);
-            break;
-          case "CONTINUAR":
-          default:
-            // Eliminar los comandos JSON del mensaje antes de mostrarlo al usuario
-            const cleanedResponse = aiResponse.replace(/\{.*?\}/g, '').trim();
-            await flowDynamic(cleanedResponse);
-        }
-      }
-    } catch (error) {
-      logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
-      logger.error(`Stack trace: ${error.stack}`);
-      console.error('Error completo:', error);
-      await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
+  
+  
+    createCatchAllFlow() {
+      return addKeyword(EVENTS.ACTION)
+        .addAction(this.blacklistMiddleware.bind(this))
+        .addAction(async (ctx, { gotoFlow }) => {
+          if (orderManager.isOrderConfirmed(ctx.from)) {
+            return gotoFlow(this.flows.confirmedFlow);
+          } else {
+            return gotoFlow(this.flows.principalFlow);
+          }
+        });
     }
-  }
-
-  async handleConfirmOrder(ctx, flowDynamic, gotoFlow, endFlow, order) {
-    try {
-      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
-      await flowDynamic(summary);
-      await flowDynamic(result.message);
-      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
-      
-      this.addToBlacklist(ctx.from, config.blacklistDuration);
-      this.clearIdleTimer(ctx.from);
-      
-      setTimeout(() => {
-        gotoFlow(this.getFlowByName('promoFlow'));
-      }, config.promoMessageDelay);
-      
-      return endFlow();
-    } catch (error) {
-      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+  
+    createIdleTimeoutFlow() {
+      return addKeyword(EVENTS.ACTION)
+        .addAction(async (ctx, { endFlow }) => {
+          logger.info(`Tiempo de espera agotado para usuario ${ctx.from}`);
+          this.resetConversation(ctx.from);
+          return endFlow('*😴 Lo siento, el tiempo de espera ha expirado. Tu cotización ha sido cancelada. Si deseas hacer una nueva cotización, por favor envía un mensaje.*');
+        });
     }
-  }
-
-
-  async handleValidateFile(ctx, flowDynamic, order) {
-    try {
-      const result = await orderManager.handleValidateFile(ctx.from, order.fileValidation.isValid, order.fileValidation.reason);
-      if (result.order.fileAnalysis.isValid) {
-        await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
-      } else {
-        await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${result.order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
-      }
-    } catch (error) {
-      logger.error(`Error al validar el archivo: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al validar tu archivo. Por favor, intenta enviarlo nuevamente.");
+  
+    createPromoFlow() {
+      return addKeyword(EVENTS.ACTION)
+        .addAction(async (ctx, { flowDynamic, endFlow }) => {
+          const promoMessage = whatsappService.getPromoMessage();
+          try {
+            await flowDynamic(promoMessage);
+            logger.info(`Mensaje promocional enviado a ${ctx.from}`);
+          } catch (error) {
+            logger.error(`Error al enviar mensaje promocional a ${ctx.from}: ${error.message}`);
+          }
+          return endFlow();
+        });
     }
-  }
-
-  processAIResponse(aiResponse, userId, userContext) {
-    try {
-      const jsonCommands = aiResponse.match(/\{.*?\}/g);
-      if (jsonCommands) {
-        return jsonCommands.map(jsonCommand => {
-          const parsedCommand = JSON.parse(jsonCommand);
-          logger.info(`Comando JSON recibido para ${userId}: ${JSON.stringify(parsedCommand)}`);
-          return this.processCommand(parsedCommand, userContext);
-        }).filter(result => result !== null);
-      }
-      return [{ action: "CONTINUAR", order: userContext.currentOrder }];
-    } catch (error) {
-      logger.error(`Error al procesar la respuesta de AI para ${userId}: ${error.message}`);
-      return [{ action: "CONTINUAR", order: userContext.currentOrder }];
+  
+    enqueueMessage(userId, message, callback) {
+      this.messageQueue.enqueueMessage(userId, message, callback);
     }
-  }
-
-  processCommand(command, userContext) {
-    switch (command.command) {
-      case "LIST_ALL_SERVICES":
-        return { action: "LIST_ALL_SERVICES", order: userContext.currentOrder };
-      case "SELECT_SERVICE":
-        return { action: "SELECT_SERVICE", order: { ...userContext.currentOrder, service: command.service } };
-      case "SET_MEASURES":
-        return { action: "SET_MEASURES", order: { ...userContext.currentOrder, measures: { width: command.width, height: command.height } } };
-      case "SET_QUANTITY":
-        return { action: "SET_QUANTITY", order: { ...userContext.currentOrder, quantity: command.quantity } };
-      case "SET_FINISHES":
-        return { action: "SET_FINISHES", order: { ...userContext.currentOrder, finishes: command } };
-      case "VALIDATE_FILE":
-        return { action: "VALIDATE_FILE", order: { ...userContext.currentOrder, fileValidation: command } };
-      case "VALIDATE_FILE_FOR_SERVICE":
-        return { action: "VALIDATE_FILE_FOR_SERVICE", order: userContext.currentOrder };
-      case "CONFIRM_ORDER":
-        return { action: "CONFIRM_ORDER", order: userContext.currentOrder };
-      default:
-        logger.warn(`Comando desconocido recibido: ${command.command}`);
-        return null;
-    }
-  }
-
-  async handleSelectService(ctx, flowDynamic, order) {
-    try {
+  
+    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
       const userId = ctx.from;
-      const result = await orderManager.handleSelectService(userId, order.service);
-      if (result.action === "INVALID_SERVICE") {
-        if (result.similarServices.length > 0) {
-          await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". ¿Quizás te refieres a uno de estos? ${result.similarServices.join(', ')}`);
-        } else {
-          const categories = Object.keys(userContextManager.getGlobalServices());
-          await flowDynamic(`Lo siento, no pude encontrar el servicio "${order.service}". Estas son nuestras categorías disponibles: ${categories.join(', ')}. ¿En cuál estás interesado?`);
-        }
-      } else {
-        const serviceInfo = result.serviceInfo;
-        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
-        
-        userContextManager.updateCurrentOrder(userId, { service: order.service });
-        logger.info(`CurrentOrder actualizado para usuario ${userId}: ${JSON.stringify(userContextManager.getCurrentOrder(userId))}`);
-        
-        await flowDynamic(`Has seleccionado el servicio: *${order.service}* de la categoría *${serviceInfo.category}*.`);
-        if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-          const availableWidths = serviceInfo.availableWidths.map(w => `${w.material}m`).join(', ');
-          await flowDynamic(`Por favor, especifica las medidas que necesitas. Anchos disponibles: ${availableWidths}. El alto debe ser mayor a 1 metro.`);
-        } else {
-          await flowDynamic(`¿Cuántas unidades necesitas?`);
-        }
-        
-        // Añadir información sobre terminaciones disponibles
-        const availableFinishes = [];
-        if (serviceInfo.sellado) availableFinishes.push("sellado");
-        if (serviceInfo.ojetillos) availableFinishes.push("ojetillos");
-        if (serviceInfo.bolsillo) availableFinishes.push("bolsillo");
-        
-        if (availableFinishes.length > 0) {
-          await flowDynamic(`Este servicio tiene las siguientes terminaciones disponibles: ${availableFinishes.join(', ')}. ¿Deseas alguna de estas terminaciones?`);
-        } else {
-          logger.warn(`No se encontraron terminaciones disponibles para el servicio ${order.service}`);
-          await flowDynamic(`Este servicio no tiene terminaciones disponibles.`);
-        }
+      logger.info(`Procesando mensaje para usuario ${userId}`);
+  
+      if (this.isBlacklisted(userId)) {
+        logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
+        return endFlow();
       }
-    } catch (error) {
-      logger.error(`Error al manejar la selección de servicio: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu selección. Por favor, intenta nuevamente.");
-    }
-  }
-
-  async handleListAllServices(ctx, flowDynamic) {
-    try {
-      const allServices = userContextManager.getAllServices();
-      let serviceList = "Aquí tienes la lista completa de nuestros servicios:\n\n";
-      allServices.forEach(service => {
-        serviceList += `- ${service.name} (${service.category})\n`;
-      });
-      await flowDynamic(serviceList);
-    } catch (error) {
-      logger.error(`Error al listar todos los servicios: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al obtener la lista de servicios. Por favor, intenta nuevamente.");
-    }
-  }
-
-  async handleSetMeasures(ctx, flowDynamic, order) {
-    try {
-      const result = await orderManager.handleSetMeasures(ctx.from, order.measures.width, order.measures.height);
-      await flowDynamic(`Medidas registradas: *${result.order.measures.width}m de ancho x ${result.order.measures.height}m de alto*. ¿Cuántas unidades necesitas?`);
-    } catch (error) {
-      logger.error(`Error al manejar las medidas: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al registrar las medidas. Por favor, asegúrate de proporcionar medidas válidas e intenta nuevamente.");
-    }
-  }
-
-  async handleSetQuantity(ctx, flowDynamic, order) {
-    try {
-      const result = await orderManager.handleSetQuantity(ctx.from, order.quantity);
-      await flowDynamic(`Cantidad registrada: *${result.order.quantity} unidades*. ¿Necesitas algún acabado especial?`);
-    } catch (error) {
-      logger.error(`Error al manejar la cantidad: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al registrar la cantidad. Por favor, asegúrate de proporcionar un número válido e intenta nuevamente.");
-    }
-  }
-
-  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
-    logger.info(`Manejando configuración de acabados para usuario ${userId}`);
-    try {
-      const currentOrder = userContextManager.getCurrentOrder(userId);
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
   
-      const finishes = {
-        sellado: sellado && serviceInfo.sellado,
-        ojetillos: ojetillos && serviceInfo.ojetillos,
-        bolsillo: bolsillo && serviceInfo.bolsillo
-      };
-  
-      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
-  
-      return {
-        action: "SET_FINISHES",
-        order: userContextManager.getCurrentOrder(userId)
-      };
-    } catch (error) {
-      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
-      throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
-    }
-  }
-
-  async handleFileValidation(ctx, flowDynamic, order) {
-    if (order.fileAnalysis.isValid) {
-      await flowDynamic("*Archivo validado correctamente.* ✅ Voy a preparar un resumen de tu cotización.");
-    } else {
-      await flowDynamic(`*El archivo no cumple con los requisitos:* ❌\n${order.fileAnalysis.reason}\nPor favor, envía un nuevo archivo que cumpla con las especificaciones.`);
-    }
-  }
-
-  async handleValidateFileForService(ctx, flowDynamic, order) {
-    const userId = ctx.from;
-    const currentOrder = userContextManager.getCurrentOrder(userId);
-    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-    if (!currentOrder.fileAnalysis) {
-      await flowDynamic("Lo siento, parece que no hay un archivo para validar. Por favor, envía un archivo primero.");
-      return;
-    }
-
-    await flowDynamic("Estoy validando el archivo para el servicio seleccionado. Un momento, por favor...");
-
-    try {
-      const validationResult = await openaiService.validateFileForService(
-        currentOrder.fileAnalysis,
-        serviceInfo,
-        currentOrder.measures,
-        currentOrder
-      );
-
-      userContextManager.updateCurrentOrder(userId, {
-        fileValidation: validationResult
-      });
-
-      if (validationResult.isValid) {
-        await flowDynamic("¡Excelente! El archivo que enviaste es válido para el servicio seleccionado. Podemos continuar con tu pedido.");
-      } else {
-        await flowDynamic(`Lo siento, pero el archivo no cumple con los requisitos para este servicio. Aquí está el análisis:\n\n${validationResult.analysis}\n\nPor favor, ajusta el archivo según estas recomendaciones y vuelve a enviarlo.`);
+      if (orderManager.isOrderConfirmed(userId)) {
+        logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
+        return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-
-      // Generar una nueva respuesta de OpenAI para continuar la conversación
-      const newResponse = await this.getNewAIResponse(userId);
-      await flowDynamic(newResponse);
-
-    } catch (error) {
-      logger.error(`Error al validar el archivo para el servicio: ${error.message}`);
-      await flowDynamic("Lo siento, hubo un problema al validar el archivo. Por favor, intenta enviar el archivo nuevamente.");
+  
+      this.startIdleTimer(ctx, flowDynamic, gotoFlow);
+  
+      try {
+        const userContext = userContextManager.getUserContext(userId);
+        const chatContext = userContextManager.getChatContext(userId);
+        
+        const hasRecentFileAnalysis = userContext.currentOrder.fileAnalysis && 
+                                      !userContext.currentOrder.fileAnalysisResponded;
+  
+        let aiResponse;
+        if (hasRecentFileAnalysis) {
+          aiResponse = this.generateFileAnalysisAIResponse(userContext.currentOrder.fileAnalysis);
+          userContext.currentOrder.fileAnalysisResponded = true;
+        } else {
+          aiResponse = await openaiService.getChatCompletion(
+            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
+            [...chatContext, { role: "user", content: message }]
+          );
+        }
+  
+        logger.info(`Respuesta AI para ${userId}: ${aiResponse}`);
+  
+        userContextManager.updateContext(userId, message, "user");
+        userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+        const commands = this.processAIResponse(aiResponse);
+        
+        for (const command of commands) {
+          await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
+        }
+  
+        if (commands.length === 0) {
+          await flowDynamic(aiResponse);
+        }
+  
+      } catch (error) {
+        logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
+        logger.error(`Stack trace: ${error.stack}`);
+        console.error('Error completo:', error);
+        await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
+      }
     }
-  }
-
-  async getNewAIResponse(userId) {
-    const userContext = userContextManager.getUserContext(userId);
-    const chatContext = userContextManager.getChatContext(userId);
-    
-    const aiResponse = await openaiService.getChatCompletion(
-      openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-      [...chatContext, { role: "assistant", content: "El archivo ha sido validado. ¿Cómo puedo ayudarte a continuar con tu pedido?" }]
-    );
-
-    userContextManager.updateContext(userId, aiResponse, "assistant");
-    return aiResponse;
-  }
-
-
-
-  async handleOrderConfirmation(ctx, flowDynamic, gotoFlow, endFlow, order) {
-    try {
-      const { summary, result } = await orderManager.handleConfirmOrder(ctx.from);
-      await flowDynamic(summary);
-      await flowDynamic(result.message);
-      logger.info(`Cotización confirmada para ${ctx.from}. Finalizando flujo.`);
+  
+    processAIResponse(aiResponse) {
+      try {
+        const jsonCommands = aiResponse.match(/\{.*?\}/g);
+        if (jsonCommands) {
+          return jsonCommands.map(jsonCommand => JSON.parse(jsonCommand));
+        }
+        return [];
+      } catch (error) {
+        logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
+        return [];
+      }
+    }
+  
+    generateFileAnalysisResponse(fileInfo) {
+      let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
+      response += `📄 Formato: ${fileInfo.format}\n`;
+      response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
+      response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
+      if (fileInfo.colorSpace) {
+        response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
+      }
+      response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
+      return response;
+    }
+  
+    generateFileAnalysisAIResponse(fileAnalysis) {
+      let response = "Basado en el análisis del archivo que enviaste, puedo proporcionar la siguiente información:\n\n";
+      response += `El archivo es de tipo ${fileAnalysis.format} con dimensiones de ${fileAnalysis.width}x${fileAnalysis.height} y una resolución de ${fileAnalysis.dpi} DPI. `;
       
-      this.addToBlacklist(ctx.from, config.blacklistDuration);
+      if (fileAnalysis.colorSpace) {
+        response += `El espacio de color es ${fileAnalysis.colorSpace}. `;
+      }
+  
+      response += "\nPara determinar si este archivo es adecuado para tu proyecto de impresión, necesito saber qué servicio específico estás buscando. ¿Podrías decirme qué tipo de impresión necesitas realizar?";
+  
+      return response;
+    }
+  
+    setIdleTimers(userId, timers) {
+      this.idleTimers.set(userId, timers);
+    }
+  
+    addToBlacklist(userId, duration) {
+      this.blacklist.set(userId, Date.now() + duration);
+      logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
+    }
+  
+    isBlacklisted(userId) {
+      if (this.blacklist.has(userId)) {
+        const blacklistExpiry = this.blacklist.get(userId);
+        if (Date.now() < blacklistExpiry) {
+          logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
+          return true;
+        } else {
+          this.blacklist.delete(userId);
+          this.resetConversation(userId);
+          logger.info(`Usuario ${userId} removido de la lista negra`);
+        }
+      }
+      return false;
+    }
+  
+    resetConversation(userId) {
+      userContextManager.resetContext(userId);
+      orderManager.resetOrderConfirmation(userId);
+      this.blacklist.delete(userId);
+      this.clearIdleTimer(userId);
+      logger.info(`Conversación reiniciada para usuario ${userId}`);
+    }
+  
+    startIdleTimer(ctx, flowDynamic, gotoFlow) {
       this.clearIdleTimer(ctx.from);
       
-      setTimeout(() => {
-        gotoFlow(this.getFlowByName('promoFlow'));
-      }, config.promoMessageDelay);
-      
-      return endFlow();
-    } catch (error) {
-      logger.error(`Error al finalizar la cotización para ${ctx.from}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar tu cotización. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
+      const warningTimer = setTimeout(async () => {
+        await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
+      }, config.idleWarningTime);
+  
+      const timeoutTimer = setTimeout(() => {
+        this.resetConversation(ctx.from);
+        gotoFlow(this.getFlowByName('idleTimeoutFlow'));
+      }, config.idleTimeoutTime);
+  
+      this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
     }
-  }
-
-  async handleHumanRequest(ctx, flowDynamic, endFlow) {
-    this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
-    this.resetConversation(ctx.from);
-    await flowDynamic("*Entendido* 👍. Un representante se pondrá en contacto contigo pronto. *Gracias por tu paciencia.* 🙏");
-    logger.info(`Solicitud de humano para ${ctx.from}. Añadido a la lista negra por ${config.humanBlacklistDuration/1000} segundos.`);
-    return endFlow();
-  }
-
-  async handleAbuseDetected(ctx, flowDynamic, endFlow) {
-    this.addToBlacklist(ctx.from, config.abuseBlacklistDuration);
-    this.resetConversation(ctx.from);
-    await flowDynamic("*Lo siento* 😔, pero hemos detectado un uso inapropiado del sistema. Tu acceso ha sido *temporalmente suspendido*. Si crees que esto es un error, por favor contacta con nuestro equipo de soporte.");
-    logger.info(`Mal uso detectado para ${ctx.from}. Añadido a la lista negra por ${config.abuseBlacklistDuration/1000} segundos.`);
-    return endFlow();
-  }
-
-  setIdleTimers(userId, timers) {
-    this.idleTimers.set(userId, timers);
-  }
-
-  addToBlacklist(userId, duration) {
-    this.blacklist.set(userId, Date.now() + duration);
-    logger.info(`Usuario ${userId} añadido a la lista negra por ${duration/1000} segundos`);
-  }
-
-  isBlacklisted(userId) {
-    if (this.blacklist.has(userId)) {
-      const blacklistExpiry = this.blacklist.get(userId);
-      if (Date.now() < blacklistExpiry) {
-        logger.info(`Usuario ${userId} está en la lista negra. Tiempo restante: ${(blacklistExpiry - Date.now()) / 1000} segundos`);
-        return true;
-      } else {
-        this.blacklist.delete(userId);
-        this.resetConversation(userId);
-        logger.info(`Usuario ${userId} removido de la lista negra`);
+  
+    clearIdleTimer(userId) {
+      const timers = this.idleTimers.get(userId);
+      if (timers) {
+        clearTimeout(timers.warningTimer);
+        clearTimeout(timers.timeoutTimer);
+        this.idleTimers.delete(userId);
       }
     }
-    return false;
-  }
-
-  resetConversation(userId) {
-    userContextManager.resetContext(userId);
-    orderManager.resetOrder(userId);
-    this.blacklist.delete(userId);
-    this.clearIdleTimer(userId);
-    logger.info(`Conversación reiniciada para usuario ${userId}`);
-  }
-
-  startIdleTimer(ctx, flowDynamic, gotoFlow) {
-    this.clearIdleTimer(ctx.from);
-    
-    const warningTimer = setTimeout(async () => {
-      await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
-    }, config.idleWarningTime);
-
-    const timeoutTimer = setTimeout(() => {
-      this.resetConversation(ctx.from);
-      gotoFlow(this.getFlowByName('idleTimeoutFlow'));
-    }, config.idleTimeoutTime);
-
-    this.setIdleTimers(ctx.from, { warningTimer, timeoutTimer });
-  }
-
-  clearIdleTimer(userId) {
-    const timers = this.idleTimers.get(userId);
-    if (timers) {
-      clearTimeout(timers.warningTimer);
-      clearTimeout(timers.timeoutTimer);
-      this.idleTimers.delete(userId);
+  
+    blacklistMiddleware(ctx, { endFlow }) {
+      if (this.isBlacklisted(ctx.from)) {
+        logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
+        return endFlow();
+      }
+      return false;
     }
   }
-
-  blacklistMiddleware(ctx, { endFlow }) {
-    if (this.isBlacklisted(ctx.from)) {
-      logger.info(`Usuario ${ctx.from} en lista negra. Mensaje ignorado.`);
-      return endFlow();
-    }
-    return false;
-  }
-}
-
-export default new FlowManager();
+  
+  export default new FlowManager();
 
 
 // modules\messageQueue.js
@@ -1015,7 +960,7 @@ class OrderManager {
     }
   }
 
-  async handleSetFinishes(userId, sellado, ojetillos, bolsillo) {
+  async setFinishes(userId, sellado, ojetillos, bolsillo) {
     logger.info(`Manejando configuración de acabados para usuario ${userId}`);
     try {
       const currentOrder = userContextManager.getCurrentOrder(userId);
@@ -1027,7 +972,7 @@ class OrderManager {
         bolsillo: bolsillo && serviceInfo.bolsillo
       };
 
-      userContextManager.updateCurrentOrder(userId, { finishes: finishes });
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes});
 
       return {
         action: "SET_FINISHES",
@@ -1166,6 +1111,7 @@ class OrderManager {
     }
   }
 
+
   formatOrderForSheet(order) {
     let details = `Servicio: ${order.service}\n`;
     
@@ -1200,18 +1146,11 @@ export default new OrderManager();
 // modules\userContext.js
 
 import logger from '../utils/logger.js';
+import sheetService from '../services/sheetService.js';
 
 class UserContextManager {
   constructor() {
     this.userContexts = new Map();
-    this.services = null;
-    this.additionalInfo = null;
-  }
-
-  setGlobalData(services, additionalInfo) {
-    this.services = services;
-    this.additionalInfo = additionalInfo;
-    logger.info('Datos globales actualizados en UserContextManager');
   }
 
   getUserContext(userId) {
@@ -1270,12 +1209,22 @@ class UserContextManager {
     logger.info(`Contexto limitado para usuario ${userId}`);
   }
 
+  setGlobalData(services, additionalInfo) {
+    this.services = services;
+    this.additionalInfo = additionalInfo;
+    logger.info('Datos globales actualizados en UserContextManager');
+    logger.info(`Menú global: ${JSON.stringify(this.services)}`);
+    logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
+  }
+
+
   updateCurrentOrder(userId, updates) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder = { ...userContext.currentOrder, ...updates };
+    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
     
     if (updates.service) {
-      const serviceInfo = this.getServiceInfo(updates.service);
+      const serviceInfo = sheetService.getServiceInfo(updates.service);
       if (serviceInfo) {
         userContext.currentOrder.category = serviceInfo.category;
         userContext.currentOrder.type = serviceInfo.type;
@@ -1306,66 +1255,10 @@ class UserContextManager {
     logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
   }
 
-  setFileAnalysisResponded(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.currentOrder.fileAnalysisResponded = value;
-  }
-  
-  hasRecentFileAnalysis(userId) {
-    const userContext = this.getUserContext(userId);
-    return userContext.currentOrder.fileAnalysis && !userContext.currentOrder.fileAnalysisResponded;
-  }
-
   getCurrentOrder(userId) {
-    return this.getUserContext(userId).currentOrder;
-  }
-
-  getServiceInfo(serviceName) {
-    for (const category in this.services) {
-      const service = this.services[category].find(s => s.name.toLowerCase() === serviceName.toLowerCase());
-      if (service) {
-        return service;
-      }
-    }
-    logger.warn(`Servicio no encontrado: ${serviceName}`);
-    return null;
-  }
-
-  findSimilarServices(serviceName) {
-    const allServices = this.getAllServices();
-    return allServices
-      .filter(service => 
-        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
-        serviceName.toLowerCase().includes(service.name.toLowerCase())
-      )
-      .map(service => ({
-        name: service.name,
-        category: service.category
-      }));
-  }
-
-  getServicesInCategory(category) {
-    return this.services[category] || [];
-  }
-
-  getFileValidationCriteria() {
-    return this.additionalInfo.criteriosValidacion;
-  }
-
-  getAllServices() {
-    let allServices = [];
-    for (const category in this.services) {
-      allServices = allServices.concat(this.services[category]);
-    }
-    return allServices;
-  }
-
-  getAvailableFinishes(serviceInfo) {
-    const finishes = [];
-    if (serviceInfo.sellado) finishes.push("sellado");
-    if (serviceInfo.ojetillos) finishes.push("ojetillos");
-    if (serviceInfo.bolsillo) finishes.push("bolsillo");
-    return finishes;
+    const userContext = this.getUserContext(userId);
+    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+    return userContext.currentOrder;
   }
 
   resetContext(userId) {
@@ -1374,11 +1267,39 @@ class UserContextManager {
   }
 
   getGlobalServices() {
-    return this.services;
+    return sheetService.getServices();
   }
 
   getGlobalAdditionalInfo() {
-    return this.additionalInfo;
+    return sheetService.getAdditionalInfo();
+  }
+
+  getServiceInfo(serviceName) {
+    return sheetService.getServiceInfo(serviceName);
+  }
+
+  getAllServices() {
+    return sheetService.getAllServices();
+  }
+
+  findSimilarServices(serviceName) {
+    return sheetService.findSimilarServices(serviceName);
+  }
+
+  getServicesInCategory(category) {
+    return sheetService.getServicesInCategory(category);
+  }
+
+  getFileValidationCriteria() {
+    return sheetService.getFileValidationCriteria();
+  }
+
+  getAvailableFinishes(serviceInfo) {
+    const finishes = [];
+    if (serviceInfo.sellado) finishes.push("sellado");
+    if (serviceInfo.ojetillos) finishes.push("ojetillos");
+    if (serviceInfo.bolsillo) finishes.push("bolsillo");
+    return finishes;
   }
 
   isOrderComplete(userId) {
@@ -1666,6 +1587,22 @@ class OpenAIService {
        - Usa un tono amigable pero profesional.
        - Estructura tus respuestas en párrafos cortos para mejor legibilidad.
        - Utiliza emojis ocasionalmente para dar un tono más amigable.
+
+    8. Manejo de Errores y Casos Especiales:
+      - Si no puedes encontrar información sobre un servicio mencionado por el cliente, responde con:
+        {"command": "SERVICE_NOT_FOUND", "service": "Nombre del servicio"}
+      - Si detectas que falta información crucial en la orden actual, como el servicio o las medidas, responde con:
+        {"command": "MISSING_INFO", "missingField": "Campo faltante"}
+      - En caso de cualquier otro error o situación inesperada, responde con:
+        {"command": "ERROR", "message": "Descripción del error"}
+
+    9. Validación Continua:
+       - Verifica constantemente que la información proporcionada por el cliente sea coherente con el servicio seleccionado.
+       - Si detectas alguna incongruencia, solicita aclaración al cliente y utiliza los comandos apropiados para corregir la información.
+
+    10. Comunicación Clara de Errores:
+       - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
+       - Ofrece alternativas o sugerencias para resolver el problema cuando sea posible.
    
        IMPORTANTE:
     - Utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
@@ -1795,20 +1732,15 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 
-const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.file",
-];
-
-const MAX_RETRIES = 5;
-const INITIAL_RETRY_DELAY = 1000; // 1 segundo
-
 class GoogleSheetService {
   constructor() {
     this.jwtFromEnv = new JWT({
       email: config.googleServiceAccountEmail,
       key: config.googlePrivateKey,
-      scopes: SCOPES,
+      scopes: [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file",
+      ],
     });
     this.doc = new GoogleSpreadsheet(config.googleSheetId, this.jwtFromEnv);
     moment.locale('es');
@@ -1818,7 +1750,6 @@ class GoogleSheetService {
     this.isInitialized = false;
   }
 
-
   async initialize() {
     try {
       logger.info("Iniciando inicialización de SheetService");
@@ -1826,9 +1757,7 @@ class GoogleSheetService {
       logger.info("Documento de Google Sheets cargado correctamente");
       
       await this.retryOperation(() => this.loadServicesWithRetry());
-      logger.info("Servicios cargados correctamente");
-      
-      await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
+      logger.info("Servicios cargados correctamente");await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
       logger.info("Información adicional cargada correctamente");
       
       this.isInitialized = true;
@@ -1838,9 +1767,8 @@ class GoogleSheetService {
       throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
     }
   }
-  
 
-  async retryOperation(operation, maxRetries = MAX_RETRIES) {
+  async retryOperation(operation, maxRetries = 5) {
     let retries = 0;
     while (retries < maxRetries) {
       try {
@@ -1850,7 +1778,7 @@ class GoogleSheetService {
           logger.error(`Error después de ${maxRetries} intentos: ${error.message}`);
           throw error;
         }
-        const delay = Math.pow(2, retries) * INITIAL_RETRY_DELAY;
+        const delay = Math.pow(2, retries) * 1000;
         logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
         await new Promise(resolve => setTimeout(resolve, delay));
         retries++;
@@ -1868,6 +1796,60 @@ class GoogleSheetService {
     logger.info("Iniciando carga de información adicional");
     this.additionalInfo = await this.getAdditionalInfo();
     logger.info("Información adicional cargada");
+  }
+
+  getServices() {
+    return this.services;
+  }
+
+  getAdditionalInfo() {
+    return this.additionalInfo;
+  }
+
+  getServiceInfo(serviceName) {
+    if (!serviceName || typeof serviceName !== 'string') {
+      logger.warn(`Nombre de servicio inválido: ${serviceName}`);
+      return null;
+    }
+
+    const lowerServiceName = serviceName.toLowerCase();
+    for (const category in this.services) {
+      const service = this.services[category].find(s => s.name.toLowerCase() === lowerServiceName);
+      if (service) {
+        return service;
+      }
+    }
+    logger.warn(`Servicio no encontrado: ${serviceName}`);
+    return null;
+  }
+
+  getAllServices() {
+    let allServices = [];
+    for (const category in this.services) {
+      allServices = allServices.concat(this.services[category]);
+    }
+    return allServices;
+  }
+
+  getServicesInCategory(category) {
+    return this.services[category] || [];
+  }
+
+  getFileValidationCriteria() {
+    return this.additionalInfo.criteriosValidacion;
+  }
+
+  findSimilarServices(serviceName) {
+    const allServices = this.getAllServices();
+    return allServices
+      .filter(service => 
+        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
+        serviceName.toLowerCase().includes(service.name.toLowerCase())
+      )
+      .map(service => ({
+        name: service.name,
+        category: service.category
+      }));
   }
 
   async getServices() {
@@ -1937,7 +1919,6 @@ class GoogleSheetService {
     }
   }
 
-
   parseAvailableWidths(widthsString) {
     if (!widthsString || widthsString.toLowerCase().includes('no tiene rollos')) {
       return [];
@@ -1945,7 +1926,6 @@ class GoogleSheetService {
     
     logger.info(`Procesando medidas: ${widthsString}`);
     
-    // Eliminar la línea de encabezado
     const lines = widthsString.split('\n').filter(line => !line.includes('Ancho material'));
     
     return lines.map(line => {
@@ -1975,7 +1955,7 @@ class GoogleSheetService {
     }).filter(w => w !== null);
   }
 
- async getAdditionalInfo() {
+  async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
@@ -2005,7 +1985,6 @@ class GoogleSheetService {
       throw new CustomError('AdditionalInfoError', 'Error al obtener información adicional desde Google Sheets', err);
     }
   }
-
 
   extractAdditionalInfo(sheet, additionalInfo) {
     const safeGetCellValue = (row, col) => {
@@ -2037,7 +2016,6 @@ class GoogleSheetService {
     logger.info(`Criterios de validación extraídos: ${additionalInfo.criteriosValidacion}`);
     logger.info(`Estado del bot: ${additionalInfo.estadoBot}`);
   }
-
 
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);

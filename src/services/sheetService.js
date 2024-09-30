@@ -6,20 +6,15 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 
-const SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.file",
-];
-
-const MAX_RETRIES = 5;
-const INITIAL_RETRY_DELAY = 1000; // 1 segundo
-
 class GoogleSheetService {
   constructor() {
     this.jwtFromEnv = new JWT({
       email: config.googleServiceAccountEmail,
       key: config.googlePrivateKey,
-      scopes: SCOPES,
+      scopes: [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file",
+      ],
     });
     this.doc = new GoogleSpreadsheet(config.googleSheetId, this.jwtFromEnv);
     moment.locale('es');
@@ -29,7 +24,6 @@ class GoogleSheetService {
     this.isInitialized = false;
   }
 
-
   async initialize() {
     try {
       logger.info("Iniciando inicialización de SheetService");
@@ -37,9 +31,7 @@ class GoogleSheetService {
       logger.info("Documento de Google Sheets cargado correctamente");
       
       await this.retryOperation(() => this.loadServicesWithRetry());
-      logger.info("Servicios cargados correctamente");
-      
-      await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
+      logger.info("Servicios cargados correctamente");await this.retryOperation(() => this.loadAdditionalInfoWithRetry());
       logger.info("Información adicional cargada correctamente");
       
       this.isInitialized = true;
@@ -49,9 +41,8 @@ class GoogleSheetService {
       throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
     }
   }
-  
 
-  async retryOperation(operation, maxRetries = MAX_RETRIES) {
+  async retryOperation(operation, maxRetries = 5) {
     let retries = 0;
     while (retries < maxRetries) {
       try {
@@ -61,7 +52,7 @@ class GoogleSheetService {
           logger.error(`Error después de ${maxRetries} intentos: ${error.message}`);
           throw error;
         }
-        const delay = Math.pow(2, retries) * INITIAL_RETRY_DELAY;
+        const delay = Math.pow(2, retries) * 1000;
         logger.warn(`Reintento ${retries + 1} en ${delay}ms: ${error.message}`);
         await new Promise(resolve => setTimeout(resolve, delay));
         retries++;
@@ -81,6 +72,14 @@ class GoogleSheetService {
     logger.info("Información adicional cargada");
   }
 
+  getServices() {
+    return this.services;
+  }
+
+  getAdditionalInfo() {
+    return this.additionalInfo;
+  }
+
   getServiceInfo(serviceName) {
     if (!serviceName || typeof serviceName !== 'string') {
       logger.warn(`Nombre de servicio inválido: ${serviceName}`);
@@ -96,6 +95,35 @@ class GoogleSheetService {
     }
     logger.warn(`Servicio no encontrado: ${serviceName}`);
     return null;
+  }
+
+  getAllServices() {
+    let allServices = [];
+    for (const category in this.services) {
+      allServices = allServices.concat(this.services[category]);
+    }
+    return allServices;
+  }
+
+  getServicesInCategory(category) {
+    return this.services[category] || [];
+  }
+
+  getFileValidationCriteria() {
+    return this.additionalInfo.criteriosValidacion;
+  }
+
+  findSimilarServices(serviceName) {
+    const allServices = this.getAllServices();
+    return allServices
+      .filter(service => 
+        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
+        serviceName.toLowerCase().includes(service.name.toLowerCase())
+      )
+      .map(service => ({
+        name: service.name,
+        category: service.category
+      }));
   }
 
   async getServices() {
@@ -165,7 +193,6 @@ class GoogleSheetService {
     }
   }
 
-
   parseAvailableWidths(widthsString) {
     if (!widthsString || widthsString.toLowerCase().includes('no tiene rollos')) {
       return [];
@@ -173,7 +200,6 @@ class GoogleSheetService {
     
     logger.info(`Procesando medidas: ${widthsString}`);
     
-    // Eliminar la línea de encabezado
     const lines = widthsString.split('\n').filter(line => !line.includes('Ancho material'));
     
     return lines.map(line => {
@@ -203,7 +229,7 @@ class GoogleSheetService {
     }).filter(w => w !== null);
   }
 
- async getAdditionalInfo() {
+  async getAdditionalInfo() {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[2];
@@ -233,7 +259,6 @@ class GoogleSheetService {
       throw new CustomError('AdditionalInfoError', 'Error al obtener información adicional desde Google Sheets', err);
     }
   }
-
 
   extractAdditionalInfo(sheet, additionalInfo) {
     const safeGetCellValue = (row, col) => {
@@ -265,7 +290,6 @@ class GoogleSheetService {
     logger.info(`Criterios de validación extraídos: ${additionalInfo.criteriosValidacion}`);
     logger.info(`Estado del bot: ${additionalInfo.estadoBot}`);
   }
-
 
   async saveOrder(data) {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
