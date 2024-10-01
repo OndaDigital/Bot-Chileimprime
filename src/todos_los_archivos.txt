@@ -217,6 +217,13 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
 
+    // Asegurarse de que el currentOrder está actualizado
+    if (!currentOrder.service || (!currentOrder.measures && currentOrder.requiresMeasures())) {
+      // Solicitar la información faltante al usuario
+      await flowDynamic("Parece que falta información en tu pedido. Por favor, asegúrate de haber proporcionado el servicio y las medidas necesarias.");
+      return;
+    }
+
     const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
 
     1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
@@ -235,9 +242,13 @@ class CommandProcessor {
     Asegúrate de que tu respuesta sea clara, concisa y guíe al usuario sobre cómo proceder.`;
 
     const aiResponse = await openaiService.getChatCompletion(
-      openaiService.getSystemPrompt(sheetService.getServices(), currentOrder, sheetService.getAdditionalInfo(), []),
-      [{ role: "system", content: instruction }]
+      openaiService.getSystemPrompt(userContextManager.getGlobalServices(), currentOrder, userContextManager.getGlobalAdditionalInfo(), userContextManager.getChatContext(userId)),
+      userContextManager.getChatContext(userId).concat({ role: "system", content: instruction })
     );
+
+    // Actualizar el contexto de chat
+    userContextManager.updateContext(userId, instruction, "system");
+    userContextManager.updateContext(userId, aiResponse, "assistant");
 
     await flowDynamic(aiResponse);
   }
@@ -937,8 +948,8 @@ class OrderManager {
         throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
       }
 
-      if (parseFloat(height) <= 1) {
-        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
+      if (parseFloat(height) < 1) {
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor o igual a 1 metro');
       }
 
       const measures = { width: validWidth.material, height: parseFloat(height) };
@@ -1596,7 +1607,7 @@ class OpenAIService {
        - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
          a) Solicita ancho, alto y cantidad.
          b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
-         c) El alto debe ser mayor a 1 metro.
+         c) El alto debe ser igual o mayor a 1 metro.
          d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
        - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
          a) Solicita solo la cantidad.
@@ -1608,7 +1619,7 @@ class OpenAIService {
          a) Presenta al cliente los anchos disponibles específicos para este servicio:
             Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
          b) Guía al cliente para que elija uno de estos anchos válidos.
-         c) Pide al cliente que especifique un alto mayor a 1 metro.
+         c) Pide al cliente que especifique un alto mayor o igual a 1 metro.
          d) Solicita la cantidad deseada.
        - Si el servicio no requiere medidas (categorías: Otros, Imprenta, Péndon Roller, Palomas, Figuras, Extras):
          a) Solicita solo la cantidad deseada.

@@ -59,7 +59,7 @@ class OrderManager {
       }
 
       if (parseFloat(height) < 1) {
-        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor o igual a 1 metro');
       }
 
       const measures = { width: validWidth.material, height: parseFloat(height) };
