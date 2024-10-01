@@ -42,6 +42,7 @@ class OpenAIService {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
+    //console.log(allServices); legacy no borrar
 
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {

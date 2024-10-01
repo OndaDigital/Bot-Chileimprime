@@ -671,12 +671,13 @@ class FlowManager {
           [...chatContext, { role: "user", content: message }],
           instruction
         );
-  
+    
         logger.info(`Respuesta inicial de AI para ${userId}: ${aiResponse}`);
-  
+    
+        // Procesar comandos en la respuesta de la IA
         const commands = this.processAIResponse(aiResponse);
         let currentOrderUpdated = false;
-  
+    
         for (const command of commands) {
           const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           if (result.currentOrderUpdated) {
@@ -684,16 +685,18 @@ class FlowManager {
           }
           if (result.messagesSent) {
             logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
-          } else if (result.data) {
+          }
+          if (result.data) {
             await flowDynamic(result.data);
           }
-
         }
-  
-        if (commands.length === 0) {
-          await flowDynamic(this.filterJsonCommands(aiResponse));
+    
+        // Enviar la parte de texto de la respuesta de la IA al usuario
+        const filteredResponse = this.filterJsonCommands(aiResponse);
+        if (filteredResponse) {
+          await flowDynamic(filteredResponse);
         }
-  
+    
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
   
@@ -1557,6 +1560,7 @@ class OpenAIService {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
+    //console.log(allServices); legacy no borrar
 
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {
