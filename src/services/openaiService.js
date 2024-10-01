@@ -47,11 +47,14 @@ class OpenAIService {
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {
       fileValidationInfo = `
-      Información de análisis del archivo:
-      Formato: ${currentOrder.fileAnalysis.format}
-      Dimensiones: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
-      DPI: ${currentOrder.fileAnalysis.dpi}
-      Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
+      Información detallada del análisis del archivo:
+      📄 Formato: ${currentOrder.fileAnalysis.format}
+      📏 Dimensiones en píxeles: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
+      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m (${(currentOrder.fileAnalysis.physicalWidth * 100).toFixed(2)}x${(currentOrder.fileAnalysis.physicalHeight * 100).toFixed(2)} cm)
+      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(4)} m²
+      🔍 Resolución: ${currentOrder.fileAnalysis.dpi} DPI
+      🎨 Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
+      📦 Tamaño del archivo: ${currentOrder.fileAnalysis.fileSize || 'No disponible'}
       `;
     }
 
@@ -116,11 +119,11 @@ class OpenAIService {
        - Informa al cliente si el archivo es válido o no, proporcionando detalles sobre cualquier problema encontrado.
        - Los criterios de validación son los siguientes:
         <criterios_validacion>${criteria}</criterios_validacion>
-        Información de análisis del archivo: ${fileValidationInfo}
+        Información de análisis del archivo: <informacion_analisis>${fileValidationInfo}</informacion_analisis> si <informacion_analisis> esta vacio es porque aun se ha enviado un archivo.
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
-       - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, y confirmación de archivo válido.
+       - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, área total (si aplica) y confirmación de archivo válido.
 - Permite al cliente modificar cualquier aspecto antes de la confirmación final.
        - Si el cliente confirma y todos los aspectos del pedido están completos y válidos, responde con el comando JSON:
          {"command": "CONFIRM_ORDER"}
