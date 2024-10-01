@@ -114,6 +114,13 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
 
+    // Asegurarse de que el currentOrder está actualizado
+    if (!currentOrder.service || (!currentOrder.measures && currentOrder.requiresMeasures())) {
+      // Solicitar la información faltante al usuario
+      await flowDynamic("Parece que falta información en tu pedido. Por favor, asegúrate de haber proporcionado el servicio y las medidas necesarias.");
+      return;
+    }
+
     const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
 
     1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
@@ -132,9 +139,13 @@ class CommandProcessor {
     Asegúrate de que tu respuesta sea clara, concisa y guíe al usuario sobre cómo proceder.`;
 
     const aiResponse = await openaiService.getChatCompletion(
-      openaiService.getSystemPrompt(sheetService.getServices(), currentOrder, sheetService.getAdditionalInfo(), []),
-      [{ role: "system", content: instruction }]
+      openaiService.getSystemPrompt(userContextManager.getGlobalServices(), currentOrder, userContextManager.getGlobalAdditionalInfo(), userContextManager.getChatContext(userId)),
+      userContextManager.getChatContext(userId).concat({ role: "system", content: instruction })
     );
+
+    // Actualizar el contexto de chat
+    userContextManager.updateContext(userId, instruction, "system");
+    userContextManager.updateContext(userId, aiResponse, "assistant");
 
     await flowDynamic(aiResponse);
   }

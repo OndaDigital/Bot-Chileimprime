@@ -58,7 +58,7 @@ class OrderManager {
         throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
       }
 
-      if (parseFloat(height) <= 1) {
+      if (parseFloat(height) < 1) {
         throw new CustomError('InvalidHeightError', 'El alto debe ser mayor a 1 metro');
       }
 

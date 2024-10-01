@@ -78,7 +78,7 @@ class OpenAIService {
        - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
          a) Solicita ancho, alto y cantidad.
          b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
-         c) El alto debe ser mayor a 1 metro.
+         c) El alto debe ser mayor o igual a 1 metro.
          d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
        - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
          a) Solicita solo la cantidad.
