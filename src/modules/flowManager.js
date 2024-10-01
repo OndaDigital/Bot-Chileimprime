@@ -111,6 +111,7 @@ class FlowManager {
             
             logger.info(`Archivo analizado para usuario ${userId}: ${JSON.stringify(fileInfo)}`);
             
+            // Llamar a handleFileAnalysis de commandProcessor para mostrar los resultados del análisis
             await commandProcessor.handleFileAnalysis(ctx, flowDynamic);
             
           } catch (error) {
@@ -119,6 +120,7 @@ class FlowManager {
           }
         });
     }
+  
 
     createVoiceNoteFlow() {
       return addKeyword(EVENTS.VOICE_NOTE)
@@ -181,66 +183,57 @@ class FlowManager {
       this.messageQueue.enqueueMessage(userId, message, callback);
     }
   
-    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
+    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message, instruction = '') {
       const userId = ctx.from;
       logger.info(`Procesando mensaje para usuario ${userId}: ${message}`);
-    
+  
       if (this.isBlacklisted(userId)) {
         logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
       }
-    
+  
       if (orderManager.isOrderConfirmed(userId)) {
         logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
         return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-    
+  
       this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-    
+  
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
         
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-          [...chatContext, { role: "user", content: message }]
+          [...chatContext, { role: "user", content: message }],
+          instruction
         );
-    
+  
         logger.info(`Respuesta inicial de AI para ${userId}: ${aiResponse}`);
-    
+  
         const commands = this.processAIResponse(aiResponse);
-        logger.info(`Comandos extraídos para ${userId}: ${JSON.stringify(commands)}`);
         let currentOrderUpdated = false;
   
         for (const command of commands) {
           const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-          if (result && result.currentOrderUpdated) {
+          if (result.currentOrderUpdated) {
             currentOrderUpdated = true;
-            logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
           }
+          if (result.messagesSent) {
+            logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
+          } else if (result.data) {
+            await flowDynamic(result.data);
+          }
+
         }
   
-        // Verificar si es necesario solicitar el archivo de diseño
-        if (this.isOrderReadyForFileUpload(userContext.currentOrder)) {
-          const instruction = "El pedido está completo. Por favor, solicita al cliente que envíe el archivo de diseño para continuar con el proceso.";
-          aiResponse = await openaiService.getChatCompletion(
-            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-            [...chatContext, { role: "user", content: message }],
-            instruction
-          );
-          logger.info(`Solicitando archivo de diseño para ${userId}`);
+        if (commands.length === 0) {
+          await flowDynamic(this.filterJsonCommands(aiResponse));
         }
   
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
   
-        // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
-        const filteredResponse = this.filterJsonCommands(aiResponse);
-        await flowDynamic(filteredResponse);
-  
-        logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
-  
-        // Verificar si la orden está completa
         if (userContextManager.isOrderComplete(userId)) {
           logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
           return gotoFlow(this.getFlowByName('confirmedFlow'));
@@ -261,38 +254,26 @@ class FlowManager {
              !currentOrder.filePath &&
              !currentOrder.fileAnalysis;
     }
-  
+
+ 
   
     processAIResponse(aiResponse) {
-      try {
-        const jsonCommands = aiResponse.match(/\{.*?\}/g);
-        if (jsonCommands) {
-          return jsonCommands.map(jsonCommand => JSON.parse(jsonCommand));
+      const commandRegex = /{[^}]+}/g;
+      const commands = aiResponse.match(commandRegex) || [];
+      return commands.map(cmd => {
+        try {
+          return JSON.parse(cmd);
+        } catch (error) {
+          logger.error(`Error al parsear comando JSON: ${error.message}`);
+          return null;
         }
-        return [];
-      } catch (error) {
-        logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
-        return [];
-      }
+      }).filter(cmd => cmd !== null);
     }
 
     filterJsonCommands(aiResponse) {
       // Eliminar todos los comandos JSON de la respuesta
       return aiResponse.replace(/\{.*?\}/g, '').trim();
     }
-  
-    generateFileAnalysisResponse(fileInfo) {
-      let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
-      response += `📄 Formato: ${fileInfo.format}\n`;
-      response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
-      response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
-      if (fileInfo.colorSpace) {
-        response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
-      }
-      response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
-      return response;
-    }
-  
   
     setIdleTimers(userId, timers) {
       this.idleTimers.set(userId, timers);

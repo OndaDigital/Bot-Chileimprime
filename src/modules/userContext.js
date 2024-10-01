@@ -179,7 +179,7 @@ class UserContextManager {
 
   isOrderComplete(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis', 'fileValidation'];
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
     if (!hasAllRequiredFields) return false;
@@ -191,9 +191,10 @@ class UserContextManager {
       return false;
     }
 
-    return order.fileValidation && order.fileValidation.isValid;
+    // La validación del archivo ahora es manejada por el sistema de IA
+    return true;
   }
-
+  
   getChatContext(userId) {
     return this.getUserContext(userId).chatContext;
   }

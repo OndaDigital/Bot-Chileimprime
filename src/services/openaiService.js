@@ -1,3 +1,5 @@
+// services/openaiService.js
+
 import OpenAI from "openai";
 import fs from 'fs';
 import { promises as fsPromises } from 'fs';
@@ -42,11 +44,13 @@ class OpenAIService {
     const criteria = userContextManager.getFileValidationCriteria();
 
     let fileValidationInfo = "";
-    if (currentOrder.fileValidation) {
+    if (currentOrder.fileAnalysis) {
       fileValidationInfo = `
-      Información de validación del archivo:
-      Válido: ${currentOrder.fileValidation.isValid ? 'Sí' : 'No'}
-      Razón: ${currentOrder.fileValidation.reason}
+      Información de análisis del archivo:
+      Formato: ${currentOrder.fileAnalysis.format}
+      Dimensiones: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
+      DPI: ${currentOrder.fileAnalysis.dpi}
+      Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
       `;
     }
 
@@ -54,7 +58,7 @@ class OpenAIService {
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis, fileAnalysisResponded}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -103,20 +107,21 @@ class OpenAIService {
  
     5. Validación de Archivos:
        - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
-         y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
-       - Para solicitar la validación, responde con el comando JSON:
-         {"command": "VALIDATE_FILE_FOR_SERVICE"}
-       - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
-       - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
+         y si hay un archivo en currentOrder.fileAnalysis, debes validar el archivo según los siguientes criterios:
+         a) Verifica si el currentOrder contiene un servicio válido.
+         b) Si la categoría es Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular o Back Light, verifica si existen medidas seleccionadas.
+         c) Valida el archivo utilizando los criterios de validación proporcionados, permitiendo una tolerancia máxima del 70%.
+         d) Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras, solo verifica que haya un servicio seleccionado.
+       - Informa al cliente si el archivo es válido o no, proporcionando detalles sobre cualquier problema encontrado.
        - Los criterios de validación son los siguientes:
-        <criterios_validacion> ${criteria}</criterios_validacion>
-        Informacion de validacion: <file_validation_info> ${fileValidationInfo} </file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
+        <criterios_validacion>${criteria}</criterios_validacion>
+        Información de análisis del archivo: ${fileValidationInfo}
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
        - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, y confirmación de archivo válido.
-       - Permite al cliente modificar cualquier aspecto antes de la confirmación final.
-       - Si el cliente confirma, responde con el comando JSON:
+- Permite al cliente modificar cualquier aspecto antes de la confirmación final.
+       - Si el cliente confirma y todos los aspectos del pedido están completos y válidos, responde con el comando JSON:
          {"command": "CONFIRM_ORDER"}
 
     7. Comunicación Clara:
@@ -160,11 +165,9 @@ class OpenAIService {
             - Las terminaciones están seleccionadas (si aplica).
          c) Para otros servicios:
             - La cantidad está especificada.
-         d) El archivo de diseño ha sido enviado y validado (fileValidation en currentOrder debe ser true).
+         d) El archivo de diseño ha sido enviado y validado correctamente.
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
-
-
 
      IMPORTANTE:
     - SIEMPRE utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
@@ -189,8 +192,6 @@ class OpenAIService {
     Responde al siguiente mensaje del cliente:`;
   }
 
-
-
   getAllServicesInfo(services) {
     const allServices = [];
     for (const category in services) {
@@ -209,58 +210,6 @@ class OpenAIService {
     }
     return allServices;
   }
-
-  async validateFileForService(fileAnalysis, service, measures, currentOrder) {
-    const validationCriteria = userContextManager.getFileValidationCriteria();
-    
-    const prompt = `Eres un experto en análisis de archivos de impresión. 
-    Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
-    Ancho: ${measures.width}m, Alto: ${measures.height}m.
-
-    Información del archivo:
-    ${JSON.stringify(fileAnalysis)}
-
-    Criterios de validación:
-    ${validationCriteria}
-
-    Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
-    Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.
-    
-    Al final de tu análisis, incluye un comando JSON con el siguiente formato:
-    {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
-    
-    Asegúrate de que el valor de "isValid" sea true si el archivo cumple con todos los criterios, y false en caso contrario.`;
-
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: config.languageModel,
-        messages: [
-          { role: "system", content: prompt },
-          { role: "user", content: "Valida este archivo para el servicio y medidas especificados." }
-        ],
-        max_tokens: config.maxTokens,
-        temperature: 0.5,
-      });
-
-      const analysis = response.choices[0].message.content.trim();
-      const commandMatch = analysis.match(/\{.*\}/);
-      if (!commandMatch) {
-        throw new Error("No se pudo extraer el comando JSON del análisis");
-      }
-
-      const command = JSON.parse(commandMatch[0]);
-      return {
-        analysis: analysis.replace(commandMatch[0], '').trim(),
-        isValid: command.isValid,
-        reason: command.reason
-      };
-    } catch (error) {
-      logger.error("Error al validar el archivo con OpenAI:", error);
-      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
-    }
-  }
-
-
 
   async transcribeAudio(audioFilePath) {
     try {

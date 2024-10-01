@@ -22,8 +22,6 @@ class CommandProcessor {
           return this.handleSetQuantity(userId, command.quantity);
         case "SET_FINISHES":
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
-        case "VALIDATE_FILE_FOR_SERVICE":
-          return this.handleValidateFileForService(userId);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
         case "SERVICE_NOT_FOUND":
@@ -80,54 +78,94 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
     const fileAnalysis = currentOrder.fileAnalysis;
-  
+ 
     if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para analizar. Por favor, envía un archivo primero.");
       return;
     }
-  
+ 
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
     response += `📄 Formato: *${fileAnalysis.format}*\n`;
     response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
-    
+   
     const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
     const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
     response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
-    
+   
     response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
     response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
-    
+   
     if (fileAnalysis.colorSpace) {
       response += `🎨 Espacio de color: *${fileAnalysis.colorSpace}*\n`;
     }
-    
+   
     if (fileAnalysis.fileSize) {
       response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
     }
-  
-    if (!currentOrder.service) {
-      response += "\nPor favor, indícame qué servicio de impresión necesitas para poder validar si el archivo es compatible.";
-    } else {
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-      if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        response += `\nYa has seleccionado el servicio *${currentOrder.service}*. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
-      } else {
-        // Tenemos toda la información, procedemos a validar
-        await this.checkAndValidateFile(ctx, flowDynamic);
-        return; // Evitamos enviar una respuesta adicional
-      }
-    }
-  
+ 
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
+
+    // Generar y enviar el segundo mensaje
+    await this.handleFileValidationInstruction(ctx, flowDynamic);
+  }
+
+  async handleFileValidationInstruction(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+
+    const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
+
+    1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
+
+    2. Si hay un servicio seleccionado, verifica la categoría:
+       - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
+         a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
+         b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
+
+    3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
+       - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
+
+    4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
+    5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
+
+    Asegúrate de que tu respuesta sea clara, concisa y guíe al usuario sobre cómo proceder.`;
+
+    const aiResponse = await openaiService.getChatCompletion(
+      openaiService.getSystemPrompt(sheetService.getServices(), currentOrder, sheetService.getAdditionalInfo(), []),
+      [{ role: "system", content: instruction }]
+    );
+
+    await flowDynamic(aiResponse);
   }
   
 
-  async handleListAllServices(userId) {
+  async handleListAllServices(userId, actions) {
     const services = sheetService.getServices();
     userContextManager.updateCurrentOrder(userId, { availableServices: services });
-    logger.info(`Lista de servicios actualizada para usuario ${userId}`);
-    return { currentOrderUpdated: true };
+    const formattedServices = this.formatServiceList(services);
+    logger.info(`Lista de servicios preparada para usuario ${userId}`);
+    
+    return { 
+      currentOrderUpdated: true, 
+      action: 'SHOW_SERVICES',
+      data: formattedServices
+    };
+  }
+
+  formatServiceList(services) {
+    let formattedList = "Aquí tienes la lista completa de servicios disponibles:\n\n";
+    
+    for (const [category, categoryServices] of Object.entries(services)) {
+      formattedList += `*${category}*:\n`;
+      categoryServices.forEach(service => {
+        formattedList += `- ${service.name}\n`;
+      });
+      formattedList += "\n";
+    }
+
+    formattedList += "Para obtener más información sobre un servicio específico, por favor menciona su nombre.";
+    return formattedList;
   }
 
   async handleSelectService(userId, serviceName) {
@@ -138,104 +176,6 @@ class CommandProcessor {
     } catch (error) {
       logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
       return { currentOrderUpdated: false, error: error.message };
-    }
-  }
-
-  async checkAndValidateFile(ctx, flowDynamic) {
-    const userId = ctx.from;
-    const currentOrder = userContextManager.getCurrentOrder(userId);
-    
-    if (currentOrder.fileAnalysis && currentOrder.service) {
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category) || 
-          (currentOrder.measures && currentOrder.measures.width && currentOrder.measures.height)) {
-        // Tenemos toda la información necesaria, procedemos a validar
-        try {
-          const validationResult = await openaiService.validateFileForService(
-            currentOrder.fileAnalysis,
-            serviceInfo,
-            currentOrder.measures,
-            currentOrder
-          );
-
-          let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
-          response += validationResult.analysis + "\n\n";
-
-          if (validationResult.isValid) {
-            response += "✅ El archivo es válido para este servicio y medidas.";
-          } else {
-            response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
-            response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
-          }
-
-          await flowDynamic(response);
-          userContextManager.updateCurrentOrder(userId, { fileValidation: validationResult });
-        } catch (error) {
-          logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
-          await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
-        }
-      }
-    }
-  }
-
-  async handleValidateFile(ctx, flowDynamic, isValid, reason) {
-    const userId = ctx.from;
-    try {
-      await userContextManager.updateCurrentOrder(userId, {
-        fileValidation: { isValid, reason }
-      });
-      
-      if (isValid) {
-        await flowDynamic("✅ El archivo es válido para este servicio y medidas.");
-      } else {
-        await flowDynamic(`❌ El archivo no cumple con los requisitos: ${reason}\nPor favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.`);
-      }
-    } catch (error) {
-      logger.error(`Error al manejar la validación del archivo para usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar la validación del archivo. Por favor, intenta nuevamente.");
-    }
-  }
-
-  async handleValidateFileForService(userId) {
-    try {
-      const result = await orderManager.handleValidateFile(userId);
-      logger.info(`Archivo validado para usuario ${userId}: ${JSON.stringify(result)}`);
-      return { currentOrderUpdated: true, ...result };
-    } catch (error) {
-      logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
-      return { currentOrderUpdated: false, error: error.message };
-    }
-  }
-
-  async validateFileForService(ctx, flowDynamic) {
-    const userId = ctx.from;
-    const currentOrder = userContextManager.getCurrentOrder(userId);
-    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-    try {
-      const validationResult = await openaiService.validateFileForService(
-        currentOrder.fileAnalysis,
-        serviceInfo,
-        currentOrder.measures,
-        currentOrder
-      );
-
-      let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
-      response += validationResult.analysis + "\n\n";
-
-      if (validationResult.isValid) {
-        response += "✅ El archivo es válido para este servicio y medidas.";
-      } else {
-        response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
-        response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
-      }
-
-      await flowDynamic(response);
-      return response;
-    } catch (error) {
-      logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
-      return "Error en la validación del archivo";
     }
   }
 

@@ -125,8 +125,6 @@ class CommandProcessor {
           return this.handleSetQuantity(userId, command.quantity);
         case "SET_FINISHES":
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
-        case "VALIDATE_FILE_FOR_SERVICE":
-          return this.handleValidateFileForService(userId);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
         case "SERVICE_NOT_FOUND":
@@ -183,54 +181,94 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
     const fileAnalysis = currentOrder.fileAnalysis;
-  
+ 
     if (!fileAnalysis) {
       await flowDynamic("Lo siento, parece que no hay un archivo para analizar. Por favor, envía un archivo primero.");
       return;
     }
-  
+ 
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
     response += `📄 Formato: *${fileAnalysis.format}*\n`;
     response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
-    
+   
     const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
     const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
     response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
-    
+   
     response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
     response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
-    
+   
     if (fileAnalysis.colorSpace) {
       response += `🎨 Espacio de color: *${fileAnalysis.colorSpace}*\n`;
     }
-    
+   
     if (fileAnalysis.fileSize) {
       response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
     }
-  
-    if (!currentOrder.service) {
-      response += "\nPor favor, indícame qué servicio de impresión necesitas para poder validar si el archivo es compatible.";
-    } else {
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-      if (!currentOrder.measures && ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        response += `\nYa has seleccionado el servicio *${currentOrder.service}*. Ahora necesito que me proporciones las medidas (ancho y alto) que necesitas para tu impresión.`;
-      } else {
-        // Tenemos toda la información, procedemos a validar
-        await this.checkAndValidateFile(ctx, flowDynamic);
-        return; // Evitamos enviar una respuesta adicional
-      }
-    }
-  
+ 
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
+
+    // Generar y enviar el segundo mensaje
+    await this.handleFileValidationInstruction(ctx, flowDynamic);
+  }
+
+  async handleFileValidationInstruction(ctx, flowDynamic) {
+    const userId = ctx.from;
+    const currentOrder = userContextManager.getCurrentOrder(userId);
+
+    const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
+
+    1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
+
+    2. Si hay un servicio seleccionado, verifica la categoría:
+       - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
+         a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
+         b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
+
+    3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
+       - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
+
+    4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
+    5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
+
+    Asegúrate de que tu respuesta sea clara, concisa y guíe al usuario sobre cómo proceder.`;
+
+    const aiResponse = await openaiService.getChatCompletion(
+      openaiService.getSystemPrompt(sheetService.getServices(), currentOrder, sheetService.getAdditionalInfo(), []),
+      [{ role: "system", content: instruction }]
+    );
+
+    await flowDynamic(aiResponse);
   }
   
 
-  async handleListAllServices(userId) {
+  async handleListAllServices(userId, actions) {
     const services = sheetService.getServices();
     userContextManager.updateCurrentOrder(userId, { availableServices: services });
-    logger.info(`Lista de servicios actualizada para usuario ${userId}`);
-    return { currentOrderUpdated: true };
+    const formattedServices = this.formatServiceList(services);
+    logger.info(`Lista de servicios preparada para usuario ${userId}`);
+    
+    return { 
+      currentOrderUpdated: true, 
+      action: 'SHOW_SERVICES',
+      data: formattedServices
+    };
+  }
+
+  formatServiceList(services) {
+    let formattedList = "Aquí tienes la lista completa de servicios disponibles:\n\n";
+    
+    for (const [category, categoryServices] of Object.entries(services)) {
+      formattedList += `*${category}*:\n`;
+      categoryServices.forEach(service => {
+        formattedList += `- ${service.name}\n`;
+      });
+      formattedList += "\n";
+    }
+
+    formattedList += "Para obtener más información sobre un servicio específico, por favor menciona su nombre.";
+    return formattedList;
   }
 
   async handleSelectService(userId, serviceName) {
@@ -241,104 +279,6 @@ class CommandProcessor {
     } catch (error) {
       logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
       return { currentOrderUpdated: false, error: error.message };
-    }
-  }
-
-  async checkAndValidateFile(ctx, flowDynamic) {
-    const userId = ctx.from;
-    const currentOrder = userContextManager.getCurrentOrder(userId);
-    
-    if (currentOrder.fileAnalysis && currentOrder.service) {
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category) || 
-          (currentOrder.measures && currentOrder.measures.width && currentOrder.measures.height)) {
-        // Tenemos toda la información necesaria, procedemos a validar
-        try {
-          const validationResult = await openaiService.validateFileForService(
-            currentOrder.fileAnalysis,
-            serviceInfo,
-            currentOrder.measures,
-            currentOrder
-          );
-
-          let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
-          response += validationResult.analysis + "\n\n";
-
-          if (validationResult.isValid) {
-            response += "✅ El archivo es válido para este servicio y medidas.";
-          } else {
-            response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
-            response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
-          }
-
-          await flowDynamic(response);
-          userContextManager.updateCurrentOrder(userId, { fileValidation: validationResult });
-        } catch (error) {
-          logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
-          await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
-        }
-      }
-    }
-  }
-
-  async handleValidateFile(ctx, flowDynamic, isValid, reason) {
-    const userId = ctx.from;
-    try {
-      await userContextManager.updateCurrentOrder(userId, {
-        fileValidation: { isValid, reason }
-      });
-      
-      if (isValid) {
-        await flowDynamic("✅ El archivo es válido para este servicio y medidas.");
-      } else {
-        await flowDynamic(`❌ El archivo no cumple con los requisitos: ${reason}\nPor favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.`);
-      }
-    } catch (error) {
-      logger.error(`Error al manejar la validación del archivo para usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al procesar la validación del archivo. Por favor, intenta nuevamente.");
-    }
-  }
-
-  async handleValidateFileForService(userId) {
-    try {
-      const result = await orderManager.handleValidateFile(userId);
-      logger.info(`Archivo validado para usuario ${userId}: ${JSON.stringify(result)}`);
-      return { currentOrderUpdated: true, ...result };
-    } catch (error) {
-      logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
-      return { currentOrderUpdated: false, error: error.message };
-    }
-  }
-
-  async validateFileForService(ctx, flowDynamic) {
-    const userId = ctx.from;
-    const currentOrder = userContextManager.getCurrentOrder(userId);
-    const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-    try {
-      const validationResult = await openaiService.validateFileForService(
-        currentOrder.fileAnalysis,
-        serviceInfo,
-        currentOrder.measures,
-        currentOrder
-      );
-
-      let response = `Análisis de compatibilidad para el servicio ${currentOrder.service}:\n\n`;
-      response += validationResult.analysis + "\n\n";
-
-      if (validationResult.isValid) {
-        response += "✅ El archivo es válido para este servicio y medidas.";
-      } else {
-        response += `❌ El archivo no cumple con los requisitos: ${validationResult.reason}\n`;
-        response += "Por favor, ajusta tu archivo según las recomendaciones y vuelve a enviarlo.";
-      }
-
-      await flowDynamic(response);
-      return response;
-    } catch (error) {
-      logger.error(`Error al validar el archivo para el usuario ${userId}: ${error.message}`);
-      await flowDynamic("Lo siento, ha ocurrido un error al validar el archivo. Por favor, intenta nuevamente o contacta con nuestro soporte técnico.");
-      return "Error en la validación del archivo";
     }
   }
 
@@ -634,6 +574,7 @@ class FlowManager {
             
             logger.info(`Archivo analizado para usuario ${userId}: ${JSON.stringify(fileInfo)}`);
             
+            // Llamar a handleFileAnalysis de commandProcessor para mostrar los resultados del análisis
             await commandProcessor.handleFileAnalysis(ctx, flowDynamic);
             
           } catch (error) {
@@ -642,6 +583,7 @@ class FlowManager {
           }
         });
     }
+  
 
     createVoiceNoteFlow() {
       return addKeyword(EVENTS.VOICE_NOTE)
@@ -704,66 +646,57 @@ class FlowManager {
       this.messageQueue.enqueueMessage(userId, message, callback);
     }
   
-    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message) {
+    async handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, message, instruction = '') {
       const userId = ctx.from;
       logger.info(`Procesando mensaje para usuario ${userId}: ${message}`);
-    
+  
       if (this.isBlacklisted(userId)) {
         logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
       }
-    
+  
       if (orderManager.isOrderConfirmed(userId)) {
         logger.info(`Cotización ya confirmada para ${userId}. Redirigiendo a atención humana.`);
         return gotoFlow(this.getFlowByName('confirmedFlow'));
       }
-    
+  
       this.startIdleTimer(ctx, flowDynamic, gotoFlow);
-    
+  
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
         
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-          [...chatContext, { role: "user", content: message }]
+          [...chatContext, { role: "user", content: message }],
+          instruction
         );
-    
+  
         logger.info(`Respuesta inicial de AI para ${userId}: ${aiResponse}`);
-    
+  
         const commands = this.processAIResponse(aiResponse);
-        logger.info(`Comandos extraídos para ${userId}: ${JSON.stringify(commands)}`);
         let currentOrderUpdated = false;
   
         for (const command of commands) {
           const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-          if (result && result.currentOrderUpdated) {
+          if (result.currentOrderUpdated) {
             currentOrderUpdated = true;
-            logger.info(`CurrentOrder actualizado para ${userId} después de procesar comando: ${JSON.stringify(command)}`);
           }
+          if (result.messagesSent) {
+            logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
+          } else if (result.data) {
+            await flowDynamic(result.data);
+          }
+
         }
   
-        // Verificar si es necesario solicitar el archivo de diseño
-        if (this.isOrderReadyForFileUpload(userContext.currentOrder)) {
-          const instruction = "El pedido está completo. Por favor, solicita al cliente que envíe el archivo de diseño para continuar con el proceso.";
-          aiResponse = await openaiService.getChatCompletion(
-            openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
-            [...chatContext, { role: "user", content: message }],
-            instruction
-          );
-          logger.info(`Solicitando archivo de diseño para ${userId}`);
+        if (commands.length === 0) {
+          await flowDynamic(this.filterJsonCommands(aiResponse));
         }
   
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
   
-        // Filtrar comandos JSON de la respuesta antes de enviarla al usuario
-        const filteredResponse = this.filterJsonCommands(aiResponse);
-        await flowDynamic(filteredResponse);
-  
-        logger.info(`Respuesta final enviada a ${userId}: ${filteredResponse}`);
-  
-        // Verificar si la orden está completa
         if (userContextManager.isOrderComplete(userId)) {
           logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
           return gotoFlow(this.getFlowByName('confirmedFlow'));
@@ -784,38 +717,26 @@ class FlowManager {
              !currentOrder.filePath &&
              !currentOrder.fileAnalysis;
     }
-  
+
+ 
   
     processAIResponse(aiResponse) {
-      try {
-        const jsonCommands = aiResponse.match(/\{.*?\}/g);
-        if (jsonCommands) {
-          return jsonCommands.map(jsonCommand => JSON.parse(jsonCommand));
+      const commandRegex = /{[^}]+}/g;
+      const commands = aiResponse.match(commandRegex) || [];
+      return commands.map(cmd => {
+        try {
+          return JSON.parse(cmd);
+        } catch (error) {
+          logger.error(`Error al parsear comando JSON: ${error.message}`);
+          return null;
         }
-        return [];
-      } catch (error) {
-        logger.error(`Error al procesar la respuesta de AI: ${error.message}`);
-        return [];
-      }
+      }).filter(cmd => cmd !== null);
     }
 
     filterJsonCommands(aiResponse) {
       // Eliminar todos los comandos JSON de la respuesta
       return aiResponse.replace(/\{.*?\}/g, '').trim();
     }
-  
-    generateFileAnalysisResponse(fileInfo) {
-      let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
-      response += `📄 Formato: ${fileInfo.format}\n`;
-      response += `📏 Dimensiones: ${fileInfo.width}x${fileInfo.height}\n`;
-      response += `🔍 Resolución: ${fileInfo.dpi} DPI\n`;
-      if (fileInfo.colorSpace) {
-        response += `🎨 Espacio de color: ${fileInfo.colorSpace}\n`;
-      }
-      response += "\nPor favor, indícame qué servicio de impresión necesitas y te diré si el archivo es compatible.";
-      return response;
-    }
-  
   
     setIdleTimers(userId, timers) {
       this.idleTimers.set(userId, timers);
@@ -1427,7 +1348,7 @@ class UserContextManager {
 
   isOrderComplete(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis', 'fileValidation'];
+    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
 
     if (!hasAllRequiredFields) return false;
@@ -1439,9 +1360,10 @@ class UserContextManager {
       return false;
     }
 
-    return order.fileValidation && order.fileValidation.isValid;
+    // La validación del archivo ahora es manejada por el sistema de IA
+    return true;
   }
-
+  
   getChatContext(userId) {
     return this.getUserContext(userId).chatContext;
   }
@@ -1591,6 +1513,8 @@ export default new FileValidationService();
 
 // services\openaiService.js
 
+// services/openaiService.js
+
 import OpenAI from "openai";
 import fs from 'fs';
 import { promises as fsPromises } from 'fs';
@@ -1635,11 +1559,13 @@ class OpenAIService {
     const criteria = userContextManager.getFileValidationCriteria();
 
     let fileValidationInfo = "";
-    if (currentOrder.fileValidation) {
+    if (currentOrder.fileAnalysis) {
       fileValidationInfo = `
-      Información de validación del archivo:
-      Válido: ${currentOrder.fileValidation.isValid ? 'Sí' : 'No'}
-      Razón: ${currentOrder.fileValidation.reason}
+      Información de análisis del archivo:
+      Formato: ${currentOrder.fileAnalysis.format}
+      Dimensiones: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
+      DPI: ${currentOrder.fileAnalysis.dpi}
+      Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
       `;
     }
 
@@ -1647,7 +1573,7 @@ class OpenAIService {
 
     1. Análisis Continuo del Estado del Pedido:
        - Examina constantemente el contenido de currentOrder: ${JSON.stringify(currentOrder)}
-       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis, fileAnalysisResponded}
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
@@ -1696,20 +1622,21 @@ class OpenAIService {
  
     5. Validación de Archivos:
        - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
-         y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
-       - Para solicitar la validación, responde con el comando JSON:
-         {"command": "VALIDATE_FILE_FOR_SERVICE"}
-       - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
-       - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
+         y si hay un archivo en currentOrder.fileAnalysis, debes validar el archivo según los siguientes criterios:
+         a) Verifica si el currentOrder contiene un servicio válido.
+         b) Si la categoría es Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular o Back Light, verifica si existen medidas seleccionadas.
+         c) Valida el archivo utilizando los criterios de validación proporcionados, permitiendo una tolerancia máxima del 70%.
+         d) Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras, solo verifica que haya un servicio seleccionado.
+       - Informa al cliente si el archivo es válido o no, proporcionando detalles sobre cualquier problema encontrado.
        - Los criterios de validación son los siguientes:
-        <criterios_validacion> ${criteria}</criterios_validacion>
-        Informacion de validacion: <file_validation_info> ${fileValidationInfo} </file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
+        <criterios_validacion>${criteria}</criterios_validacion>
+        Información de análisis del archivo: ${fileValidationInfo}
 
     6. Resumen y Confirmación:
        - Cuando tengas toda la información necesaria, presenta un resumen detallado del pedido.
        - El resumen debe incluir: servicio, medidas (si aplica), cantidad, terminaciones seleccionadas, y confirmación de archivo válido.
-       - Permite al cliente modificar cualquier aspecto antes de la confirmación final.
-       - Si el cliente confirma, responde con el comando JSON:
+- Permite al cliente modificar cualquier aspecto antes de la confirmación final.
+       - Si el cliente confirma y todos los aspectos del pedido están completos y válidos, responde con el comando JSON:
          {"command": "CONFIRM_ORDER"}
 
     7. Comunicación Clara:
@@ -1753,11 +1680,9 @@ class OpenAIService {
             - Las terminaciones están seleccionadas (si aplica).
          c) Para otros servicios:
             - La cantidad está especificada.
-         d) El archivo de diseño ha sido enviado y validado (fileValidation en currentOrder debe ser true).
+         d) El archivo de diseño ha sido enviado y validado correctamente.
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
-
-
 
      IMPORTANTE:
     - SIEMPRE utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
@@ -1782,8 +1707,6 @@ class OpenAIService {
     Responde al siguiente mensaje del cliente:`;
   }
 
-
-
   getAllServicesInfo(services) {
     const allServices = [];
     for (const category in services) {
@@ -1802,58 +1725,6 @@ class OpenAIService {
     }
     return allServices;
   }
-
-  async validateFileForService(fileAnalysis, service, measures, currentOrder) {
-    const validationCriteria = userContextManager.getFileValidationCriteria();
-    
-    const prompt = `Eres un experto en análisis de archivos de impresión. 
-    Analiza el siguiente archivo para el servicio "${service.name}" con las siguientes medidas: 
-    Ancho: ${measures.width}m, Alto: ${measures.height}m.
-
-    Información del archivo:
-    ${JSON.stringify(fileAnalysis)}
-
-    Criterios de validación:
-    ${validationCriteria}
-
-    Basándote en estos criterios y tu experiencia, determina si el archivo es válido para este servicio y medidas.
-    Proporciona una explicación detallada de tu análisis y recomendaciones si el archivo no cumple con los requisitos.
-    
-    Al final de tu análisis, incluye un comando JSON con el siguiente formato:
-    {"command": "VALIDATE_FILE", "isValid": true/false, "reason": "Explicación detallada"}
-    
-    Asegúrate de que el valor de "isValid" sea true si el archivo cumple con todos los criterios, y false en caso contrario.`;
-
-    try {
-      const response = await this.openai.chat.completions.create({
-        model: config.languageModel,
-        messages: [
-          { role: "system", content: prompt },
-          { role: "user", content: "Valida este archivo para el servicio y medidas especificados." }
-        ],
-        max_tokens: config.maxTokens,
-        temperature: 0.5,
-      });
-
-      const analysis = response.choices[0].message.content.trim();
-      const commandMatch = analysis.match(/\{.*\}/);
-      if (!commandMatch) {
-        throw new Error("No se pudo extraer el comando JSON del análisis");
-      }
-
-      const command = JSON.parse(commandMatch[0]);
-      return {
-        analysis: analysis.replace(commandMatch[0], '').trim(),
-        isValid: command.isValid,
-        reason: command.reason
-      };
-    } catch (error) {
-      logger.error("Error al validar el archivo con OpenAI:", error);
-      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
-    }
-  }
-
-
 
   async transcribeAudio(audioFilePath) {
     try {
