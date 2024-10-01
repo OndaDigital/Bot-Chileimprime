@@ -67,7 +67,7 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
-       - Si el cliente solicita la lista completa de servicios o el menú, responde con el comando JSON:
+       - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
        - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
