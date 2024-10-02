@@ -1,8 +1,8 @@
-# Usar una imagen base de Node.js
-FROM node:20
+# Usar una imagen base más ligera de Node.js
+FROM node:20-slim
 
 # Instalar las dependencias del sistema necesarias
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libcairo2-dev \
     libpango1.0-dev \
@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     libvips \
     python3 \
     make \
-    g++
+    g++ \
+ && rm -rf /var/lib/apt/lists/*
 
 # Establecer el directorio de trabajo en el contenedor
 WORKDIR /app
@@ -21,11 +22,12 @@ WORKDIR /app
 # Copiar los archivos de package.json y package-lock.json al contenedor
 COPY package*.json ./
 
-# Instalar las dependencias de Node.js
-RUN npm install
+# Instalar las dependencias de producción
+RUN npm install --production
 
-# Copiar todos los archivos y carpetas del proyecto al contenedor
-COPY . .
+# Copiar solo los archivos necesarios al contenedor
+COPY src/ ./src/
+COPY .env.example ./
 
 # Exponer el puerto en el que la aplicación se ejecuta
 EXPOSE 3000
