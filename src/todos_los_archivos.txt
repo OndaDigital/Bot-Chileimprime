@@ -255,6 +255,13 @@ class CommandProcessor {
 4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
 5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
 
+Información para la validación:
+- Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
+- Área del diseño proporcionado: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²
+- Resolución del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi
+- Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
+- Espacio de color: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+
 IMPORTANTE:
 - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
 {"command": "RESULT_ANALYSIS", "result": true/false}
@@ -262,7 +269,7 @@ IMPORTANTE:
   1. ### Criterios de Validación:
      - Lista los criterios utilizados para validar el archivo.
   2. ### Resultado de la Validación:
-     - Indica si el archivo es válido o no, y proporciona detalles.
+     - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el archivo no es valido, el cliente debe entender claramente que salio mal y como debe adaptar su diseño para que cumpla con los criterios de validacion.
   3. ### Siguiente Paso:
      - Indica al usuario cuál es el siguiente paso en el proceso.
 
@@ -808,12 +815,14 @@ class FlowManager {
     
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
-  
+    
         if (userContextManager.isOrderComplete(userId)) {
-          logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
+          logger.info(`Orden completa para ${userId}. Confirmando pedido.`);
+          // Enviar comando de confirmación
+          await commandProcessor.processCommand({ command: "CONFIRM_ORDER" }, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           return gotoFlow(this.getFlowByName('confirmedFlow'));
         }
-  
+    
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);
@@ -1051,9 +1060,10 @@ class OrderManager {
       }
 
       const measures = { width: validWidth.material, height: parseFloat(height) };
+      const areaServicio = measures.width * measures.height; // Calcular área del servicio
       const { total, area } = this.calculatePrice({ ...currentOrder, measures });
 
-      userContextManager.updateCurrentOrder(userId, { measures, total, area });
+      userContextManager.updateCurrentOrder(userId, { measures, areaServicio, total, area }); // Actualizar areaServicio
 
       return {
         action: "SET_MEASURES",
@@ -1320,7 +1330,8 @@ class UserContextManager {
       fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
-      price: 0
+      price: 0,
+      areaServicio: null, // Agregado nuevo campo
     };
   }
 
@@ -1413,8 +1424,10 @@ class UserContextManager {
 
   getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
-    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
-    return userContext.currentOrder;
+    const currentOrder = userContext.currentOrder;
+    currentOrder.requiresMeasures = () => this.isServiceRequiringMeasures(currentOrder.category);
+    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(currentOrder)}`);
+    return currentOrder;
   }
 
   resetContext(userId) {
@@ -1462,19 +1475,25 @@ class UserContextManager {
     const order = this.getCurrentOrder(userId);
     const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
-
+  
     if (!hasAllRequiredFields) return false;
-
+  
     const serviceInfo = this.getServiceInfo(order.service);
-    const needsMeasures = ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category);
-
-    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height)) {
+    const needsMeasures = this.isServiceRequiringMeasures(order.category);
+  
+    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height || !order.areaServicio)) {
       return false;
     }
-
+  
     // La validación del archivo ahora es manejada por el sistema de IA
     return true;
   }
+
+    // Método para determinar si el servicio requiere medidas
+    isServiceRequiringMeasures(serviceCategory) {
+      return ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory);
+    }
+  
   
   getChatContext(userId) {
     return this.getUserContext(userId).chatContext;
@@ -1485,6 +1504,8 @@ export default new UserContextManager();
 
 
 // services\fileValidationService.js
+
+// services/fileValidationService.js
 
 import fs from 'fs';
 import { promisify } from 'util';
@@ -1572,8 +1593,10 @@ class FileValidationService {
   async analyzePDF(buffer) {
     try {
       const data = await pdfParse(buffer);
-      const width = data.metadata?.width || 0;
-      const height = data.metadata?.height || 0;
+
+      // Asumir dimensiones estándar si no se pueden obtener
+      const width = 595; // A4 width in points
+      const height = 842; // A4 height in points
       const dpi = 72; // Asumimos 72 DPI para PDFs
 
       const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
@@ -1598,17 +1621,17 @@ class FileValidationService {
   calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
     const widthInches = widthPixels / dpi;
     const heightInches = heightPixels / dpi;
-    const physicalWidth = widthInches * 2.54; // Convertir a centímetros
-    const physicalHeight = heightInches * 2.54; // Convertir a centímetros
+    const physicalWidth = widthInches * 0.0254; // Convertir a metros
+    const physicalHeight = heightInches * 0.0254; // Convertir a metros
     return { 
       physicalWidth: Number(physicalWidth.toFixed(2)),
       physicalHeight: Number(physicalHeight.toFixed(2))
     };
   }
 
-  calculateDesignArea(widthCm, heightCm) {
-    const areaM2 = (widthCm / 100) * (heightCm / 100);
-    return Number(areaM2.toFixed(4));
+  calculateDesignArea(widthM, heightM) {
+    const areaM2 = widthM * heightM;
+    return Number(areaM2.toFixed(2));
   }
 
   formatFileSize(bytes) {
@@ -1621,6 +1644,7 @@ class FileValidationService {
 }
 
 export default new FileValidationService();
+
 
 
 // services\openaiService.js
@@ -1677,8 +1701,8 @@ class OpenAIService {
       Información detallada del análisis del archivo:
       📄 Formato: ${currentOrder.fileAnalysis.format}
       📏 Dimensiones en píxeles: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
-      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m (${(currentOrder.fileAnalysis.physicalWidth * 100).toFixed(2)}x${(currentOrder.fileAnalysis.physicalHeight * 100).toFixed(2)} cm)
-      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(4)} m²
+      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m
+      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(2)} m²
       🔍 Resolución: ${currentOrder.fileAnalysis.dpi} DPI
       🎨 Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
       📦 Tamaño del archivo: ${currentOrder.fileAnalysis.fileSize || 'No disponible'}

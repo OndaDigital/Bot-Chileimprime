@@ -130,27 +130,25 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
 
-    // Asegurarse de que el currentOrder está actualizado
+    // Verificar que el currentOrder está actualizado
     if (!currentOrder.service || (!currentOrder.measures && currentOrder.requiresMeasures())) {
       // Solicitar la información faltante al usuario
       await flowDynamic("Parece que falta información en tu pedido. Por favor, asegúrate de haber proporcionado el servicio y las medidas necesarias.");
       return;
     }
 
-    const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
+    // Generar la instrucción para la IA con mayor contexto y flexibilidad
+    const instruction = `El usuario acaba de subir un archivo. Ahora eres un experto en impresion de gran formato e ingeniero en color. Verifica el currentOrder y responde según las siguientes condiciones:
 
-1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
-
-2. Si hay un servicio seleccionado, verifica la categoría:
-   - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
-     a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
-     b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
-
-3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
-   - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
-
-4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
-5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
+1. Analiza el archivo proporcionado considerando una tolerancia del 70% en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
+2. Ten en cuenta que el DPI es importante, pero debe ajustarse según el tamaño del área:
+   - Para áreas pequeñas (menos de 2 m²), DPI recomendado: 150 dpi.
+   - Para áreas entre 2 m² y 20 m², DPI recomendado: entre 72 dpi y 120 dpi.
+   - Para áreas mayores a 20 m², DPI mínimo aceptable: 20 dpi.
+3. Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas (ejemplo: archivos mayores a 3GB), es aceptable reducir el DPI para adaptarse.
+4. Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del 70%.
+5. Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
+6. Si el archivo no es válido, proporciona una explicación detallada y consejos específicos para que el cliente pueda corregirlo.
 
 Información para la validación:
 - Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
@@ -159,20 +157,26 @@ Información para la validación:
 - Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
 - Espacio de color: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
 
+Criterios de Validación:
+${userContextManager.getFileValidationCriteria()}
+
 IMPORTANTE:
 - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
 {"command": "RESULT_ANALYSIS", "result": true/false}
-- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 4 secciones, separadas por encabezados "### ":
-  1. ### Criterios de Validación:
-     - Lista los criterios utilizados para validar el archivo.
+- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
+  1. ### Criterios de Validación Aplicados:
+     - Explica brevemente los criterios que aplicaste en este caso específico.
   2. ### Resultado de la Validación:
-     - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el archivo no es valido, el cliente debe entender claramente que salio mal y como debe adaptar su diseño para que cumpla con los criterios de validacion.
+     - Indica si el archivo es válido o no, y proporciona detalles.
   3. ### Siguiente Paso:
      - Indica al usuario cuál es el siguiente paso en el proceso.
 
-- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en 4 mensajes.
+- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en mensajes separados.
 
 Responde al usuario siguiendo estas indicaciones.`;
+
+    // Log para depuración
+    logger.info(`Enviando instrucción a la IA para validación de archivo para usuario ${userId}: ${instruction}`);
 
     const aiResponse = await openaiService.getChatCompletion(
       openaiService.getSystemPrompt(userContextManager.getGlobalServices(), currentOrder, userContextManager.getGlobalAdditionalInfo(), userContextManager.getChatContext(userId)),
@@ -182,6 +186,9 @@ Responde al usuario siguiendo estas indicaciones.`;
     // Actualizar el contexto de chat
     userContextManager.updateContext(userId, instruction, "system");
     userContextManager.updateContext(userId, aiResponse, "assistant");
+
+    // Log de la respuesta de la IA
+    logger.info(`Respuesta de la IA para validación de archivo para usuario ${userId}: ${aiResponse}`);
 
     // Procesar comandos en la respuesta de la IA
     const commands = this.processAIResponseCommandProcessor(aiResponse);

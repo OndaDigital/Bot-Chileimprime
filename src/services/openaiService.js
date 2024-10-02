@@ -44,6 +44,35 @@ class OpenAIService {
     const criteria = userContextManager.getFileValidationCriteria();
     console.log(contextStr);
 
+// Información detallada sobre la importancia del DPI según el área y la distancia de visualización
+const dpiGuidelines = `
+Ten en cuenta lo siguiente sobre la resolución (DPI) en función del área y la distancia de visualización, aplicando a productos específicos de impresión en Chile:
+
+- **Áreas pequeñas (menos de 1.5 m²)**:
+   - Se recomienda una resolución de 150-300 DPI para obtener alta calidad.
+   - Ideal para productos como *Tarjetas de presentación (1000 unidades)*, *Flyers 15×22 cms*, y *Mini Roller de escritorio papel sintético*, los cuales se observan de cerca (distancia menor a 1.5 metros).
+
+- **Áreas medianas (1.5 m² a 5 m²)**:
+   - La resolución puede oscilar entre 72 y 150 DPI.
+   - Adecuada para *Pendones Roller 90x200 cms*, *Palomas 2 caras 70x120 cms*, y *PVC 11 Oz mt2*, que se visualizan desde distancias intermedias (1.5 a 3 metros).
+
+- **Áreas grandes (5 m² a 10 m²)**:
+   - Se recomienda una resolución entre 35 y 72 DPI.
+   - Ideal para *Back Light Banner*, *Tela Mesh* y *PVC Blackout*, que se verán a distancias de 3 a 5 metros.
+
+- **Áreas muy grandes (más de 10 m²)**:
+   - Resoluciones bajas, entre 20 y 35 DPI, son aceptables debido a que estos gráficos se ven desde distancias mayores a 5 metros.
+   - Ejemplos: *Murales publicitarios, Back Light Textil*, o *Windows One Vision* que serán observados a grandes distancias.
+
+### Notas Adicionales:
+1. La distancia de visualización es un factor crítico para determinar el DPI. A mayor distancia, menor es la necesidad de alta resolución, ya que el ojo humano no distingue los detalles finos.
+2. Usar resoluciones demasiado altas en áreas grandes como *PVC Alta Definición* para grandes formatos incrementa significativamente el tamaño del archivo y el tiempo de impresión sin una mejora perceptible en la calidad visual.
+3. **Material específico**: Productos como *Adhesivo Empavonado*, *Vinilo Adhesivo Reflectante* y *Rotulación para fundido* requieren considerar el material y su capacidad de impresión, por lo que es recomendable mantener el DPI en el rango medio de 72-150 DPI para garantizar una buena nitidez.
+
+Estas guías te ayudarán a optimizar la calidad y la eficiencia en cada proyecto de impresión según el tipo de producto y su aplicación en el mercado chileno.
+`;
+
+
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {
       fileValidationInfo = `
@@ -151,7 +180,7 @@ class OpenAIService {
        - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
        - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
        - Los criterios de validación son los siguientes:
-        <criterios_validacion> ${criteria}</criterios_validacion>
+        <criterios_validacion> ${criteria} ${dpiGuidelines} </criterios_validacion>
         Informacion de validacion: <file_validation_info> ${fileValidationInfo} </file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
 
     10. Comunicación Clara:
