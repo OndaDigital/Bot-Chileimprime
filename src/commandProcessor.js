@@ -186,7 +186,7 @@ class CommandProcessor {
       <dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
       
     3. 🛠️ **Casos Especiales**:
-      - Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas (ejemplo: archivos mayores a *3GB*), es aceptable reducir el DPI para adaptarse.
+      - Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas, o archivos con mas de 10m2, es aceptable reducir el DPI hasta 30 o menos para adaptarse, tu eres el experto que decide esto.
       
     4. 🧐 **Evaluación de Adecuación**:
       - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *80%*.
