@@ -63,9 +63,10 @@ class OrderManager {
       }
 
       const measures = { width: validWidth.material, height: parseFloat(height) };
+      const areaServicio = measures.width * measures.height; // Calcular área del servicio
       const { total, area } = this.calculatePrice({ ...currentOrder, measures });
 
-      userContextManager.updateCurrentOrder(userId, { measures, total, area });
+      userContextManager.updateCurrentOrder(userId, { measures, areaServicio, total, area }); // Actualizar areaServicio
 
       return {
         action: "SET_MEASURES",

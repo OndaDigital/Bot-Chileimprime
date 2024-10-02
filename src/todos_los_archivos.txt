@@ -107,7 +107,7 @@ import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
 import sheetService from './services/sheetService.js'
-import { formatPrice } from './utils/helpers.js';
+import { formatPrice, sendSplitMessages } from './utils/helpers.js';
 
 class CommandProcessor {
   constructor() {}
@@ -126,6 +126,8 @@ class CommandProcessor {
           return this.handleSetQuantity(userId, command.quantity);
         case "SET_FINISHES":
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
+        case "RESULT_ANALYSIS":
+            return this.handleAnalysisResult(userId, command.result);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
         case "SERVICE_NOT_FOUND":
@@ -140,6 +142,19 @@ class CommandProcessor {
       }
     } catch (error) {
       logger.error(`Error al procesar comando: ${error.message}`);
+      return { currentOrderUpdated: false, error: error.message };
+    }
+  }
+
+  // Nuevo método para manejar RESULT_ANALYSIS
+  async handleAnalysisResult(userId, result) {
+    try {
+      const isValid = result === true || result === "true";
+      userContextManager.updateCurrentOrder(userId, { fileValidation: isValid });
+      logger.info(`Resultado del análisis actualizado para usuario ${userId}: ${isValid}`);
+      return { currentOrderUpdated: true };
+    } catch (error) {
+      logger.error(`Error al actualizar resultado del análisis para usuario ${userId}: ${error.message}`);
       return { currentOrderUpdated: false, error: error.message };
     }
   }
@@ -227,20 +242,33 @@ class CommandProcessor {
 
     const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
 
-    1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
+1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
 
-    2. Si hay un servicio seleccionado, verifica la categoría:
-       - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
-         a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
-         b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
+2. Si hay un servicio seleccionado, verifica la categoría:
+   - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
+     a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
+     b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
 
-    3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
-       - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
+3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
+   - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
 
-    4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
-    5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
+4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
+5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
 
-    Asegúrate de que tu respuesta sea clara, concisa y guíe al usuario sobre cómo proceder.`;
+IMPORTANTE:
+- Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
+{"command": "RESULT_ANALYSIS", "result": true/false}
+- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 4 secciones, separadas por encabezados "### ":
+  1. ### Criterios de Validación:
+     - Lista los criterios utilizados para validar el archivo.
+  2. ### Resultado de la Validación:
+     - Indica si el archivo es válido o no, y proporciona detalles.
+  3. ### Siguiente Paso:
+     - Indica al usuario cuál es el siguiente paso en el proceso.
+
+- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en 4 mensajes.
+
+Responde al usuario siguiendo estas indicaciones.`;
 
     const aiResponse = await openaiService.getChatCompletion(
       openaiService.getSystemPrompt(userContextManager.getGlobalServices(), currentOrder, userContextManager.getGlobalAdditionalInfo(), userContextManager.getChatContext(userId)),
@@ -251,7 +279,27 @@ class CommandProcessor {
     userContextManager.updateContext(userId, instruction, "system");
     userContextManager.updateContext(userId, aiResponse, "assistant");
 
-    await flowDynamic(aiResponse);
+    // Procesar comandos en la respuesta de la IA
+    const commands = this.processAIResponseCommandProcessor(aiResponse);
+    for (const command of commands) {
+      await this.processCommand(command, userId, ctx, { flowDynamic });
+    }
+
+    // Enviar los mensajes divididos al usuario
+    await sendSplitMessages(flowDynamic, aiResponse);
+  }
+
+  processAIResponseCommandProcessor(aiResponse) {
+    const commandRegex = /{[^}]+}/g;
+    const commands = aiResponse.match(commandRegex) || [];
+    return commands.map(cmd => {
+      try {
+        return JSON.parse(cmd);
+      } catch (error) {
+        logger.error(`Error al parsear comando JSON: ${error.message}`);
+        return null;
+      }
+    }).filter(cmd => cmd !== null);
   }
   
 
@@ -2413,6 +2461,22 @@ export function formatPrice(price) {
     const censoredMiddle = '*'.repeat(middleLength);
     return `${firstTwo}${censoredMiddle}${lastThree}`;
   }
+
+
+  // Nueva función para enviar mensajes divididos
+export async function sendSplitMessages(flowDynamic, aiResponse) {
+  // Filtrar el comando JSON inicial
+  const filteredResponse = aiResponse.replace(/^\s*\{.*?\}\s*/, '').trim();
+
+  // Dividir la respuesta en secciones basadas en los encabezados "### "
+  const sections = filteredResponse.split(/(?=### )/).map(s => s.trim()).filter(s => s);
+
+  for (const section of sections) {
+    await flowDynamic(section);
+    // Espera de 3 segundos antes de enviar el siguiente mensaje
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+}
 
 
 // utils\logger.js

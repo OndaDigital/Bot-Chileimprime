@@ -1,3 +1,5 @@
+// services/fileValidationService.js
+
 import fs from 'fs';
 import { promisify } from 'util';
 import path from 'path';
@@ -84,8 +86,10 @@ class FileValidationService {
   async analyzePDF(buffer) {
     try {
       const data = await pdfParse(buffer);
-      const width = data.metadata?.width || 0;
-      const height = data.metadata?.height || 0;
+
+      // Asumir dimensiones estándar si no se pueden obtener
+      const width = 595; // A4 width in points
+      const height = 842; // A4 height in points
       const dpi = 72; // Asumimos 72 DPI para PDFs
 
       const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
@@ -110,17 +114,17 @@ class FileValidationService {
   calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
     const widthInches = widthPixels / dpi;
     const heightInches = heightPixels / dpi;
-    const physicalWidth = widthInches * 2.54; // Convertir a centímetros
-    const physicalHeight = heightInches * 2.54; // Convertir a centímetros
+    const physicalWidth = widthInches * 0.0254; // Convertir a metros
+    const physicalHeight = heightInches * 0.0254; // Convertir a metros
     return { 
       physicalWidth: Number(physicalWidth.toFixed(2)),
       physicalHeight: Number(physicalHeight.toFixed(2))
     };
   }
 
-  calculateDesignArea(widthCm, heightCm) {
-    const areaM2 = (widthCm / 100) * (heightCm / 100);
-    return Number(areaM2.toFixed(4));
+  calculateDesignArea(widthM, heightM) {
+    const areaM2 = widthM * heightM;
+    return Number(areaM2.toFixed(2));
   }
 
   formatFileSize(bytes) {

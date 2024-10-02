@@ -39,7 +39,8 @@ class UserContextManager {
       fileValidation: null,
       availableWidths: [],
       availableFinishes: [],
-      price: 0
+      price: 0,
+      areaServicio: null, // Agregado nuevo campo
     };
   }
 
@@ -132,8 +133,10 @@ class UserContextManager {
 
   getCurrentOrder(userId) {
     const userContext = this.getUserContext(userId);
-    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
-    return userContext.currentOrder;
+    const currentOrder = userContext.currentOrder;
+    currentOrder.requiresMeasures = () => this.isServiceRequiringMeasures(currentOrder.category);
+    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(currentOrder)}`);
+    return currentOrder;
   }
 
   resetContext(userId) {
@@ -181,19 +184,25 @@ class UserContextManager {
     const order = this.getCurrentOrder(userId);
     const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
     const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
-
+  
     if (!hasAllRequiredFields) return false;
-
+  
     const serviceInfo = this.getServiceInfo(order.service);
-    const needsMeasures = ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category);
-
-    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height)) {
+    const needsMeasures = this.isServiceRequiringMeasures(order.category);
+  
+    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height || !order.areaServicio)) {
       return false;
     }
-
+  
     // La validación del archivo ahora es manejada por el sistema de IA
     return true;
   }
+
+    // Método para determinar si el servicio requiere medidas
+    isServiceRequiringMeasures(serviceCategory) {
+      return ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory);
+    }
+  
   
   getChatContext(userId) {
     return this.getUserContext(userId).chatContext;

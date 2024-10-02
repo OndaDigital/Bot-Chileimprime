@@ -264,12 +264,14 @@ class FlowManager {
     
         userContextManager.updateContext(userId, message, "user");
         userContextManager.updateContext(userId, aiResponse, "assistant");
-  
+    
         if (userContextManager.isOrderComplete(userId)) {
-          logger.info(`Orden completa para ${userId}. Redirigiendo a flujo de confirmación.`);
+          logger.info(`Orden completa para ${userId}. Confirmando pedido.`);
+          // Enviar comando de confirmación
+          await commandProcessor.processCommand({ command: "CONFIRM_ORDER" }, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           return gotoFlow(this.getFlowByName('confirmedFlow'));
         }
-  
+    
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);

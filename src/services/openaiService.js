@@ -50,8 +50,8 @@ class OpenAIService {
       Información detallada del análisis del archivo:
       📄 Formato: ${currentOrder.fileAnalysis.format}
       📏 Dimensiones en píxeles: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
-      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m (${(currentOrder.fileAnalysis.physicalWidth * 100).toFixed(2)}x${(currentOrder.fileAnalysis.physicalHeight * 100).toFixed(2)} cm)
-      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(4)} m²
+      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m
+      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(2)} m²
       🔍 Resolución: ${currentOrder.fileAnalysis.dpi} DPI
       🎨 Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
       📦 Tamaño del archivo: ${currentOrder.fileAnalysis.fileSize || 'No disponible'}

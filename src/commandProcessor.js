@@ -152,6 +152,13 @@ class CommandProcessor {
 4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
 5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
 
+Información para la validación:
+- Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
+- Área del diseño proporcionado: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²
+- Resolución del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi
+- Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
+- Espacio de color: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+
 IMPORTANTE:
 - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
 {"command": "RESULT_ANALYSIS", "result": true/false}
@@ -159,7 +166,7 @@ IMPORTANTE:
   1. ### Criterios de Validación:
      - Lista los criterios utilizados para validar el archivo.
   2. ### Resultado de la Validación:
-     - Indica si el archivo es válido o no, y proporciona detalles.
+     - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el archivo no es valido, el cliente debe entender claramente que salio mal y como debe adaptar su diseño para que cumpla con los criterios de validacion.
   3. ### Siguiente Paso:
      - Indica al usuario cuál es el siguiente paso en el proceso.
 
