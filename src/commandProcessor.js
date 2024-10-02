@@ -137,25 +137,52 @@ class CommandProcessor {
       return;
     }
 
+    // Información detallada sobre la importancia del DPI según el área y la distancia de visualización
+const dpiGuidelines = `
+Ten en cuenta lo siguiente sobre la resolución (DPI) en función del área del servicio ${currentOrder.areaServicio} y la distancia de visualización, aplicando a productos específicos de Chileimprime:
+
+- **Áreas pequeñas (menos de 1.0 m²)**:
+   - Se recomienda una resolución de 150-300 DPI para obtener alta calidad.
+   - Ideal para productos como *Tarjetas de presentación (1000 unidades)*, *Flyers 15×22 cms*, y *Mini Roller de escritorio papel sintético*, los cuales se observan de cerca (distancia menor a 1.5 metros).
+
+- **Áreas medianas (1.5 m² a 5 m²)**:
+   - La resolución puede oscilar entre 72 y 150 DPI.
+   - Adecuada para *Pendones Roller 90x200 cms*, *Palomas 2 caras 70x120 cms*, y *PVC 11 Oz mt2*, que se visualizan desde distancias intermedias (1.5 a 3 metros).
+
+- **Áreas grandes (5 m² a 10 m²)**:
+   - Se recomienda una resolución entre 35 y 72 DPI.
+   - Ideal para *Back Light Banner*, *Tela Mesh* y *PVC Blackout*, que se verán a distancias de 3 a 5 metros.
+
+- **Áreas muy grandes (más de 10 m²)**:
+   - Resoluciones bajas, entre 20 y 35 DPI, son aceptables debido a que estos gráficos se ven desde distancias mayores a 5 metros.
+   - Ejemplos: *Murales publicitarios, Back Light Textil*, o *Windows One Vision* que serán observados a grandes distancias.
+
+### Notas Adicionales:
+1. La distancia de visualización es un factor crítico para determinar el DPI correcto. A mayor distancia, menor es la necesidad de alta resolución, ya que el ojo humano no distingue los detalles finos.
+2. Usar resoluciones demasiado altas en áreas grandes como *PVC Alta Definición* para grandes formatos incrementa significativamente el tamaño del archivo y el tiempo de impresión sin una mejora perceptible en la calidad visual.
+3. **Material específico**: Productos como *Adhesivo Empavonado*, *Vinilo Adhesivo Reflectante* y *Rotulación para fundido* requieren considerar el material y su capacidad de impresión, por lo que es recomendable mantener el DPI en el rango medio de 72-150 DPI para garantizar una buena nitidez.
+
+Estas guías te ayudarán a optimizar la calidad y la eficiencia en cada proyecto de impresión según el tipo de producto y su aplicación en el mercado chileno.
+`;
+
     // Generar la instrucción para la IA con mayor contexto y flexibilidad
     const instruction = `El usuario acaba de subir un archivo. Ahora eres un experto en impresion de gran formato e ingeniero en color. Verifica el currentOrder y responde según las siguientes condiciones:
 
 1. Analiza el archivo proporcionado considerando una tolerancia del 70% en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
-2. Ten en cuenta que el DPI es importante, pero debe ajustarse según el tamaño del área:
-   - Para áreas pequeñas (menos de 2 m²), DPI recomendado: 150 dpi.
-   - Para áreas entre 2 m² y 20 m², DPI recomendado: entre 72 dpi y 120 dpi.
-   - Para áreas mayores a 20 m², DPI mínimo aceptable: 20 dpi.
+2. Ten en cuenta las siguientes directrices para el DPI:
+<dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
 3. Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas (ejemplo: archivos mayores a 3GB), es aceptable reducir el DPI para adaptarse.
-4. Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del 70%.
+4. Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del 80%.
 5. Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
 6. Si el archivo no es válido, proporciona una explicación detallada y consejos específicos para que el cliente pueda corregirlo.
 
 Información para la validación:
+- Servicio seleccionado: ${currentOrder.service}
 - Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
 - Área del diseño proporcionado: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²
 - Resolución del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi
 - Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
-- Espacio de color: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+- Espacio de color del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
 
 Criterios de Validación:
 ${userContextManager.getFileValidationCriteria()}
