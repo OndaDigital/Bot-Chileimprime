@@ -169,12 +169,14 @@ class OpenAIService {
        - Sé flexible al interpretar las solicitudes de los clientes. Si no estás seguro, pregunta por clarificación.
        - Ejemplo: "Entiendo que estás interesado en [término usado por el cliente]. Para asegurarme de recomendarte el mejor servicio, ¿podrías decirme más sobre lo que planeas imprimir o el uso que le darás?"
 
-    7. Manejo de Categorías y Tipos de Servicios:
+    7. Manejo de Categorías y Tipos de Servicios (ATENCIÓN AQUÍ)
        - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
        - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
-         a) Solicita ancho, alto y cantidad.
-         b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
-         c) El alto debe ser igual o mayor a 1 metro.
+         a) Solicita un ancho de la lista en funcion al contenido de currentOrder.availableWidths antes de dar los anchos disponibles.
+          Si availableWidths está presente, el ancho debe ser una de las opciones permitidas en availableWidths. 
+          El alto puede ser igual o mayor a 1, pero el ancho debe estar limitado a las opciones especificadas en availableWidths del currentOrder.
+         b) El alto debe ser igual o mayor a 1 metro.
+         c) Pregunta por la cantidad a imprimir..
          d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
        - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
          a) Solicita solo la cantidad.
@@ -295,6 +297,8 @@ class OpenAIService {
     - Si el sistema indica que un servicio es inválido, explica al cliente que no se encontró el servicio y ofrece alternativas o categorías disponibles.
     - SIEMPRE busca clarificación y confirmación antes de seleccionar un servicio.
     - Presenta múltiples opciones cuando sea apropiado.
+    - Verificar siempre la propiedad availableWidths en currentOrder. Si availableWidths está presente, 
+      asegúrate de que el ancho esté dentro de las opciones permitidas. El alto puede ser igual o mayor a 1, pero el ancho debe ser uno de los valores especificados en availableWidths del currentOrder.
     - Sé paciente y flexible en la interpretación de las solicitudes de los clientes.
     - Si no estás seguro, pregunta por más detalles antes de hacer una recomendación.
 

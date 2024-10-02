@@ -77,8 +77,8 @@ class FlowManager {
         if (!userContext.initialMessagesSent) {
           // Enviar imagen con la lista de servicios
           await flowDynamic([{ 
-            body: `Lista de Servicios`,
-            media: `https://chileimprime.cl/wp-content/uploads/2024/05/Gigantografias-chileimprime-600x600.webp` 
+            body: `Promo campañas politicas`,
+            media: `https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg` 
           }]);
           logger.info(`Imagen de lista de servicios enviada a ${userId}`);
 

@@ -70,7 +70,7 @@ class UserContextManager {
 
   limitContextSize(userId) {
     const userContext = this.getUserContext(userId);
-    if (userContext.chatContext.length > 10) {
+    if (userContext.chatContext.length > 30) {
       userContext.chatContext = userContext.chatContext.slice(-10);
     }
     const words = userContext.context.split(/\s+/);
