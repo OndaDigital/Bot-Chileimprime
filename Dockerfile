@@ -1,10 +1,19 @@
+# Usar una imagen base de Node.js
 FROM node:20
 
-# Instalar dependencias de sistema para módulos como `sharp`
+# Instalar las dependencias del sistema necesarias
 RUN apt-get update && apt-get install -y \
-  python3 \
-  build-essential \
-  libvips-dev
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    libvips-dev \
+    libvips \
+    python3 \
+    make \
+    g++
 
 # Establecer el directorio de trabajo en el contenedor
 WORKDIR /app
@@ -12,7 +21,7 @@ WORKDIR /app
 # Copiar los archivos de package.json y package-lock.json al contenedor
 COPY package*.json ./
 
-# Instalar las dependencias
+# Instalar las dependencias de Node.js
 RUN npm install
 
 # Copiar todos los archivos y carpetas del proyecto al contenedor
