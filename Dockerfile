@@ -1,5 +1,10 @@
-# Usar una imagen base de Node.js
 FROM node:20
+
+# Instalar dependencias de sistema para módulos como `sharp`
+RUN apt-get update && apt-get install -y \
+  python3 \
+  build-essential \
+  libvips-dev
 
 # Establecer el directorio de trabajo en el contenedor
 WORKDIR /app
