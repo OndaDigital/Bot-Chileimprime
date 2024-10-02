@@ -25,8 +25,6 @@ class CommandProcessor {
           return this.handleSetFinishes(userId, command.sellado, command.ojetillos, command.bolsillo);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
-        case "VALIDATE_FILE_FOR_SERVICE":
-          return this.handleValidateFileForService(userId);
         case "SERVICE_NOT_FOUND":
           return this.handleServiceNotFound(userId, command.service);
         case "MISSING_INFO":

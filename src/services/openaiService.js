@@ -147,8 +147,7 @@ class OpenAIService {
     9. Validación de Archivos:
        - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
          y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
-       - Para solicitar la validación, responde con el comando JSON:
-         {"command": "VALIDATE_FILE_FOR_SERVICE"}
+       - Para solicitar la validación, solo solicitale al cliente que envie el diseño en formato documento.
        - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
        - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
        - Los criterios de validación son los siguientes:
