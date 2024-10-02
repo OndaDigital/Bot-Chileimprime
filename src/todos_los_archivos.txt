@@ -107,6 +107,7 @@ import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
 import sheetService from './services/sheetService.js'
+import { formatPrice } from './utils/helpers.js';
 
 class CommandProcessor {
   constructor() {}
@@ -269,11 +270,32 @@ class CommandProcessor {
 
   formatServiceList(services) {
     let formattedList = "Aquí tienes la lista completa de servicios disponibles:\n\n";
-    
+
+    const categoryEmojis = {
+      'Telas PVC': '🖼️',
+      'Banderas': '🚩',
+      'Adhesivos': '🏷️',
+      'Adhesivo Vehicular': '🚗',
+      'Back Light': '💡',
+      'Otros': '📦',
+      'Imprenta': '🖨️',
+      'Péndon Roller': '🎞️',
+      'Palomas': '🐦',
+      'Figuras': '🔺',
+      'Extras': '➕'
+    };
+
     for (const [category, categoryServices] of Object.entries(services)) {
-      formattedList += `*${category}*:\n`;
+      const emojiIcon = categoryEmojis[category] || '';
+      formattedList += `${emojiIcon} *${category}:*\n`;
+
       categoryServices.forEach(service => {
-        formattedList += `- ${service.name}\n`;
+        const serviceName = service.name;
+        const priceFormatted = formatPrice(service.precio);
+        const priceBold = `*$${
+          priceFormatted
+        }*`; // Envuelve el precio con asteriscos para negrita
+        formattedList += `- ${serviceName}: ${priceBold}\n`;
       });
       formattedList += "\n";
     }
@@ -1727,6 +1749,29 @@ class OpenAIService {
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
 
+           18. **Formato de la Lista de Servicios**:
+      - Cuando envíes la lista completa de servicios al cliente, debes presentarla en el siguiente formato:
+        - Incluir un emoji antes del nombre de cada categoría.
+        - Mostrar el nombre de la categoría en negritas.
+        - Listar cada servicio bajo su categoría, incluyendo el precio formateado con puntos para los miles (por ejemplo, $4.000).
+        - **Ejemplo**:
+          Aquí tienes la lista completa de servicios disponibles:
+
+          🧵 *Telas PVC*:
+          - PVC 10 Oz mt2 - Promoción solo Local: *$Precio*
+          - PVC Alta Definición: *$Precio*
+          - PVC 11 Oz mt2: *$Precio*
+          - PVC 13 Oz mt2 - Promoción solo Local: *$Precio*
+          - PVC 13 Oz mt2: *$Precio*
+          - PVC Blackout: *$Precio*
+
+          🚩 *Banderas*:
+          - Tela de bandera Translúcido género: *$Precio*
+          - Tela de bandera Textil: *$Precio*
+          - Tela de bandera Sintética: *$Precio*
+
+          Y así con las demás categorías.
+
      IMPORTANTE:
     - SIEMPRE utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
     - Actúa como un experto humano en impresión, no como una IA.
@@ -2324,8 +2369,9 @@ export const errorHandler = async (error, ctx, { flowDynamic, endFlow }) => {
 // utils/helpers.js
 
 export function formatPrice(price) {
-    return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  }
+  const formattedPrice = price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return formattedPrice;
+}
   
   export function censorPhoneNumber(phoneNumber) {
     if (phoneNumber.length <= 5) {

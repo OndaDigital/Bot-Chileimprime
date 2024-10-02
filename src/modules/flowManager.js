@@ -40,6 +40,7 @@ class FlowManager {
       this.flows.catchAllFlow = this.createCatchAllFlow();
       this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
       this.flows.promoFlow = this.createPromoFlow();
+      this.flows.mediaFlow = this.createMediaFlow();
 
       Object.values(this.flows).forEach(flow => {
         if (flow && typeof flow.addAction === 'function') {
@@ -117,6 +118,33 @@ class FlowManager {
           } catch (error) {
             logger.error(`Error al procesar el archivo: ${error.message}`);
             await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
+          }
+        });
+    }
+
+    createMediaFlow() {
+      return addKeyword(EVENTS.MEDIA)
+        .addAction(async (ctx, { flowDynamic }) => {
+          const userId = ctx.from;
+          logger.info(`Imagen recibida de ${userId}`);
+  
+          const messages = [
+            '🖼️ *¡Hola!* Hemos recibido tu imagen, pero necesitamos que nos envíes tu diseño como *documento* para preservar la calidad.\n\nLas imágenes enviadas como foto en WhatsApp se comprimen y pierden calidad, lo que afecta el análisis y la impresión.\n\nPor favor, envía el mismo archivo como *documento* en uno de los siguientes formatos de alta calidad: *PDF, AI, PSD* o una imagen en alta resolución.\n\n*Criterios de Validación Resumidos:*\n\n- Resolución mínima: 72 dpi y máxima: 150 dpi.\n- Formato preferente: CMYK para evitar diferencias de color.\n- Tamaño real del diseño acorde al tamaño de impresión.',
+            
+            '📱 *Cómo enviar un documento en WhatsApp desde Android o iPhone:*\n\n1️⃣ Abre el chat de *Chileimprime*.\n2️⃣ Toca el ícono de *adjuntar* (📎).\n3️⃣ Selecciona *Documento*.\n4️⃣ Busca y selecciona tu archivo de diseño.\n5️⃣ Presiona *Enviar*.',
+            
+            '✨ *Esperamos tu archivo nuevamente como documento para iniciar el análisis.* ¡Gracias!'
+          ];
+  
+          try {
+            for (const message of messages) {
+              await flowDynamic(message);
+              // Espera de 3 segundos antes de enviar el siguiente mensaje
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+          } catch (error) {
+            logger.error(`Error al enviar mensajes secuenciales en mediaFlow para usuario ${userId}: ${error.message}`);
+            await flowDynamic('⚠️ *Ha ocurrido un error al enviar las instrucciones. Por favor, intenta nuevamente más tarde.*');
           }
         });
     }
