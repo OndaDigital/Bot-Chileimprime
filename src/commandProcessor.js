@@ -4,6 +4,7 @@ import orderManager from './modules/orderManager.js';
 import openaiService from './services/openaiService.js';
 import config from './config/config.js';
 import sheetService from './services/sheetService.js'
+import { formatPrice } from './utils/helpers.js';
 
 class CommandProcessor {
   constructor() {}
@@ -166,11 +167,32 @@ class CommandProcessor {
 
   formatServiceList(services) {
     let formattedList = "Aquí tienes la lista completa de servicios disponibles:\n\n";
-    
+
+    const categoryEmojis = {
+      'Telas PVC': '🖼️',
+      'Banderas': '🚩',
+      'Adhesivos': '🏷️',
+      'Adhesivo Vehicular': '🚗',
+      'Back Light': '💡',
+      'Otros': '📦',
+      'Imprenta': '🖨️',
+      'Péndon Roller': '🎞️',
+      'Palomas': '🐦',
+      'Figuras': '🔺',
+      'Extras': '➕'
+    };
+
     for (const [category, categoryServices] of Object.entries(services)) {
-      formattedList += `*${category}*:\n`;
+      const emojiIcon = categoryEmojis[category] || '';
+      formattedList += `${emojiIcon} *${category}:*\n`;
+
       categoryServices.forEach(service => {
-        formattedList += `- ${service.name}\n`;
+        const serviceName = service.name;
+        const priceFormatted = formatPrice(service.precio);
+        const priceBold = `*$${
+          priceFormatted
+        }*`; // Envuelve el precio con asteriscos para negrita
+        formattedList += `- ${serviceName}: ${priceBold}\n`;
       });
       formattedList += "\n";
     }

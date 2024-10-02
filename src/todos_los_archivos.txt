@@ -606,9 +606,9 @@ class FlowManager {
             
             await state.update({ lastTranscription: transcription });
             await flowDynamic(`*📝 Transcripción:*\n${transcription}`);
-  
+    
             this.enqueueMessage(ctx.from, transcription, async (accumulatedMessage) => {
-              await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage, true);
+              await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
             });
           } catch (error) {
             logger.error(`Error al procesar la nota de voz: ${error.message}`);

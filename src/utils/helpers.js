@@ -1,8 +1,9 @@
 // utils/helpers.js
 
 export function formatPrice(price) {
-    return price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  }
+  const formattedPrice = price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return formattedPrice;
+}
   
   export function censorPhoneNumber(phoneNumber) {
     if (phoneNumber.length <= 5) {
