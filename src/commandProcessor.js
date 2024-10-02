@@ -186,7 +186,9 @@ class CommandProcessor {
       <dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
       
     3. 🛠️ **Casos Especiales**:
-      - Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas, o archivos con mas de 10m2, es aceptable reducir el DPI hasta 30 o menos para adaptarse, tu eres el experto que decide esto.
+      - Considera que en casos especiales, como areas muy grandes que superan las limitaciones técnicas, como areas que superen los 5m2, es aceptable reducir la exigencia de DPI hasta 30 o menos para adaptar el diseño a las dimensiones fisicas,
+      tu eres el experto que decide el DPI correcto que debe tener el diseño en funcion al las guias de <dpiGuidelines>. Y ten cuidado de que para areas muy grandes de impresion, debes pedir que los archivos tambien tengan alta resolucion,
+      verifica la resolucion del archivo enviado por el cliente y en caso de que no cumpla con su area de impresion pero si con los DPI darle los pasos para corregir su archivo.
       
     4. 🧐 **Evaluación de Adecuación**:
       - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *80%*.
@@ -210,12 +212,13 @@ class CommandProcessor {
 
     ⚠️ **IMPORTANTE**:
     - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
-      \`{"command": "RESULT_ANALYSIS", "result": true/false}\`
+      {"command": "RESULT_ANALYSIS", "result": true/false}
     - Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
       1. ### 🔍 Criterios de Validación Aplicados:
         - Explica brevemente los criterios que aplicaste en este caso específico.
       2. ### ✅ Resultado de la Validación:
-        - Indica si el archivo es válido o no, y proporciona detalles.
+        - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el resultado es negativo,
+          explica y brinda detalladamente lo que debe hacer el cliente para que su archivo sea valido para su impresion en funcion al area de impresion.
       3. ### 👉 Siguiente Paso:
         - Indica al usuario cuál es el siguiente paso en el proceso.
 
