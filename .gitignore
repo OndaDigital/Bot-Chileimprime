@@ -1,10 +1,28 @@
+# Ignorar la carpeta dist
 dist/*
-node_modules
+
+# Ignorar node_modules
+node_modules/
+
+# Ignorar archivos de configuración sensibles
 .env
 
+# Ignorar sesiones y tokens
 *_sessions
 *tokens
 .wwebjs*
 
+# Ignorar archivos de logs y temporales
 *.log
 *qr.png
+tmp/
+logs/
+
+# Ignorar otros archivos innecesarios
+.baileys_store
+.cache
+.DS_Store
+
+# Ignorar archivos de documentación y otros
+*.gdoc
+*.pdf
