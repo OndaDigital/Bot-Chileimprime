@@ -243,7 +243,7 @@ Responde al usuario siguiendo estas indicaciones.`;
 
   async handleListAllServices(userId, actions) {
     const services = sheetService.getServices();
-    userContextManager.updateCurrentOrder(userId, { availableServices: services });
+    //userContextManager.updateCurrentOrder(userId, { availableServices: services }); eliminar o no?
     const formattedServices = this.formatServiceList(services);
     logger.info(`Lista de servicios preparada para usuario ${userId}`);
     

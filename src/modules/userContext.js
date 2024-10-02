@@ -6,6 +6,7 @@ class UserContextManager {
     this.userContexts = new Map();
   }
 
+  // Método existente para obtener el contexto del usuario
   getUserContext(userId) {
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
@@ -13,7 +14,8 @@ class UserContextManager {
         chatContext: [],
         currentOrder: this.getEmptyOrder(),
         services: sheetService.getServices(),
-        additionalInfo: sheetService.getAdditionalInfo()
+        additionalInfo: sheetService.getAdditionalInfo(),
+        initialMessagesSent: false // Añadido para rastrear si se enviaron los mensajes iniciales
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
@@ -40,8 +42,22 @@ class UserContextManager {
       availableWidths: [],
       availableFinishes: [],
       price: 0,
-      areaServicio: null, // Agregado nuevo campo
+      areaServicio: null,
     };
+  }
+
+   // Nuevo método para actualizar el estado general del usuario
+   updateUserState(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    Object.assign(userContext, updates);
+    logger.info(`Estado del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
+  }
+
+   // Nuevo método para actualizar el contexto del usuario
+   updateUserContext(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    this.userContexts.set(userId, { ...userContext, ...updates });
+    logger.info(`Contexto del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
   }
 
   updateContext(userId, message, role) {

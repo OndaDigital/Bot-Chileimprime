@@ -233,49 +233,80 @@ class CommandProcessor {
     const userId = ctx.from;
     const currentOrder = userContextManager.getCurrentOrder(userId);
 
-    // Asegurarse de que el currentOrder está actualizado
+    // Verificar que el currentOrder está actualizado
     if (!currentOrder.service || (!currentOrder.measures && currentOrder.requiresMeasures())) {
       // Solicitar la información faltante al usuario
       await flowDynamic("Parece que falta información en tu pedido. Por favor, asegúrate de haber proporcionado el servicio y las medidas necesarias.");
       return;
     }
 
-    const instruction = `El usuario acaba de subir un archivo. Verifica el currentOrder y responde según las siguientes condiciones:
+    // Información detallada sobre la importancia del DPI según el área y la distancia de visualización
+const dpiGuidelines = `
+Ten en cuenta lo siguiente sobre la resolución (DPI) en función del área del servicio ${currentOrder.areaServicio} y la distancia de visualización, aplicando a productos específicos de Chileimprime:
 
-1. Si el currentOrder no contiene un servicio válido, solicita al usuario que seleccione un servicio de impresión.
+- **Áreas pequeñas (menos de 1.0 m²)**:
+   - Se recomienda una resolución de 150-300 DPI para obtener alta calidad.
+   - Ideal para productos como *Tarjetas de presentación (1000 unidades)*, *Flyers 15×22 cms*, y *Mini Roller de escritorio papel sintético*, los cuales se observan de cerca (distancia menor a 1.5 metros).
 
-2. Si hay un servicio seleccionado, verifica la categoría:
-   - Para las categorías Tela PVC, Banderas, Adhesivos, Adhesivo Vehicular y Back Light:
-     a) Si no hay medidas seleccionadas, solicita al usuario que proporcione las medidas (ancho y alto).
-     b) Si hay medidas seleccionadas, procede a validar el archivo considerando una tolerancia máxima del 70%.
+- **Áreas medianas (1.5 m² a 5 m²)**:
+   - La resolución puede oscilar entre 72 y 150 DPI.
+   - Adecuada para *Pendones Roller 90x200 cms*, *Palomas 2 caras 70x120 cms*, y *PVC 11 Oz mt2*, que se visualizan desde distancias intermedias (1.5 a 3 metros).
 
-3. Para las categorías Otros, Imprenta, Péndon Roller, Palomas, Figuras y Extras:
-   - Si hay un servicio seleccionado, procede a validar el archivo considerando una tolerancia máxima del 70%.
+- **Áreas grandes (5 m² a 10 m²)**:
+   - Se recomienda una resolución entre 35 y 72 DPI.
+   - Ideal para *Back Light Banner*, *Tela Mesh* y *PVC Blackout*, que se verán a distancias de 3 a 5 metros.
 
-4. Si el archivo es válido, informa al usuario y sugiere el siguiente paso en el proceso de cotización.
-5. Si el archivo no es válido, explica detalladamente por qué, considerando la tolerancia del 70%, y sugiere cómo el usuario puede corregirlo.
+- **Áreas muy grandes (más de 10 m²)**:
+   - Resoluciones bajas, entre 20 y 35 DPI, son aceptables debido a que estos gráficos se ven desde distancias mayores a 5 metros.
+   - Ejemplos: *Murales publicitarios, Back Light Textil*, o *Windows One Vision* que serán observados a grandes distancias.
+
+### Notas Adicionales:
+1. La distancia de visualización es un factor crítico para determinar el DPI correcto. A mayor distancia, menor es la necesidad de alta resolución, ya que el ojo humano no distingue los detalles finos.
+2. Usar resoluciones demasiado altas en áreas grandes como *PVC Alta Definición* para grandes formatos incrementa significativamente el tamaño del archivo y el tiempo de impresión sin una mejora perceptible en la calidad visual.
+3. **Material específico**: Productos como *Adhesivo Empavonado*, *Vinilo Adhesivo Reflectante* y *Rotulación para fundido* requieren considerar el material y su capacidad de impresión, por lo que es recomendable mantener el DPI en el rango medio de 72-150 DPI para garantizar una buena nitidez.
+
+Estas guías te ayudarán a optimizar la calidad y la eficiencia en cada proyecto de impresión según el tipo de producto y su aplicación en el mercado chileno.
+`;
+
+    // Generar la instrucción para la IA con mayor contexto y flexibilidad
+    const instruction = `El usuario acaba de subir un archivo. Ahora eres un experto en impresion de gran formato e ingeniero en color. Verifica el currentOrder y responde según las siguientes condiciones:
+
+1. Analiza el archivo proporcionado considerando una tolerancia del 70% en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
+2. Ten en cuenta las siguientes directrices para el DPI:
+<dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
+3. Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas (ejemplo: archivos mayores a 3GB), es aceptable reducir el DPI para adaptarse.
+4. Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del 80%.
+5. Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
+6. Si el archivo no es válido, proporciona una explicación detallada y consejos específicos para que el cliente pueda corregirlo.
 
 Información para la validación:
+- Servicio seleccionado: ${currentOrder.service}
 - Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
 - Área del diseño proporcionado: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²
 - Resolución del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi
 - Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
-- Espacio de color: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+- Espacio de color del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+
+Criterios de Validación:
+${userContextManager.getFileValidationCriteria()}
 
 IMPORTANTE:
 - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
 {"command": "RESULT_ANALYSIS", "result": true/false}
-- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 4 secciones, separadas por encabezados "### ":
-  1. ### Criterios de Validación:
-     - Lista los criterios utilizados para validar el archivo.
+- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
+  1. ### Criterios de Validación Aplicados:
+     - Explica brevemente los criterios que aplicaste en este caso específico.
   2. ### Resultado de la Validación:
-     - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el archivo no es valido, el cliente debe entender claramente que salio mal y como debe adaptar su diseño para que cumpla con los criterios de validacion.
+     - Indica si el archivo es válido o no, y proporciona detalles.
   3. ### Siguiente Paso:
      - Indica al usuario cuál es el siguiente paso en el proceso.
 
-- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en 4 mensajes.
+- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en mensajes separados.
 
 Responde al usuario siguiendo estas indicaciones.`;
+
+    // Log para depuración
+    logger.info(`Enviando instrucción a la IA para validación de archivo para usuario ${userId}: ${instruction}`);
 
     const aiResponse = await openaiService.getChatCompletion(
       openaiService.getSystemPrompt(userContextManager.getGlobalServices(), currentOrder, userContextManager.getGlobalAdditionalInfo(), userContextManager.getChatContext(userId)),
@@ -285,6 +316,9 @@ Responde al usuario siguiendo estas indicaciones.`;
     // Actualizar el contexto de chat
     userContextManager.updateContext(userId, instruction, "system");
     userContextManager.updateContext(userId, aiResponse, "assistant");
+
+    // Log de la respuesta de la IA
+    logger.info(`Respuesta de la IA para validación de archivo para usuario ${userId}: ${aiResponse}`);
 
     // Procesar comandos en la respuesta de la IA
     const commands = this.processAIResponseCommandProcessor(aiResponse);
@@ -312,7 +346,7 @@ Responde al usuario siguiendo estas indicaciones.`;
 
   async handleListAllServices(userId, actions) {
     const services = sheetService.getServices();
-    userContextManager.updateCurrentOrder(userId, { availableServices: services });
+    //userContextManager.updateCurrentOrder(userId, { availableServices: services }); eliminar o no?
     const formattedServices = this.formatServiceList(services);
     logger.info(`Lista de servicios preparada para usuario ${userId}`);
     
@@ -583,6 +617,7 @@ class FlowManager {
 
   async initializeFlows() {
     try {
+      // Inicializar los flujos
       this.flows.principalFlow = this.createPrincipalFlow();
       this.flows.confirmedFlow = this.createConfirmedFlow();
       this.flows.restartBotFlow = this.createRestartBotFlow();
@@ -593,6 +628,7 @@ class FlowManager {
       this.flows.promoFlow = this.createPromoFlow();
       this.flows.mediaFlow = this.createMediaFlow();
 
+      // Agregar middlewares
       Object.values(this.flows).forEach(flow => {
         if (flow && typeof flow.addAction === 'function') {
           flow.addAction(inactivityMiddleware(this));
@@ -615,10 +651,41 @@ class FlowManager {
     return this.flows[name];
   }
 
+  // Dentro de la clase FlowManager
   createPrincipalFlow() {
     return addKeyword(EVENTS.WELCOME)
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-        const userId = ctx.from;
+        const userId = ctx.from; // Mover la declaración aquí
+        const userContext = userContextManager.getUserContext(userId);
+
+        // Verificar si los mensajes iniciales ya fueron enviados
+        if (!userContext.initialMessagesSent) {
+          // Enviar imagen con la lista de servicios
+          await flowDynamic([{ 
+            body: `Lista de Servicios`,
+            media: `https://chileimprime.cl/wp-content/uploads/2024/05/Gigantografias-chileimprime-600x600.webp` 
+          }]);
+          logger.info(`Imagen de lista de servicios enviada a ${userId}`);
+
+          // Esperar 5 segundos
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Enviar la lista de servicios en texto utilizando handleListAllServices
+          const servicesList = await commandProcessor.handleListAllServices(userId);
+          if (servicesList && servicesList.data) {
+            await flowDynamic(servicesList.data);
+            logger.info(`Lista de servicios en texto enviada a ${userId}`);
+          }
+
+          // Esperar 5 segundos
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Actualizar el estado de mensajes iniciales enviados
+          userContextManager.updateUserState(userId, { initialMessagesSent: true });
+          logger.info(`Estado initialMessagesSent actualizado a true para usuario ${userId}`);
+        }
+
+        // Continuar con el manejo normal del mensaje
         this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
           await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
         });
@@ -1297,6 +1364,7 @@ class UserContextManager {
     this.userContexts = new Map();
   }
 
+  // Método existente para obtener el contexto del usuario
   getUserContext(userId) {
     if (!this.userContexts.has(userId)) {
       this.userContexts.set(userId, {
@@ -1304,7 +1372,8 @@ class UserContextManager {
         chatContext: [],
         currentOrder: this.getEmptyOrder(),
         services: sheetService.getServices(),
-        additionalInfo: sheetService.getAdditionalInfo()
+        additionalInfo: sheetService.getAdditionalInfo(),
+        initialMessagesSent: false // Añadido para rastrear si se enviaron los mensajes iniciales
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
@@ -1331,8 +1400,22 @@ class UserContextManager {
       availableWidths: [],
       availableFinishes: [],
       price: 0,
-      areaServicio: null, // Agregado nuevo campo
+      areaServicio: null,
     };
+  }
+
+   // Nuevo método para actualizar el estado general del usuario
+   updateUserState(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    Object.assign(userContext, updates);
+    logger.info(`Estado del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
+  }
+
+   // Nuevo método para actualizar el contexto del usuario
+   updateUserContext(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    this.userContexts.set(userId, { ...userContext, ...updates });
+    logger.info(`Contexto del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
   }
 
   updateContext(userId, message, role) {
@@ -1717,7 +1800,20 @@ class OpenAIService {
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
-       - Si es el primer mensaje, saluda al cliente y ofrece asistencia.
+       - SOLO Si es el primer mensaje, saluda al cliente de la siguiente forma:
+          👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
+
+          También puedes realizar las siguientes acciones:
+          - 🕒 Consultar horarios de atención
+          - 🎉 Conocer nuestras promociones actuales
+          - 🖨️ Resolver dudas sobre procesos de impresión
+          - 📄 Consultar especificaciones de archivos o parámetros técnicos
+          - 🎙️ Analizar archivos en tiempo real para evaluar validez. 
+
+          Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
+
+          Para reiniciar el bot en cualquier momento, simplemente escribe *bot*.
+
        - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
@@ -1729,34 +1825,79 @@ class OpenAIService {
        - Si el servicio mencionado no es válido, sugiere servicios similares o muestra las categorías disponibles.
 
     3. Manejo de Términos Coloquiales y Generales:
-       - Reconoce términos coloquiales comunes como "pendones", "lienzos", "banners", etc.
-       - Cuando se use un término general, presenta TODAS las opciones relevantes. Por ejemplo:
-         * Si el cliente dice "Quiero un pendon", responde: "Entiendo que estás interesado en pendones. Tenemos varias opciones que podrían interesarte:
-           1. Telas PVC (ideal para pendones de gran tamaño)
-           2. Pendon Roller
-           ¿Cuál de estas opciones te interesa más o prefieres que te explique la diferencia entre ellas?"
+       - Reconoce términos coloquiales comunes de Chile en la impresión como "pendones" que hacen referencia a Telas PVC, o "lienzos" que se hace referencia a Tela de Banderas, etc.
+       - Cuando se use un término general, presenta TODAS las opciones relevantes.
+       - Luego de aclarar el servicio coloquial y general. debes confirmar el servicio exacto del cliente, para el comando {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"} al comienzo del chatt justo antes de tu respuesta.
 
-    4. Confirmación de Selección:
-       - Antes de seleccionar definitivamente un servicio, SIEMPRE pide confirmación al cliente.
-       - El nombre que envies en el comando de confirmación debe ser exacto al que se encuentra en <servicios_disponibles>.
-       - **IMPORTANTE:** Cuando el cliente confirme que desea el servicio, debes:
-         - Enviar el comando JSON antes de cualquier otro texto:
-           {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
-         - Luego, proporcionar una respuesta amable confirmando la selección y solicitando la información necesaria para continuar.
-       - Ejemplo:
-         Cliente: "Sí"
-         Asistente:
-         {"command": "SELECT_SERVICE", "service": "PVC Alta Definición"}
-         "Perfecto, he seleccionado el servicio 'PVC Alta Definición'. Ahora, necesito que me proporciones algunas especificaciones para continuar con tu cotización."
+    4. Confirmación de Selección (ATENCION AQUÍ)
+      - Antes de seleccionar definitivamente un servicio, SIEMPRE pide confirmación al cliente.
+      - El nombre que envies en el comando de confirmación debe ser exacto al que se encuentra en <servicios_disponibles>.
+      - **IMPORTANTE:** Cuando el cliente confirme que desea el servicio, debes:
+        - Enviar el comando JSON antes de cualquier otro texto:
+
+          {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
+
+        - Luego, proporcionar una respuesta amable confirmando la selección y solicitando la información necesaria para continuar.
+      - Ejemplos:
+        ---
+        **Ejemplo 1:**
+        
+        Cliente: "Sí"
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "PVC Alta Definición"}
+
+        "✅ Perfecto, he seleccionado el servicio *PVC Alta Definición*.
+        
+        📋 Ahora, necesito que me proporciones algunas especificaciones para continuar con tu cotización."
+
+        ---
+        **Ejemplo 2:**
+        
+        Cliente: "Me gustaría el 1 el *Vinilo Adhesivo Transparente*."
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "Vinilo Adhesivo Transparente"}
+
+        "✅ Perfecto, he seleccionado el servicio *Vinilo Adhesivo Transparente*.
+        
+        📋 Ahora, por favor, indícame las especificaciones necesarias para continuar con tu cotización."
+
+
+        **Ejemplo 3:**
+        
+        Cliente: "Sí, quiero el servicio de *Back Light Banner*."
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "Back Light Banner"}
+
+        "✅ He seleccionado el servicio *Back Light Banner*.
+        
+        📋 Para avanzar con tu cotización, por favor proporciona las especificaciones requeridas."
+
+        **Ejemplo 4:**
+        
+        Cliente: "El 1"
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "PVC 13 Oz mt2 - Promoción solo Local"}
+
+        "✅ He seleccionado el servicio *PVC 13 Oz mt2 - Promoción solo Local*.
+        
+        📋 Para avanzar con tu cotización, por favor proporciona las especificaciones requeridas."
+
 
     5. Manejo de Nombres Parciales o Similares:
-       - Si el cliente proporciona un nombre parcial o similar a un servicio, busca y presenta las opciones más cercanas.
-       - Ejemplo: Si el cliente dice "Quiero Tela PVC", responde: "Tenemos varios servicios relacionados con Tela PVC. Aquí están las opciones:
-         1. PVC 10 Oz mt2 - Promoción solo Local
-         2. PVC Alta Definición
-         3. PVC 11 Oz mt2
-         4. PVC 13 Oz mt2
-         ¿Cuál de estos te interesa más?"
+       - Si el cliente proporciona un nombre parcial o similar a un servicio, busca y presenta las opciones más cercanas a <servicios_disponibles>.
+       - Ejemplo: Si el cliente dice "Quiero un pendon", responde: 📌 Tenemos varios servicios relacionados con pendones. Aquí están las opciones:
+
+          1️⃣ PVC 10 Oz mt2 - Promoción solo Local
+          2️⃣ PVC Alta Definición
+          3️⃣ PVC 11 Oz mt2
+          4️⃣ PVC 13 Oz mt2
+          5. Otras opciones que encuentes similares a PVCs segun la lista de servicios en <servicios_disponibles>. Recuerda que siempre debes entregar los nombres exactos.
+
+          👉 ¿Cuál de estos te interesa más?
 
     6. Flexibilidad en la Interpretación:
        - Sé flexible al interpretar las solicitudes de los clientes. Si no estás seguro, pregunta por clarificación.
@@ -1802,13 +1943,16 @@ class OpenAIService {
        - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
        - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
        - Los criterios de validación son los siguientes:
-        <criterios_validacion> ${criteria}</criterios_validacion>
+        <criterios_validacion> ${criteria} </criterios_validacion>
         Informacion de validacion: <file_validation_info> ${fileValidationInfo} </file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
 
     10. Comunicación Clara:
-       - Usa un tono amigable pero profesional.
-       - Estructura tus respuestas en párrafos cortos para mejor legibilidad.
-       - Utiliza emojis ocasionalmente para dar un tono más amigable.
+      - Usa un tono amigable pero profesional con emojis y respuestas bien formateadas para whatsapp.
+      - Estructura siempre tus respuestas en párrafos cortos y utiliza saltos de línea para mejorar la legibilidad.
+      - Destaca la información importante en negritas. Las negritas en Whatsapp son con solo un asterisco por lado.
+      - Emplea siempre que puedas emojis para dar un tono más amigable y cercano.
+      - Explica los conceptos técnicos de forma sencilla y entendible, ya que los clientes tienen problemas para entender si su diseño es apto o no, se confunden con los DPI y la resolucion, etc.
+      - Asegúrate de que tus mensajes sean fáciles de entender, claros y no demasiado extensos, pero que contengan toda la información necesaria. De necesitar contener mas informacion ocupa saltos de lineas.
 
     11. Manejo de Errores y Casos Especiales:
       - Si no puedes encontrar información sobre un servicio mencionado por el cliente, responde con:

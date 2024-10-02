@@ -32,6 +32,7 @@ class FlowManager {
 
   async initializeFlows() {
     try {
+      // Inicializar los flujos
       this.flows.principalFlow = this.createPrincipalFlow();
       this.flows.confirmedFlow = this.createConfirmedFlow();
       this.flows.restartBotFlow = this.createRestartBotFlow();
@@ -42,6 +43,7 @@ class FlowManager {
       this.flows.promoFlow = this.createPromoFlow();
       this.flows.mediaFlow = this.createMediaFlow();
 
+      // Agregar middlewares
       Object.values(this.flows).forEach(flow => {
         if (flow && typeof flow.addAction === 'function') {
           flow.addAction(inactivityMiddleware(this));
@@ -64,10 +66,41 @@ class FlowManager {
     return this.flows[name];
   }
 
+  // Dentro de la clase FlowManager
   createPrincipalFlow() {
     return addKeyword(EVENTS.WELCOME)
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-        const userId = ctx.from;
+        const userId = ctx.from; // Mover la declaración aquí
+        const userContext = userContextManager.getUserContext(userId);
+
+        // Verificar si los mensajes iniciales ya fueron enviados
+        if (!userContext.initialMessagesSent) {
+          // Enviar imagen con la lista de servicios
+          await flowDynamic([{ 
+            body: `Lista de Servicios`,
+            media: `https://chileimprime.cl/wp-content/uploads/2024/05/Gigantografias-chileimprime-600x600.webp` 
+          }]);
+          logger.info(`Imagen de lista de servicios enviada a ${userId}`);
+
+          // Esperar 5 segundos
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Enviar la lista de servicios en texto utilizando handleListAllServices
+          const servicesList = await commandProcessor.handleListAllServices(userId);
+          if (servicesList && servicesList.data) {
+            await flowDynamic(servicesList.data);
+            logger.info(`Lista de servicios en texto enviada a ${userId}`);
+          }
+
+          // Esperar 5 segundos
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Actualizar el estado de mensajes iniciales enviados
+          userContextManager.updateUserState(userId, { initialMessagesSent: true });
+          logger.info(`Estado initialMessagesSent actualizado a true para usuario ${userId}`);
+        }
+
+        // Continuar con el manejo normal del mensaje
         this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
           await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
         });
