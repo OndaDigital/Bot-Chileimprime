@@ -123,7 +123,7 @@ class FlowManager {
         .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
           const userId = ctx.from;
           logger.info(`Intento de reinicio de bot por usuario ${userId}`);
-          this.resetConversation(userId);
+          this.resetConversation(userId, true); // Reiniciar initialMessagesSent
           logger.info(`Bot reiniciado para usuario ${userId}`);
           await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
           return gotoFlow(this.flows.principalFlow);
@@ -365,12 +365,12 @@ class FlowManager {
       return false;
     }
   
-    resetConversation(userId) {
-      userContextManager.resetContext(userId);
+    resetConversation(userId, resetInitialMessages = false) {
+      userContextManager.resetContext(userId, resetInitialMessages);
       orderManager.resetOrderConfirmation(userId);
       this.blacklist.delete(userId);
       this.clearIdleTimer(userId);
-      logger.info(`Conversación reiniciada para usuario ${userId}`);
+      logger.info(`Conversación reiniciada para usuario ${userId}, resetInitialMessages: ${resetInitialMessages}`);
     }
   
     startIdleTimer(ctx, flowDynamic, gotoFlow) {

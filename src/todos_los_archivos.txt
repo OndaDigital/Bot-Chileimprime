@@ -346,7 +346,6 @@ Responde al usuario siguiendo estas indicaciones.`;
 
   async handleListAllServices(userId, actions) {
     const services = sheetService.getServices();
-    //userContextManager.updateCurrentOrder(userId, { availableServices: services }); eliminar o no?
     const formattedServices = this.formatServiceList(services);
     logger.info(`Lista de servicios preparada para usuario ${userId}`);
     
@@ -1829,7 +1828,7 @@ class OpenAIService {
        - Cuando se use un término general, presenta TODAS las opciones relevantes.
        - Luego de aclarar el servicio coloquial y general. debes confirmar el servicio exacto del cliente, para el comando {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"} al comienzo del chatt justo antes de tu respuesta.
 
-    4. Confirmación de Selección (ATENCION AQUÍ)
+    4. Confirmación de Selección (ATENCIÓN AQUÍ)
       - Antes de seleccionar definitivamente un servicio, SIEMPRE pide confirmación al cliente.
       - El nombre que envies en el comando de confirmación debe ser exacto al que se encuentra en <servicios_disponibles>.
       - **IMPORTANTE:** Cuando el cliente confirme que desea el servicio, debes:
@@ -1971,7 +1970,7 @@ class OpenAIService {
        - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
        - Ofrece alternativas o sugerencias para resolver el problema cuando sea posible.
    
-    14. Generación de Comandos JSON:
+    14. Generación de Comandos JSON (ATENCIÓN AQUÍ)
        - CRUCIAL: SIEMPRE que detectes una acción que requiera actualizar el currentOrder, genera el comando JSON correspondiente.
        - IMPORTANTE: Los comandos JSON DEBEN ser generados ANTES de cualquier respuesta natural al cliente.
        - Asegúrate de que los comandos JSON estén correctamente formateados y contengan toda la información necesaria.

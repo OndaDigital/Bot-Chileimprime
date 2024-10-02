@@ -155,9 +155,18 @@ class UserContextManager {
     return currentOrder;
   }
 
-  resetContext(userId) {
-    this.userContexts.delete(userId);
-    logger.info(`Contexto reiniciado para usuario ${userId}`);
+  resetContext(userId, resetInitialMessages = false) {
+    const userContext = this.getUserContext(userId);
+    const initialMessagesSent = resetInitialMessages ? false : userContext.initialMessagesSent;
+    this.userContexts.set(userId, {
+      context: "",
+      chatContext: [],
+      currentOrder: this.getEmptyOrder(),
+      services: sheetService.getServices(),
+      additionalInfo: sheetService.getAdditionalInfo(),
+      initialMessagesSent: initialMessagesSent
+    });
+    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}`);
   }
 
   getGlobalServices() {
