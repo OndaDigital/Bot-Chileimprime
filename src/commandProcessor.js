@@ -158,11 +158,9 @@ IMPORTANTE:
 - Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 4 secciones, separadas por encabezados "### ":
   1. ### Criterios de Validación:
      - Lista los criterios utilizados para validar el archivo.
-  2. ### Información del Archivo:
-     - Detalles del archivo proporcionado por el usuario.
-  3. ### Resultado de la Validación:
+  2. ### Resultado de la Validación:
      - Indica si el archivo es válido o no, y proporciona detalles.
-  4. ### Siguiente Paso:
+  3. ### Siguiente Paso:
      - Indica al usuario cuál es el siguiente paso en el proceso.
 
 - Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en 4 mensajes.
