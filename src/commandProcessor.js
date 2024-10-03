@@ -27,12 +27,6 @@ class CommandProcessor {
             return this.handleAnalysisResult(userId, command.result);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
-        case "SERVICE_NOT_FOUND":
-          return this.handleServiceNotFound(userId, command.service);
-        case "MISSING_INFO":
-          return this.handleMissingInfo(userId, command.missingField);
-        case "ERROR":
-          return this.handleGeneralError(userId, command.message);
         default:
           logger.warn(`Comando desconocido recibido: ${command.command}`);
           return { currentOrderUpdated: false };
@@ -100,13 +94,14 @@ class CommandProcessor {
       return;
     }
  
+    logger.info(`Iniciando análisis de archivo para usuario ${userId}`);
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
     response += `📄 Formato: *${fileAnalysis.format}*\n`;
     response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
    
-    const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
-    const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
-    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
+    const widthM = fileAnalysis.physicalWidth.toFixed(2);
+    const heightM = fileAnalysis.physicalHeight.toFixed(2);
+    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${(widthM*100).toFixed(2)}x${(heightM*100).toFixed(2)} cm)\n`;
    
     response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
     response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
@@ -119,6 +114,7 @@ class CommandProcessor {
       response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
     }
  
+    logger.info(`Análisis de archivo completado para usuario ${userId}: ${JSON.stringify(fileAnalysis)}`);
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
 
@@ -344,23 +340,6 @@ class CommandProcessor {
     }
   }
 
-  async handleServiceNotFound(userId, serviceName) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: `Servicio no encontrado: ${serviceName}` });
-    logger.warn(`Servicio no encontrado para usuario ${userId}: ${serviceName}`);
-    return { currentOrderUpdated: true };
-  }
-
-  async handleMissingInfo(userId, missingField) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: `Falta información: ${missingField}` });
-    logger.warn(`Información faltante para usuario ${userId}: ${missingField}`);
-    return { currentOrderUpdated: true };
-  }
-
-  async handleGeneralError(userId, errorMessage) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: errorMessage });
-    logger.error(`Error general para usuario ${userId}: ${errorMessage}`);
-    return { currentOrderUpdated: true };
-  }
 
   
 }

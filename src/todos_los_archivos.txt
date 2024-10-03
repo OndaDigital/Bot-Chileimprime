@@ -130,12 +130,6 @@ class CommandProcessor {
             return this.handleAnalysisResult(userId, command.result);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
-        case "SERVICE_NOT_FOUND":
-          return this.handleServiceNotFound(userId, command.service);
-        case "MISSING_INFO":
-          return this.handleMissingInfo(userId, command.missingField);
-        case "ERROR":
-          return this.handleGeneralError(userId, command.message);
         default:
           logger.warn(`Comando desconocido recibido: ${command.command}`);
           return { currentOrderUpdated: false };
@@ -203,13 +197,14 @@ class CommandProcessor {
       return;
     }
  
+    logger.info(`Iniciando análisis de archivo para usuario ${userId}`);
     let response = "He analizado tu archivo. Aquí están los resultados:\n\n";
     response += `📄 Formato: *${fileAnalysis.format}*\n`;
     response += `📏 Dimensiones en píxeles: *${fileAnalysis.width}x${fileAnalysis.height}*\n`;
    
-    const widthM = (fileAnalysis.physicalWidth / 100).toFixed(2);
-    const heightM = (fileAnalysis.physicalHeight / 100).toFixed(2);
-    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${fileAnalysis.physicalWidth.toFixed(2)}x${fileAnalysis.physicalHeight.toFixed(2)} cm)\n`;
+    const widthM = fileAnalysis.physicalWidth.toFixed(2);
+    const heightM = fileAnalysis.physicalHeight.toFixed(2);
+    response += `📐 Dimensiones físicas: *${widthM}x${heightM} m* (${(widthM*100).toFixed(2)}x${(heightM*100).toFixed(2)} cm)\n`;
    
     response += `📊 Área del diseño: *${fileAnalysis.area} m²*\n`;
     response += `🔍 Resolución: *${fileAnalysis.dpi} DPI*\n`;
@@ -222,6 +217,7 @@ class CommandProcessor {
       response += `📦 Tamaño del archivo: *${fileAnalysis.fileSize}*\n`;
     }
  
+    logger.info(`Análisis de archivo completado para usuario ${userId}: ${JSON.stringify(fileAnalysis)}`);
     await flowDynamic(response);
     userContextManager.updateFileAnalysisResponded(userId, true);
 
@@ -241,69 +237,96 @@ class CommandProcessor {
     }
 
     // Información detallada sobre la importancia del DPI según el área y la distancia de visualización
-const dpiGuidelines = `
-Ten en cuenta lo siguiente sobre la resolución (DPI) en función del área del servicio ${currentOrder.areaServicio} y la distancia de visualización, aplicando a productos específicos de Chileimprime:
+    // Información detallada sobre la importancia del DPI según el área y la distancia de visualización
+    const dpiGuidelines = `
+    📏 **Resolución (DPI) según el Área y Distancia de Visualización** 📐
 
-- **Áreas pequeñas (menos de 1.0 m²)**:
-   - Se recomienda una resolución de 150-300 DPI para obtener alta calidad.
-   - Ideal para productos como *Tarjetas de presentación (1000 unidades)*, *Flyers 15×22 cms*, y *Mini Roller de escritorio papel sintético*, los cuales se observan de cerca (distancia menor a 1.5 metros).
+    Ten en cuenta lo siguiente sobre la resolución (DPI) en función del área del servicio *${currentOrder.areaServicio} m²* y la distancia de visualización, aplicando a productos específicos de *Chileimprime*:
 
-- **Áreas medianas (1.5 m² a 5 m²)**:
-   - La resolución puede oscilar entre 72 y 150 DPI.
-   - Adecuada para *Pendones Roller 90x200 cms*, *Palomas 2 caras 70x120 cms*, y *PVC 11 Oz mt2*, que se visualizan desde distancias intermedias (1.5 a 3 metros).
+    - **Áreas pequeñas (menos de 1.0 m²)** 🖼️:
+      - Se recomienda una resolución de *150-300 DPI* para obtener alta calidad.
+      - Ideal para productos como *Tarjetas de presentación (1000 unidades)*, *Flyers 15×22 cms*, y *Mini Roller de escritorio papel sintético*, los cuales se observan de cerca (distancia menor a *1.5 metros*).
 
-- **Áreas grandes (5 m² a 10 m²)**:
-   - Se recomienda una resolución entre 35 y 72 DPI.
-   - Ideal para *Back Light Banner*, *Tela Mesh* y *PVC Blackout*, que se verán a distancias de 3 a 5 metros.
+    - **Áreas medianas (1.5 m² a 5 m²)** 📊:
+      - La resolución puede oscilar entre *72 y 150 DPI*.
+      - Adecuada para *Pendones Roller 90x200 cms*, *Palomas 2 caras 70x120 cms*, y *PVC 11 Oz mt²*, que se visualizan desde distancias intermedias (*1.5 a 3 metros*).
 
-- **Áreas muy grandes (más de 10 m²)**:
-   - Resoluciones bajas, entre 20 y 35 DPI, son aceptables debido a que estos gráficos se ven desde distancias mayores a 5 metros.
-   - Ejemplos: *Murales publicitarios, Back Light Textil*, o *Windows One Vision* que serán observados a grandes distancias.
+    - **Áreas grandes (5 m² a 10 m²)** 📢:
+      - Se recomienda una resolución entre *35 y 72 DPI*.
+      - Ideal para *Back Light Banner*, *Tela Mesh* y *PVC Blackout*, que se verán a distancias de *3 a 5 metros*.
 
-### Notas Adicionales:
-1. La distancia de visualización es un factor crítico para determinar el DPI correcto. A mayor distancia, menor es la necesidad de alta resolución, ya que el ojo humano no distingue los detalles finos.
-2. Usar resoluciones demasiado altas en áreas grandes como *PVC Alta Definición* para grandes formatos incrementa significativamente el tamaño del archivo y el tiempo de impresión sin una mejora perceptible en la calidad visual.
-3. **Material específico**: Productos como *Adhesivo Empavonado*, *Vinilo Adhesivo Reflectante* y *Rotulación para fundido* requieren considerar el material y su capacidad de impresión, por lo que es recomendable mantener el DPI en el rango medio de 72-150 DPI para garantizar una buena nitidez.
+    - **Áreas muy grandes (más de 10 m²)** 🏢:
+      - Resoluciones bajas, entre *20 y 35 DPI*, son aceptables debido a que estos gráficos se ven desde distancias mayores a *5 metros*.
+      - Ejemplos: *Murales publicitarios*, *Back Light Textil*, o *Windows One Vision* que serán observados a grandes distancias.
 
-Estas guías te ayudarán a optimizar la calidad y la eficiencia en cada proyecto de impresión según el tipo de producto y su aplicación en el mercado chileno.
-`;
+    ### 📌 Notas Adicionales:
+    1. **Distancia de Visualización** 👀: Es un factor crítico para determinar el DPI correcto. A mayor distancia, menor es la necesidad de alta resolución, ya que el ojo humano no distingue los detalles finos.
+    2. **Tamaño del Archivo** 💾: Usar resoluciones demasiado altas en áreas grandes como *PVC Alta Definición* para grandes formatos incrementa significativamente el tamaño del archivo y el tiempo de impresión sin una mejora perceptible en la calidad visual.
+    3. **Material Específico** 🧱: Productos como *Adhesivo Empavonado*, *Vinilo Adhesivo Reflectante* y *Rotulación para fundido* requieren considerar el material y su capacidad de impresión, por lo que es recomendable mantener el DPI en el rango medio de *72-150 DPI* para garantizar una buena nitidez.
+
+    ✨ **Emojis y Formateo**:
+    - Utiliza emojis relevantes para resaltar puntos importantes.
+    - Aplica **formateo con asteriscos** usando un asterisco por lado (*texto*) para resaltar palabras clave.
+    - Asegúrate de mantener una estructura clara con saltos de línea para facilitar la lectura en WhatsApp.
+
+    Estas guías te ayudarán a optimizar la calidad y la eficiencia en cada proyecto de impresión según el tipo de producto y su aplicación en el mercado chileno.
+    `;
 
     // Generar la instrucción para la IA con mayor contexto y flexibilidad
-    const instruction = `El usuario acaba de subir un archivo. Ahora eres un experto en impresion de gran formato e ingeniero en color. Verifica el currentOrder y responde según las siguientes condiciones:
+    const instruction = `🔄 **Nueva Solicitud de Archivo** 📂
 
-1. Analiza el archivo proporcionado considerando una tolerancia del 70% en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
-2. Ten en cuenta las siguientes directrices para el DPI:
-<dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
-3. Considera que en casos especiales, como archivos muy grandes que superan las limitaciones técnicas (ejemplo: archivos mayores a 3GB), es aceptable reducir el DPI para adaptarse.
-4. Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del 80%.
-5. Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
-6. Si el archivo no es válido, proporciona una explicación detallada y consejos específicos para que el cliente pueda corregirlo.
+    El usuario acaba de subir un archivo. Ahora eres un **experto en impresión de gran formato** e **ingeniero en color**. Verifica el *currentOrder* y responde según las siguientes condiciones:
 
-Información para la validación:
-- Servicio seleccionado: ${currentOrder.service}
-- Área del servicio solicitado: ${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²
-- Área del diseño proporcionado: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²
-- Resolución del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi
-- Formato del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}
-- Espacio de color del diseño: ${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}
+    1. 📐 **Análisis del Archivo**:
+      - Analiza el archivo proporcionado considerando una tolerancia del *70%* en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
+      
+    2. 📊 **Directrices de DPI**:
+      - Ten en cuenta las siguientes directrices para el DPI:
+      <dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
+      
+    3. 🛠️ **Casos Especiales**:
+      - Considera que en casos especiales, como areas muy grandes que superan las limitaciones técnicas, como areas que superen los 5m2, es aceptable reducir la exigencia de DPI hasta 30 o menos para adaptar el diseño a las dimensiones fisicas,
+      tu eres el experto que decide el DPI correcto que debe tener el diseño en funcion al las guias de <dpiGuidelines>. Y ten cuidado de que para areas muy grandes de impresion, debes pedir que los archivos tambien tengan alta resolucion,
+      verifica la resolucion del archivo enviado por el cliente y en caso de que no cumpla con su area de impresion pero si con los DPI darle los pasos para corregir su archivo.
+      
+    4. 🧐 **Evaluación de Adecuación**:
+      - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *80%*.
+      
+    5. ✅ **Validación del Archivo**:
+      - Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
+      
+    6. ❌ **Invalidez del Archivo**:
+      - Si el archivo no es válido, proporciona una explicación detallada y consejos específicos para que el cliente pueda corregirlo.
 
-Criterios de Validación:
-${userContextManager.getFileValidationCriteria()}
+    📋 **Información para la Validación**:
+    - **Servicio seleccionado**: *${currentOrder.service}*
+    - **Área del servicio solicitado**: *${currentOrder.areaServicio ? currentOrder.areaServicio.toFixed(2) : 'No disponible'} m²*
+    - **Área del diseño proporcionado**: *${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.area.toFixed(2) : 'No disponible'} m²*
+    - **Resolución del diseño**: *${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.dpi : 'No disponible'} dpi*
+    - **Formato del diseño**: *${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.format : 'No disponible'}*
+    - **Espacio de color del diseño**: *${currentOrder.fileAnalysis ? currentOrder.fileAnalysis.colorSpace : 'No disponible'}*
 
-IMPORTANTE:
-- Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
-{"command": "RESULT_ANALYSIS", "result": true/false}
-- Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
-  1. ### Criterios de Validación Aplicados:
-     - Explica brevemente los criterios que aplicaste en este caso específico.
-  2. ### Resultado de la Validación:
-     - Indica si el archivo es válido o no, y proporciona detalles.
-  3. ### Siguiente Paso:
-     - Indica al usuario cuál es el siguiente paso en el proceso.
+    📑 **Criterios de Validación**:
+    ${userContextManager.getFileValidationCriteria()}
 
-- Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en mensajes separados.
+    ⚠️ **IMPORTANTE**:
+    - Al inicio de tu respuesta, incluye un comando JSON indicando el resultado del análisis, en el siguiente formato:
+      {"command": "RESULT_ANALYSIS", "result": true/false}
+    - Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
+      1. ### 🔍 Criterios de Validación Aplicados:
+        - Explica brevemente los criterios que aplicaste en este caso específico.
+      2. ### ✅ Resultado de la Validación:
+        - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el resultado es negativo,
+          explica y brinda detalladamente lo que debe hacer el cliente para que su archivo sea valido para su impresion en funcion al area de impresion.
+      3. ### 👉 Siguiente Paso:
+        - Indica al usuario cuál es el siguiente paso en el proceso.
 
-Responde al usuario siguiendo estas indicaciones.`;
+    - Asegúrate de que tu respuesta siga este formato exactamente, para que pueda ser dividida en mensajes separados.
+    - **Incluye emojis y utiliza asteriscos para el formateo** en toda tu respuesta para mejorar la interacción en WhatsApp.
+
+    Responde al usuario siguiendo estas indicaciones.
+    `;
+
 
     // Log para depuración
     logger.info(`Enviando instrucción a la IA para validación de archivo para usuario ${userId}: ${instruction}`);
@@ -420,23 +443,6 @@ Responde al usuario siguiendo estas indicaciones.`;
     }
   }
 
-  async handleServiceNotFound(userId, serviceName) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: `Servicio no encontrado: ${serviceName}` });
-    logger.warn(`Servicio no encontrado para usuario ${userId}: ${serviceName}`);
-    return { currentOrderUpdated: true };
-  }
-
-  async handleMissingInfo(userId, missingField) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: `Falta información: ${missingField}` });
-    logger.warn(`Información faltante para usuario ${userId}: ${missingField}`);
-    return { currentOrderUpdated: true };
-  }
-
-  async handleGeneralError(userId, errorMessage) {
-    userContextManager.updateCurrentOrder(userId, { lastErrorMessage: errorMessage });
-    logger.error(`Error general para usuario ${userId}: ${errorMessage}`);
-    return { currentOrderUpdated: true };
-  }
 
   
 }
@@ -661,8 +667,8 @@ class FlowManager {
         if (!userContext.initialMessagesSent) {
           // Enviar imagen con la lista de servicios
           await flowDynamic([{ 
-            body: `Lista de Servicios`,
-            media: `https://chileimprime.cl/wp-content/uploads/2024/05/Gigantografias-chileimprime-600x600.webp` 
+            body: `Promo campañas politicas`,
+            media: `https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg` 
           }]);
           logger.info(`Imagen de lista de servicios enviada a ${userId}`);
 
@@ -707,7 +713,7 @@ class FlowManager {
         .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
           const userId = ctx.from;
           logger.info(`Intento de reinicio de bot por usuario ${userId}`);
-          this.resetConversation(userId);
+          this.resetConversation(userId, true); // Reiniciar initialMessagesSent
           logger.info(`Bot reiniciado para usuario ${userId}`);
           await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
           return gotoFlow(this.flows.principalFlow);
@@ -949,12 +955,12 @@ class FlowManager {
       return false;
     }
   
-    resetConversation(userId) {
-      userContextManager.resetContext(userId);
+    resetConversation(userId, resetInitialMessages = false) {
+      userContextManager.resetContext(userId, resetInitialMessages);
       orderManager.resetOrderConfirmation(userId);
       this.blacklist.delete(userId);
       this.clearIdleTimer(userId);
-      logger.info(`Conversación reiniciada para usuario ${userId}`);
+      logger.info(`Conversación reiniciada para usuario ${userId}, resetInitialMessages: ${resetInitialMessages}`);
     }
   
     startIdleTimer(ctx, flowDynamic, gotoFlow) {
@@ -1427,7 +1433,7 @@ class UserContextManager {
 
   limitContextSize(userId) {
     const userContext = this.getUserContext(userId);
-    if (userContext.chatContext.length > 10) {
+    if (userContext.chatContext.length > 30) {
       userContext.chatContext = userContext.chatContext.slice(-10);
     }
     const words = userContext.context.split(/\s+/);
@@ -1512,9 +1518,18 @@ class UserContextManager {
     return currentOrder;
   }
 
-  resetContext(userId) {
-    this.userContexts.delete(userId);
-    logger.info(`Contexto reiniciado para usuario ${userId}`);
+  resetContext(userId, resetInitialMessages = false) {
+    const userContext = this.getUserContext(userId);
+    const initialMessagesSent = resetInitialMessages ? false : userContext.initialMessagesSent;
+    this.userContexts.set(userId, {
+      context: "",
+      chatContext: [],
+      currentOrder: this.getEmptyOrder(),
+      services: sheetService.getServices(),
+      additionalInfo: sheetService.getAdditionalInfo(),
+      initialMessagesSent: initialMessagesSent
+    });
+    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}`);
   }
 
   getGlobalServices() {
@@ -1652,6 +1667,8 @@ class FileValidationService {
     const image = sharp(buffer);
     const metadata = await image.metadata();
 
+    logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
+
     const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
     const area = this.calculateDesignArea(physicalWidth, physicalHeight);
 
@@ -1659,6 +1676,8 @@ class FileValidationService {
     const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
       ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
       : colorSpace;
+
+    logger.info(`Análisis de imagen completado: ${physicalWidth}x${physicalHeight} m, ${area} m², ${colorSpaceInfo}`);
 
     return {
       format: metadata.format,
@@ -1701,19 +1720,30 @@ class FileValidationService {
   }
 
   calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
+    logger.info(`Calculando dimensiones físicas: ${widthPixels}x${heightPixels} píxeles, ${dpi} DPI`);
+    
+    // Convertir píxeles a pulgadas
     const widthInches = widthPixels / dpi;
     const heightInches = heightPixels / dpi;
-    const physicalWidth = widthInches * 0.0254; // Convertir a metros
-    const physicalHeight = heightInches * 0.0254; // Convertir a metros
-    return { 
-      physicalWidth: Number(physicalWidth.toFixed(2)),
-      physicalHeight: Number(physicalHeight.toFixed(2))
-    };
+    
+    // Convertir pulgadas a metros (1 pulgada = 0.0254 metros)
+    const widthMeters = widthInches * 0.0254;
+    const heightMeters = heightInches * 0.0254;
+    
+    // Redondear a dos decimales
+    const physicalWidth = Number(widthMeters.toFixed(2));
+    const physicalHeight = Number(heightMeters.toFixed(2));
+    
+    logger.info(`Dimensiones físicas calculadas: ${physicalWidth}x${physicalHeight} metros`);
+    
+    return { physicalWidth, physicalHeight };
   }
 
   calculateDesignArea(widthM, heightM) {
     const areaM2 = widthM * heightM;
-    return Number(areaM2.toFixed(2));
+    const roundedArea = Number(areaM2.toFixed(2));
+    logger.info(`Área calculada: ${roundedArea} m²`);
+    return roundedArea;
   }
 
   formatFileSize(bytes) {
@@ -1902,12 +1932,14 @@ class OpenAIService {
        - Sé flexible al interpretar las solicitudes de los clientes. Si no estás seguro, pregunta por clarificación.
        - Ejemplo: "Entiendo que estás interesado en [término usado por el cliente]. Para asegurarme de recomendarte el mejor servicio, ¿podrías decirme más sobre lo que planeas imprimir o el uso que le darás?"
 
-    7. Manejo de Categorías y Tipos de Servicios:
+    7. Manejo de Categorías y Tipos de Servicios (ATENCIÓN AQUÍ)
        - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
        - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
-         a) Solicita ancho, alto y cantidad.
-         b) Ofrece los anchos disponibles específicos para el servicio (están en currentOrder.availableWidths).
-         c) El alto debe ser igual o mayor a 1 metro.
+         a) Solicita un ancho de la lista en funcion al contenido de currentOrder.availableWidths antes de dar los anchos disponibles.
+          Si availableWidths está presente, el ancho debe ser una de las opciones permitidas en availableWidths. 
+          El alto puede ser igual o mayor a 1, pero el ancho debe estar limitado a las opciones especificadas en availableWidths del currentOrder.
+         b) El alto debe ser igual o mayor a 1 metro.
+         c) Pregunta por la cantidad a imprimir..
          d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
        - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
          a) Solicita solo la cantidad.
@@ -1953,35 +1985,27 @@ class OpenAIService {
       - Explica los conceptos técnicos de forma sencilla y entendible, ya que los clientes tienen problemas para entender si su diseño es apto o no, se confunden con los DPI y la resolucion, etc.
       - Asegúrate de que tus mensajes sean fáciles de entender, claros y no demasiado extensos, pero que contengan toda la información necesaria. De necesitar contener mas informacion ocupa saltos de lineas.
 
-    11. Manejo de Errores y Casos Especiales:
-      - Si no puedes encontrar información sobre un servicio mencionado por el cliente, responde con:
-        {"command": "SERVICE_NOT_FOUND", "service": "Nombre del servicio"}
-      - Si detectas que falta información crucial en la orden actual, como el servicio o las medidas, responde con:
-        {"command": "MISSING_INFO", "missingField": "Campo faltante"}
-      - En caso de cualquier otro error o situación inesperada, responde con:
-        {"command": "ERROR", "message": "Descripción del error"}
-
-    12. Validación Continua:
+    11. Validación Continua:
        - Verifica constantemente que la información proporcionada por el cliente sea coherente con el servicio seleccionado.
        - Si detectas alguna incongruencia, solicita aclaración al cliente y utiliza los comandos apropiados para corregir la información.
-       - Verifica constantemente los cambios en <currentOrder> en funcion del avance del chat que tienes en <contexto_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
+       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <contexto_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
 
-    13. Comunicación Clara de Errores:
+    12. Comunicación Clara de Errores:
        - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
        - Ofrece alternativas o sugerencias para resolver el problema cuando sea posible.
    
-    14. Generación de Comandos JSON (ATENCIÓN AQUÍ)
+    13. Generación de Comandos JSON (ATENCIÓN AQUÍ)
        - CRUCIAL: SIEMPRE que detectes una acción que requiera actualizar el currentOrder, genera el comando JSON correspondiente.
        - IMPORTANTE: Los comandos JSON DEBEN ser generados ANTES de cualquier respuesta natural al cliente.
        - Asegúrate de que los comandos JSON estén correctamente formateados y contengan toda la información necesaria.
        - Después de generar un comando JSON, proporciona una respuesta natural al cliente que refleje la acción realizada.
 
-    15. Procesamiento de Instrucciones del Sistema:
+    14. Procesamiento de Instrucciones del Sistema:
        - Cuando recibas una instrucción del sistema (por ejemplo, después de que se haya actualizado el currentOrder),
          asegúrate de incorporar esa información en tu siguiente respuesta al cliente.
        - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
 
-    16. Confirmación del Pedido:
+    15. Confirmación del Pedido:
        - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
          a) El servicio está seleccionado y es válido.
          b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
@@ -1994,7 +2018,7 @@ class OpenAIService {
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
 
-    17. **Formato de la Lista de Servicios**:
+    16. **Formato de la Lista de Servicios**:
       - Cuando envíes la lista completa de servicios al cliente, debes presentarla en el siguiente formato:
         - Incluir un emoji antes del nombre de cada categoría.
         - Mostrar el nombre de la categoría en negritas.
@@ -2028,6 +2052,8 @@ class OpenAIService {
     - Si el sistema indica que un servicio es inválido, explica al cliente que no se encontró el servicio y ofrece alternativas o categorías disponibles.
     - SIEMPRE busca clarificación y confirmación antes de seleccionar un servicio.
     - Presenta múltiples opciones cuando sea apropiado.
+    - Verificar siempre la propiedad availableWidths en currentOrder. Si availableWidths está presente, 
+      asegúrate de que el ancho esté dentro de las opciones permitidas. El alto puede ser igual o mayor a 1, pero el ancho debe ser uno de los valores especificados en availableWidths del currentOrder.
     - Sé paciente y flexible en la interpretación de las solicitudes de los clientes.
     - Si no estás seguro, pregunta por más detalles antes de hacer una recomendación.
 

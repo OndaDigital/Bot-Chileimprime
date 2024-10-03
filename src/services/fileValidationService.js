@@ -63,6 +63,8 @@ class FileValidationService {
     const image = sharp(buffer);
     const metadata = await image.metadata();
 
+    logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
+
     const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
     const area = this.calculateDesignArea(physicalWidth, physicalHeight);
 
@@ -70,6 +72,8 @@ class FileValidationService {
     const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
       ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
       : colorSpace;
+
+    logger.info(`Análisis de imagen completado: ${physicalWidth}x${physicalHeight} m, ${area} m², ${colorSpaceInfo}`);
 
     return {
       format: metadata.format,
@@ -112,19 +116,30 @@ class FileValidationService {
   }
 
   calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
+    logger.info(`Calculando dimensiones físicas: ${widthPixels}x${heightPixels} píxeles, ${dpi} DPI`);
+    
+    // Convertir píxeles a pulgadas
     const widthInches = widthPixels / dpi;
     const heightInches = heightPixels / dpi;
-    const physicalWidth = widthInches * 0.0254; // Convertir a metros
-    const physicalHeight = heightInches * 0.0254; // Convertir a metros
-    return { 
-      physicalWidth: Number(physicalWidth.toFixed(2)),
-      physicalHeight: Number(physicalHeight.toFixed(2))
-    };
+    
+    // Convertir pulgadas a metros (1 pulgada = 0.0254 metros)
+    const widthMeters = widthInches * 0.0254;
+    const heightMeters = heightInches * 0.0254;
+    
+    // Redondear a dos decimales
+    const physicalWidth = Number(widthMeters.toFixed(2));
+    const physicalHeight = Number(heightMeters.toFixed(2));
+    
+    logger.info(`Dimensiones físicas calculadas: ${physicalWidth}x${physicalHeight} metros`);
+    
+    return { physicalWidth, physicalHeight };
   }
 
   calculateDesignArea(widthM, heightM) {
     const areaM2 = widthM * heightM;
-    return Number(areaM2.toFixed(2));
+    const roundedArea = Number(areaM2.toFixed(2));
+    logger.info(`Área calculada: ${roundedArea} m²`);
+    return roundedArea;
   }
 
   formatFileSize(bytes) {
