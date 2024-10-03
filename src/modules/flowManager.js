@@ -90,8 +90,7 @@ class FlowManager {
 
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-        userContextManager.setHasInteracted(userId, true);
-        userContextManager.setInitialMessagesSent(userId, true);
+          userContextManager.setInitialMessagesSent(userId, true);
           logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
         } else {
           logger.info(`Usuario ${userId} ya ha interactuado, omitiendo mensajes iniciales`);
@@ -330,17 +329,6 @@ class FlowManager {
         await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
     }
-
-    isOrderReadyForFileUpload(currentOrder) {
-      return currentOrder.service &&
-             currentOrder.measures &&
-             currentOrder.quantity &&
-             currentOrder.finishes &&
-             !currentOrder.filePath &&
-             !currentOrder.fileAnalysis;
-    }
-
- 
   
     processAIResponse(aiResponse) {
       const commandRegex = /{[^}]+}/g;

@@ -47,29 +47,17 @@ class UserContextManager {
     };
   }
 
-   // Nuevo método para actualizar el estado general del usuario
-   updateUserState(userId, updates) {
-    const userContext = this.getUserContext(userId);
-    Object.assign(userContext, updates);
-    logger.info(`Estado del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
-  }
-
   setInitialMessagesSent(userId, value) {
     const userContext = this.getUserContext(userId);
     userContext.initialMessagesSent = value;
-    userContext.hasInteracted = true;  // Actualizar también el estado de interacción
-    logger.info(`Estado de mensajes iniciales actualizado para usuario ${userId}: ${value}`);
+    userContext.hasInteracted = true;
+    logger.info(`Estado de mensajes iniciales y interacción actualizados para usuario ${userId}: ${value}`);
   }
 
   setHasInteracted(userId, value) {
     const userContext = this.getUserContext(userId);
     userContext.hasInteracted = value;
     logger.info(`Estado de interacción actualizado para usuario ${userId}: ${value}`);
-  }
-
-
- haveInitialMessagesSentBeenSent(userId) {
-    return this.getUserContext(userId).initialMessagesSent;
   }
 
   hasUserInteracted(userId) {
