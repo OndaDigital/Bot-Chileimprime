@@ -180,9 +180,10 @@ class UserContextManager {
       currentOrder: this.getEmptyOrder(),
       services: sheetService.getServices(),
       additionalInfo: sheetService.getAdditionalInfo(),
-      initialMessagesSent: initialMessagesSent
+      initialMessagesSent: initialMessagesSent,
+      hasInteracted: false  // Reiniciar hasInteracted
     });
-    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}`);
+    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}, hasInteracted reset`);
   }
 
   getGlobalServices() {

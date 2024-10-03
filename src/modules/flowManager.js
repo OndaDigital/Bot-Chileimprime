@@ -90,7 +90,8 @@ class FlowManager {
 
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-          userContextManager.setInitialMessagesSent(userId, true);
+        userContextManager.setHasInteracted(userId, true);
+        userContextManager.setInitialMessagesSent(userId, true);
           logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
         } else {
           logger.info(`Usuario ${userId} ya ha interactuado, omitiendo mensajes iniciales`);
