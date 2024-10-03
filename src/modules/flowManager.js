@@ -22,13 +22,16 @@ class FlowManager {
       voiceNoteFlow: null,
       catchAllFlow: null,
       idleTimeoutFlow: null,
-      promoFlow: null
+      promoFlow: null,
+      mediaFlow: null
     };
     this.blacklist = new Map();
     this.idleTimers = new Map();
     this.messageQueue = new MessageQueue({ gapSeconds: config.messageQueueGapSeconds });
     this.cooldowns = new Map();
+    this.initialMessagePromises = new Map();
   }
+
 
   async initializeFlows() {
     try {
@@ -66,122 +69,137 @@ class FlowManager {
     return this.flows[name];
   }
 
-  // Dentro de la clase FlowManager
-  createPrincipalFlow() {
-    return addKeyword(EVENTS.WELCOME)
-      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-        const userId = ctx.from; // Mover la declaración aquí
-        const userContext = userContextManager.getUserContext(userId);
-
-        // Verificar si los mensajes iniciales ya fueron enviados
-        if (!userContext.initialMessagesSent) {
-          // Enviar imagen con la lista de servicios
+  // Nuevo método centralizado para manejar mensajes iniciales
+  async handleInitialMessagesOnce(userId, flowDynamic) {
+    if (!this.initialMessagePromises.has(userId)) {
+      this.initialMessagePromises.set(userId, (async () => {
+        if (!userContextManager.hasUserInteracted(userId)) {
+          logger.info(`Enviando mensajes iniciales para usuario ${userId}`);
+          
           await flowDynamic([{ 
             body: `Promo campañas politicas`,
             media: `https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg` 
           }]);
-          logger.info(`Imagen de lista de servicios enviada a ${userId}`);
-
-          // Esperar 5 segundos
+          
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-          // Enviar la lista de servicios en texto utilizando handleListAllServices
           const servicesList = await commandProcessor.handleListAllServices(userId);
           if (servicesList && servicesList.data) {
             await flowDynamic(servicesList.data);
-            logger.info(`Lista de servicios en texto enviada a ${userId}`);
           }
 
-          // Esperar 5 segundos
           await new Promise(resolve => setTimeout(resolve, 5000));
 
-          // Actualizar el estado de mensajes iniciales enviados
-          userContextManager.updateUserState(userId, { initialMessagesSent: true });
-          logger.info(`Estado initialMessagesSent actualizado a true para usuario ${userId}`);
+          userContextManager.setInitialMessagesSent(userId, true);
+          logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
+        } else {
+          logger.info(`Usuario ${userId} ya ha interactuado, omitiendo mensajes iniciales`);
+        }
+      })());
+    }
+
+    await this.initialMessagePromises.get(userId);
+    this.initialMessagePromises.delete(userId);
+  }
+
+
+  createPrincipalFlow() {
+    return addKeyword(EVENTS.WELCOME)
+      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
+        const userId = ctx.from;
+        
+        if (!userContextManager.hasUserInteracted(userId)) {
+          await this.handleInitialMessagesOnce(userId, flowDynamic);
         }
 
-        // Continuar con el manejo normal del mensaje
         this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
           await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
         });
       });
   }
 
-  createConfirmedFlow() {
-    return addKeyword(EVENTS.ACTION)
-      .addAction(this.blacklistMiddleware.bind(this))
-      .addAction(async (ctx, { flowDynamic, endFlow }) => {
-        await flowDynamic("SOLICITUD_HUMANO");
-        this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
-        logger.info(`Cotización ya confirmada para ${ctx.from}. Redirigiendo a atención humana.`);
-        return endFlow("Un representante se pondrá en contacto contigo pronto para finalizar tu cotización. Gracias por tu paciencia.");
+  createMediaFlow() {
+    return addKeyword(EVENTS.MEDIA)
+      .addAction(async (ctx, { flowDynamic }) => {
+        const userId = ctx.from;
+        logger.info(`Imagen recibida de ${userId}. Enviando instrucciones específicas.`);
+
+        userContextManager.setHasInteracted(userId, true);
+  
+        const messages = [
+          '🖼️ *¡Hola!* Hemos recibido tu imagen, pero necesitamos que nos envíes tu diseño como *documento* para preservar la calidad.\n\nLas imágenes enviadas como foto en WhatsApp se comprimen y pierden calidad, lo que afecta el análisis y la impresión.\n\nPor favor, envía el mismo archivo como *documento* en uno de los siguientes formatos de alta calidad: *PDF, AI, PSD* o una imagen en alta resolución.\n\n*Criterios de Validación Resumidos:*\n\n- Resolución mínima: 72 dpi y máxima: 150 dpi.\n- Formato preferente: CMYK para evitar diferencias de color.\n- Tamaño real del diseño acorde al tamaño de impresión.',
+          '📱 *Cómo enviar un documento en WhatsApp desde Android o iPhone:*\n\n1️⃣ Abre el chat de *Chileimprime*.\n2️⃣ Toca el ícono de *adjuntar* (📎).\n3️⃣ Selecciona *Documento*.\n4️⃣ Busca y selecciona tu archivo de diseño.\n5️⃣ Presiona *Enviar*.',
+          '✨ *Esperamos tu archivo nuevamente como documento para iniciar el análisis.* ¡Gracias!'
+        ];
+  
+        try {
+          for (const message of messages) {
+            await flowDynamic(message);
+            logger.info(`Mensaje enviado a ${userId}: ${message.substring(0, 50)}...`);
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+          logger.info(`Instrucciones para imagen enviadas exitosamente a ${userId}`);
+        } catch (error) {
+          logger.error(`Error al enviar mensajes en mediaFlow para usuario ${userId}: ${error.message}`);
+          await flowDynamic('⚠️ *Ha ocurrido un error al enviar las instrucciones. Por favor, intenta nuevamente más tarde.*');
+        }
       });
   }
   
-    createRestartBotFlow() {
-      return addKeyword(['bot', 'Bot', 'BOT'])
-        .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-          const userId = ctx.from;
-          logger.info(`Intento de reinicio de bot por usuario ${userId}`);
-          this.resetConversation(userId, true); // Reiniciar initialMessagesSent
-          logger.info(`Bot reiniciado para usuario ${userId}`);
-          await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
-          return gotoFlow(this.flows.principalFlow);
-        });
-    }
+
+  createDocumentFlow() {
+    return addKeyword(EVENTS.DOCUMENT)
+      .addAction(async (ctx, { flowDynamic }) => {
+        const userId = ctx.from;
+        logger.info(`Documento recibido de ${userId}. Iniciando análisis.`);
+        userContextManager.setHasInteracted(userId, true);
+
+        try {
+          const filePath = await whatsappService.saveFile(ctx);
+          logger.info(`Archivo guardado para usuario ${userId}: ${filePath}`);
   
-    createDocumentFlow() {
-      return addKeyword(EVENTS.DOCUMENT)
-        .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-          try {
-            const userId = ctx.from;
-            const filePath = await whatsappService.saveFile(ctx);
-            const fileInfo = await fileValidationService.analyzeFile(filePath);
-            
-            await userContextManager.updateCurrentOrder(userId, {
-              filePath: filePath,
-              fileAnalysis: fileInfo
-            });
-            
-            logger.info(`Archivo analizado para usuario ${userId}: ${JSON.stringify(fileInfo)}`);
-            
-            // Llamar a handleFileAnalysis de commandProcessor para mostrar los resultados del análisis
-            await commandProcessor.handleFileAnalysis(ctx, flowDynamic);
-            
-          } catch (error) {
-            logger.error(`Error al procesar el archivo: ${error.message}`);
-            await flowDynamic('Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente.');
-          }
-        });
+          const fileInfo = await fileValidationService.analyzeFile(filePath);
+          logger.info(`Análisis completado para archivo de usuario ${userId}: ${JSON.stringify(fileInfo)}`);
+          
+          await userContextManager.updateCurrentOrder(userId, {
+            filePath: filePath,
+            fileAnalysis: fileInfo
+          });
+          
+          await flowDynamic('📄 Documento recibido. Analizando...');
+  
+          await commandProcessor.handleFileAnalysis(ctx, flowDynamic);
+          
+          logger.info(`Análisis de archivo enviado al usuario ${userId}`);
+        } catch (error) {
+          logger.error(`Error al procesar el documento para usuario ${userId}: ${error.message}`);
+          await flowDynamic('❌ Hubo un error al procesar tu archivo. Por favor, intenta enviarlo nuevamente o contacta con soporte si el problema persiste.');
+        }
+      });
     }
 
-    createMediaFlow() {
-      return addKeyword(EVENTS.MEDIA)
-        .addAction(async (ctx, { flowDynamic }) => {
-          const userId = ctx.from;
-          logger.info(`Imagen recibida de ${userId}`);
-  
-          const messages = [
-            '🖼️ *¡Hola!* Hemos recibido tu imagen, pero necesitamos que nos envíes tu diseño como *documento* para preservar la calidad.\n\nLas imágenes enviadas como foto en WhatsApp se comprimen y pierden calidad, lo que afecta el análisis y la impresión.\n\nPor favor, envía el mismo archivo como *documento* en uno de los siguientes formatos de alta calidad: *PDF, AI, PSD* o una imagen en alta resolución.\n\n*Criterios de Validación Resumidos:*\n\n- Resolución mínima: 72 dpi y máxima: 150 dpi.\n- Formato preferente: CMYK para evitar diferencias de color.\n- Tamaño real del diseño acorde al tamaño de impresión.',
-            
-            '📱 *Cómo enviar un documento en WhatsApp desde Android o iPhone:*\n\n1️⃣ Abre el chat de *Chileimprime*.\n2️⃣ Toca el ícono de *adjuntar* (📎).\n3️⃣ Selecciona *Documento*.\n4️⃣ Busca y selecciona tu archivo de diseño.\n5️⃣ Presiona *Enviar*.',
-            
-            '✨ *Esperamos tu archivo nuevamente como documento para iniciar el análisis.* ¡Gracias!'
-          ];
-  
-          try {
-            for (const message of messages) {
-              await flowDynamic(message);
-              // Espera de 3 segundos antes de enviar el siguiente mensaje
-              await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-          } catch (error) {
-            logger.error(`Error al enviar mensajes secuenciales en mediaFlow para usuario ${userId}: ${error.message}`);
-            await flowDynamic('⚠️ *Ha ocurrido un error al enviar las instrucciones. Por favor, intenta nuevamente más tarde.*');
-          }
+    createConfirmedFlow() {
+      return addKeyword(EVENTS.ACTION)
+        .addAction(this.blacklistMiddleware.bind(this))
+        .addAction(async (ctx, { flowDynamic, endFlow }) => {
+          await flowDynamic("SOLICITUD_HUMANO");
+          this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
+          logger.info(`Cotización ya confirmada para ${ctx.from}. Redirigiendo a atención humana.`);
+          return endFlow("Un representante se pondrá en contacto contigo pronto para finalizar tu cotización. Gracias por tu paciencia.");
         });
     }
-  
+    
+      createRestartBotFlow() {
+        return addKeyword(['bot', 'Bot', 'BOT'])
+          .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
+            const userId = ctx.from;
+            logger.info(`Intento de reinicio de bot por usuario ${userId}`);
+            this.resetConversation(userId, true); // Reiniciar initialMessagesSent
+            logger.info(`Bot reiniciado para usuario ${userId}`);
+            await flowDynamic('*¡Bienvenido de nuevo!* 🎉 El bot ha sido reiniciado. *¿En qué puedo ayudarte hoy?* 😊');
+            return gotoFlow(this.flows.principalFlow);
+          });
+      }
 
     createVoiceNoteFlow() {
       return addKeyword(EVENTS.VOICE_NOTE)

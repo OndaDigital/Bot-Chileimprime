@@ -15,7 +15,8 @@ class UserContextManager {
         currentOrder: this.getEmptyOrder(),
         services: sheetService.getServices(),
         additionalInfo: sheetService.getAdditionalInfo(),
-        initialMessagesSent: false // Añadido para rastrear si se enviaron los mensajes iniciales
+        initialMessagesSent: false,
+        hasInteracted: false  // Nuevo estado para rastrear cualquier interacción
       });
       logger.info(`Nuevo contexto creado para usuario ${userId}`);
     }
@@ -53,11 +54,26 @@ class UserContextManager {
     logger.info(`Estado del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
   }
 
-   // Nuevo método para actualizar el contexto del usuario
-   updateUserContext(userId, updates) {
+  setInitialMessagesSent(userId, value) {
     const userContext = this.getUserContext(userId);
-    this.userContexts.set(userId, { ...userContext, ...updates });
-    logger.info(`Contexto del usuario ${userId} actualizado: ${JSON.stringify(updates)}`);
+    userContext.initialMessagesSent = value;
+    userContext.hasInteracted = true;  // Actualizar también el estado de interacción
+    logger.info(`Estado de mensajes iniciales actualizado para usuario ${userId}: ${value}`);
+  }
+
+  setHasInteracted(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.hasInteracted = value;
+    logger.info(`Estado de interacción actualizado para usuario ${userId}: ${value}`);
+  }
+
+
+ haveInitialMessagesSentBeenSent(userId) {
+    return this.getUserContext(userId).initialMessagesSent;
+  }
+
+  hasUserInteracted(userId) {
+    return this.getUserContext(userId).hasInteracted;
   }
 
   updateContext(userId, message, role) {
