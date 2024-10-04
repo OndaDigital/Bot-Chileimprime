@@ -156,8 +156,10 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
         }
 
         if (!userContextManager.hasUserInteracted(userId)) {
+          // Send initial messages without processing user input
           await this.handleInitialMessagesOnce(userId, flowDynamic);
         } else {
+          // Process user input in subsequent interactions
           this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });
