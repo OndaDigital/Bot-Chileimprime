@@ -210,23 +210,38 @@ class UserContextManager {
     return finishes;
   }
 
-  isOrderComplete(userId) {
+  // NUEVO: Función para obtener los campos faltantes en la orden actual
+  getIncompleteFields(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
-    const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
-  
-    if (!hasAllRequiredFields) return false;
-  
-    const serviceInfo = this.getServiceInfo(order.service);
-    const needsMeasures = this.isServiceRequiringMeasures(order.category);
-  
-    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height || !order.areaServicio)) {
-      return false;
+    const missingFields = [];
+
+    // Verificar campos obligatorios
+    if (!order.service) missingFields.push('service');
+    if (!order.quantity) missingFields.push('quantity');
+    if (!order.filePath) missingFields.push('filePath');
+    if (!order.fileAnalysis) missingFields.push('fileAnalysis');
+    if (!order.fileAnalysisResponded) missingFields.push('fileAnalysisResponded');
+    if (!order.fileAnalysisHandled) missingFields.push('fileAnalysisHandled');
+    if (!order.fileValidation) missingFields.push('fileValidation');
+
+    // Verificar si el servicio requiere medidas
+    if (this.isServiceRequiringMeasures(order.category)) {
+      if (!order.measures || !order.measures.width) missingFields.push('width');
+      if (!order.measures || !order.measures.height) missingFields.push('height');
+      if (!order.areaServicio) missingFields.push('areaServicio');
     }
-  
-    // La validación del archivo ahora es manejada por el sistema de IA
-    return true;
+
+    logger.info(`Campos faltantes para usuario ${userId}: ${missingFields.join(', ')}`);
+
+    return missingFields;
   }
+
+  // MODIFICADO: isOrderComplete ahora utiliza getIncompleteFields
+  isOrderComplete(userId) {
+    const missingFields = this.getIncompleteFields(userId);
+    return missingFields.length === 0;
+  }
+
 
     // Método para determinar si el servicio requiere medidas
     isServiceRequiringMeasures(serviceCategory) {

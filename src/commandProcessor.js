@@ -331,12 +331,24 @@ class CommandProcessor {
         logger.info(`Pedido confirmado para usuario ${userId}`);
         return { currentOrderUpdated: true, ...result, nextFlow: 'promoFlow' };
       } else {
-        logger.warn(`No se pudo confirmar el pedido para usuario ${userId}: ${result.message}`);
-        return { currentOrderUpdated: false, error: result.message };
+        // Este bloque no se ejecutará ya que se lanza una excepción en caso de error
       }
     } catch (error) {
-      logger.error(`Error al confirmar el pedido para ${userId}: ${error.message}`);
-      return { currentOrderUpdated: false, error: error.message };
+      logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
+      if (error.name === 'IncompleteOrderError') {
+        // NUEVO: Obtener campos faltantes y actualizar el contexto del asistente
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        const systemMessage = `Campos faltantes: ${missingFields.join(', ')}`;
+        userContextManager.updateContext(userId, systemMessage, "system");
+
+        return {
+          currentOrderUpdated: false,
+          error: error.message,
+          missingFields: missingFields
+        };
+      } else {
+        return { currentOrderUpdated: false, error: error.message };
+      }
     }
   }
 

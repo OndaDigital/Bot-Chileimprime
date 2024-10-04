@@ -153,7 +153,12 @@ class OrderManager {
       const currentOrder = userContextManager.getCurrentOrder(userId);
       
       if (!userContextManager.isOrderComplete(userId)) {
-        throw new CustomError('IncompleteOrderError', 'La orden no está completa');
+        
+         // NUEVO: Lanzar excepción con detalles de campos faltantes
+         const missingFields = userContextManager.getIncompleteFields(userId);
+         const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+         logger.warn(errorMessage);
+         throw new CustomError('IncompleteOrderError', errorMessage);
       }
 
       const total = this.calculatePrice(currentOrder);
@@ -172,7 +177,7 @@ class OrderManager {
       };
     } catch (error) {
       logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError('OrderConfirmationError', 'Error al confirmar el pedido', error);
+      throw new CustomError(error.name || 'OrderConfirmationError', error.message);
     }
   }
 

@@ -485,7 +485,7 @@ export default {
   idleWarningTime: parseInt(process.env.IDLE_WARNING_TIME) || 5 * 60 * 1000,
   idleTimeoutTime: parseInt(process.env.IDLE_TIMEOUT_TIME) || 10 * 60 * 1000,
   maxAudioSize: parseInt(process.env.MAX_AUDIO_SIZE) || 5 * 1024 * 1024,
-  languageModel: process.env.LANGUAGE_MODEL || 'gpt-4o-mini',
+  languageModel: process.env.LANGUAGE_MODEL || 'ft:gpt-4o-mini-2024-07-18:personal:modelo-chile-imprime:AEWZI9XK',
   timezone: process.env.TIMEZONE || 'America/Santiago',
   logLevel: process.env.LOG_LEVEL || 'info',
   maxTokens: parseInt(process.env.MAX_TOKENS) || 2000,
@@ -1842,14 +1842,14 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - SOLO Si es el primer mensaje, saluda al cliente de la siguiente forma:
-          👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
+👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
-          También puedes realizar las siguientes acciones:
-          - 🕒 Consultar horarios de atención
-          - 🎉 Conocer nuestras promociones actuales
-          - 🖨️ Resolver dudas sobre procesos de impresión
-          - 📄 Consultar especificaciones de archivos o parámetros técnicos
-          - 🎙️ Analizar archivos en tiempo real para evaluar validez. 
+También puedes realizar las siguientes acciones:
+- 🕒 Consultar horarios de atención
+- 🎉 Conocer nuestras promociones actuales
+- 🖨️ Resolver dudas sobre procesos de impresión
+- 📄 Consultar especificaciones de archivos o parámetros técnicos
+- 🎙️ Analizar archivos en tiempo real para evaluar validez. 
 
           Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
 

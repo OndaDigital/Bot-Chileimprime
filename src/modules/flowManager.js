@@ -293,11 +293,15 @@ class FlowManager {
         // Procesar comandos en la respuesta de la IA
         const commands = this.processAIResponse(aiResponse);
         let currentOrderUpdated = false;
+        let missingFields = [];
     
         for (const command of commands) {
           const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           if (result.currentOrderUpdated) {
             currentOrderUpdated = true;
+          }
+          if (result.missingFields && result.missingFields.length > 0) {
+            missingFields = result.missingFields;
           }
           if (result.messagesSent) {
             logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
@@ -305,6 +309,12 @@ class FlowManager {
           if (result.data) {
             await flowDynamic(result.data);
           }
+        }
+
+        // NUEVO: Actualizar el contexto del asistente con los campos faltantes
+        if (missingFields.length > 0) {
+          const missingFieldsInfo = `Los siguientes campos están incompletos en la orden: ${missingFields.join(', ')}`;
+          userContextManager.updateContext(userId, missingFieldsInfo, "system");
         }
     
         // Enviar la parte de texto de la respuesta de la IA al usuario

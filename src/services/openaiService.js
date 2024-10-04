@@ -44,6 +44,13 @@ class OpenAIService {
     const criteria = userContextManager.getFileValidationCriteria();
     console.log(contextStr);
 
+      // NUEVO: Incluir información sobre campos faltantes
+      const missingFieldsMessage = chatContext.find(msg => msg.role === 'system' && msg.content.startsWith('Campos faltantes:'));
+      let missingFieldsInfo = '';
+      if (missingFieldsMessage) {
+        missingFieldsInfo = missingFieldsMessage.content;
+      }
+
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {
       fileValidationInfo = `
@@ -225,7 +232,7 @@ También puedes realizar las siguientes acciones:
     11. Validación Continua:
        - Verifica constantemente que la información proporcionada por el cliente sea coherente con el servicio seleccionado.
        - Si detectas alguna incongruencia, solicita aclaración al cliente y utiliza los comandos apropiados para corregir la información.
-       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <contexto_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
+       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <historial_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
 
     12. Comunicación Clara de Errores:
        - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
@@ -241,8 +248,16 @@ También puedes realizar las siguientes acciones:
        - Cuando recibas una instrucción del sistema (por ejemplo, después de que se haya actualizado el currentOrder),
          asegúrate de incorporar esa información en tu siguiente respuesta al cliente.
        - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
+    
+    15. **Manejo de Órdenes Incompletas**:
 
-    15. Confirmación del Pedido:
+    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height"), debes:
+      - Identificar los campos faltantes mencionados.
+      - Solicitar amablemente al usuario la información faltante, proporcionando orientación clara sobre cómo proporcionarla.
+      - Utilizar los comandos JSON apropiados cuando el usuario proporcione la información.
+      - No avances en el flujo hasta que todos los campos estén completos.
+
+    16. Confirmación del Pedido:
        - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
          a) El servicio está seleccionado y es válido.
          b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
@@ -255,7 +270,7 @@ También puedes realizar las siguientes acciones:
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
 
-    16. **Formato de la Lista de Servicios**:
+    17. **Formato de la Lista de Servicios**:
       - Cuando envíes la lista completa de servicios al cliente, debes presentarla en el siguiente formato:
         - Incluir un emoji antes del nombre de cada categoría.
         - Mostrar el nombre de la categoría en negritas.
@@ -300,8 +315,12 @@ También puedes realizar las siguientes acciones:
     Información adicional:
     <informacion_adicional>${JSON.stringify(additionalInfo, null, 2)}</informacion_adicional>
 
-    Contexto de la conversación:
-    <contexto_de_la_conversacion>${contextStr}</contexto_de_la_conversacion>
+    ${missingFieldsInfo ? `Información del sistema:
+
+    ${missingFieldsInfo}` : ''}
+
+    Historial  de la conversación:
+    <historial_de_la_conversacion>${contextStr}</historial_de_la_conversacion>
 
     Responde al siguiente mensaje del cliente:`;
   }
