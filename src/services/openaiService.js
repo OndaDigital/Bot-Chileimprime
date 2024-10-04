@@ -7,6 +7,7 @@ import config from '../config/config.js';
 import logger from '../utils/logger.js';
 import { CustomError } from '../utils/errorHandler.js';
 import userContextManager from '../modules/userContext.js';
+import { formatPrice } from '../utils/helpers.js';
 
 class OpenAIService {
   constructor() {
@@ -43,6 +44,7 @@ class OpenAIService {
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
     console.log(contextStr);
+    console.log(JSON.stringify(allServices, null, 2));
 
       // NUEVO: Incluir información sobre campos faltantes
       const missingFieldsMessage = chatContext.find(msg => msg.role === 'system' && msg.content.startsWith('Campos faltantes:'));
@@ -73,7 +75,8 @@ class OpenAIService {
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
-       - SOLO Si es el primer mensaje, saluda al cliente de la siguiente forma:
+       - (Obligatorio) SIEMPRE QUE SEA EL primer mensaje, saluda al cliente de la siguiente forma:
+"
 👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
@@ -82,7 +85,7 @@ También puedes realizar las siguientes acciones:
 - 🖨️ Resolver dudas sobre procesos de impresión
 - 📄 Consultar especificaciones de archivos o parámetros técnicos
 - 🎙️ Analizar archivos en tiempo real para evaluar validez. 
-
+"
           Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
 
           Para reiniciar el bot en cualquier momento, simplemente escribe *bot*.
@@ -332,6 +335,7 @@ También puedes realizar las siguientes acciones:
         allServices.push({
           name: service.name,
           category: service.category,
+          price: formatPrice(service.precio), // Añadimos el precio formateado
           availableWidths: service.availableWidths,
           availableFinishes: [
             service.sellado ? "sellado" : null,
@@ -341,6 +345,7 @@ También puedes realizar las siguientes acciones:
         });
       });
     }
+    logger.info(`Servicios con precios: ${JSON.stringify(allServices, null, 2)}`);
     return allServices;
   }
 

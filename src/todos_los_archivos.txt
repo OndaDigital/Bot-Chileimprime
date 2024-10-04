@@ -434,12 +434,24 @@ class CommandProcessor {
         logger.info(`Pedido confirmado para usuario ${userId}`);
         return { currentOrderUpdated: true, ...result, nextFlow: 'promoFlow' };
       } else {
-        logger.warn(`No se pudo confirmar el pedido para usuario ${userId}: ${result.message}`);
-        return { currentOrderUpdated: false, error: result.message };
+        // Este bloque no se ejecutará ya que se lanza una excepción en caso de error
       }
     } catch (error) {
-      logger.error(`Error al confirmar el pedido para ${userId}: ${error.message}`);
-      return { currentOrderUpdated: false, error: error.message };
+      logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
+      if (error.name === 'IncompleteOrderError') {
+        // NUEVO: Obtener campos faltantes y actualizar el contexto del asistente
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        const systemMessage = `Campos faltantes: ${missingFields.join(', ')}`;
+        userContextManager.updateContext(userId, systemMessage, "system");
+
+        return {
+          currentOrderUpdated: false,
+          error: error.message,
+          missingFields: missingFields
+        };
+      } else {
+        return { currentOrderUpdated: false, error: error.message };
+      }
     }
   }
 
@@ -883,11 +895,15 @@ class FlowManager {
         // Procesar comandos en la respuesta de la IA
         const commands = this.processAIResponse(aiResponse);
         let currentOrderUpdated = false;
+        let missingFields = [];
     
         for (const command of commands) {
           const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           if (result.currentOrderUpdated) {
             currentOrderUpdated = true;
+          }
+          if (result.missingFields && result.missingFields.length > 0) {
+            missingFields = result.missingFields;
           }
           if (result.messagesSent) {
             logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
@@ -895,6 +911,12 @@ class FlowManager {
           if (result.data) {
             await flowDynamic(result.data);
           }
+        }
+
+        // NUEVO: Actualizar el contexto del asistente con los campos faltantes
+        if (missingFields.length > 0) {
+          const missingFieldsInfo = `Los siguientes campos están incompletos en la orden: ${missingFields.join(', ')}`;
+          userContextManager.updateContext(userId, missingFieldsInfo, "system");
         }
     
         // Enviar la parte de texto de la respuesta de la IA al usuario
@@ -1229,7 +1251,12 @@ class OrderManager {
       const currentOrder = userContextManager.getCurrentOrder(userId);
       
       if (!userContextManager.isOrderComplete(userId)) {
-        throw new CustomError('IncompleteOrderError', 'La orden no está completa');
+        
+         // NUEVO: Lanzar excepción con detalles de campos faltantes
+         const missingFields = userContextManager.getIncompleteFields(userId);
+         const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+         logger.warn(errorMessage);
+         throw new CustomError('IncompleteOrderError', errorMessage);
       }
 
       const total = this.calculatePrice(currentOrder);
@@ -1248,7 +1275,7 @@ class OrderManager {
       };
     } catch (error) {
       logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError('OrderConfirmationError', 'Error al confirmar el pedido', error);
+      throw new CustomError(error.name || 'OrderConfirmationError', error.message);
     }
   }
 
@@ -1580,23 +1607,38 @@ class UserContextManager {
     return finishes;
   }
 
-  isOrderComplete(userId) {
+  // NUEVO: Función para obtener los campos faltantes en la orden actual
+  getIncompleteFields(userId) {
     const order = this.getCurrentOrder(userId);
-    const requiredFields = ['service', 'quantity', 'filePath', 'fileAnalysis'];
-    const hasAllRequiredFields = requiredFields.every(field => order[field] !== null);
-  
-    if (!hasAllRequiredFields) return false;
-  
-    const serviceInfo = this.getServiceInfo(order.service);
-    const needsMeasures = this.isServiceRequiringMeasures(order.category);
-  
-    if (needsMeasures && (!order.measures || !order.measures.width || !order.measures.height || !order.areaServicio)) {
-      return false;
+    const missingFields = [];
+
+    // Verificar campos obligatorios
+    if (!order.service) missingFields.push('service');
+    if (!order.quantity) missingFields.push('quantity');
+    if (!order.filePath) missingFields.push('filePath');
+    if (!order.fileAnalysis) missingFields.push('fileAnalysis');
+    if (!order.fileAnalysisResponded) missingFields.push('fileAnalysisResponded');
+    if (!order.fileAnalysisHandled) missingFields.push('fileAnalysisHandled');
+    if (!order.fileValidation) missingFields.push('fileValidation');
+
+    // Verificar si el servicio requiere medidas
+    if (this.isServiceRequiringMeasures(order.category)) {
+      if (!order.measures || !order.measures.width) missingFields.push('width');
+      if (!order.measures || !order.measures.height) missingFields.push('height');
+      if (!order.areaServicio) missingFields.push('areaServicio');
     }
-  
-    // La validación del archivo ahora es manejada por el sistema de IA
-    return true;
+
+    logger.info(`Campos faltantes para usuario ${userId}: ${missingFields.join(', ')}`);
+
+    return missingFields;
   }
+
+  // MODIFICADO: isOrderComplete ahora utiliza getIncompleteFields
+  isOrderComplete(userId) {
+    const missingFields = this.getIncompleteFields(userId);
+    return missingFields.length === 0;
+  }
+
 
     // Método para determinar si el servicio requiere medidas
     isServiceRequiringMeasures(serviceCategory) {
@@ -1818,6 +1860,14 @@ class OpenAIService {
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
     console.log(contextStr);
+    console.log(JSON.stringify(allServices, null, 2));
+
+      // NUEVO: Incluir información sobre campos faltantes
+      const missingFieldsMessage = chatContext.find(msg => msg.role === 'system' && msg.content.startsWith('Campos faltantes:'));
+      let missingFieldsInfo = '';
+      if (missingFieldsMessage) {
+        missingFieldsInfo = missingFieldsMessage.content;
+      }
 
     let fileValidationInfo = "";
     if (currentOrder.fileAnalysis) {
@@ -1841,7 +1891,8 @@ class OpenAIService {
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
     2. Inicio y Selección de Servicio:
-       - SOLO Si es el primer mensaje, saluda al cliente de la siguiente forma:
+       - (Obligatorio) SOLO SIEMPRE QUE SEA EL primer mensaje, saluda al cliente de la siguiente forma:
+"
 👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
@@ -1850,7 +1901,7 @@ También puedes realizar las siguientes acciones:
 - 🖨️ Resolver dudas sobre procesos de impresión
 - 📄 Consultar especificaciones de archivos o parámetros técnicos
 - 🎙️ Analizar archivos en tiempo real para evaluar validez. 
-
+"
           Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
 
           Para reiniciar el bot en cualquier momento, simplemente escribe *bot*.
@@ -2000,7 +2051,7 @@ También puedes realizar las siguientes acciones:
     11. Validación Continua:
        - Verifica constantemente que la información proporcionada por el cliente sea coherente con el servicio seleccionado.
        - Si detectas alguna incongruencia, solicita aclaración al cliente y utiliza los comandos apropiados para corregir la información.
-       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <contexto_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
+       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <historial_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
 
     12. Comunicación Clara de Errores:
        - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
@@ -2016,8 +2067,16 @@ También puedes realizar las siguientes acciones:
        - Cuando recibas una instrucción del sistema (por ejemplo, después de que se haya actualizado el currentOrder),
          asegúrate de incorporar esa información en tu siguiente respuesta al cliente.
        - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
+    
+    15. **Manejo de Órdenes Incompletas**:
 
-    15. Confirmación del Pedido:
+    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height"), debes:
+      - Identificar los campos faltantes mencionados.
+      - Solicitar amablemente al usuario la información faltante, proporcionando orientación clara sobre cómo proporcionarla.
+      - Utilizar los comandos JSON apropiados cuando el usuario proporcione la información.
+      - No avances en el flujo hasta que todos los campos estén completos.
+
+    16. Confirmación del Pedido:
        - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
          a) El servicio está seleccionado y es válido.
          b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
@@ -2030,7 +2089,7 @@ También puedes realizar las siguientes acciones:
        - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
        - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
 
-    16. **Formato de la Lista de Servicios**:
+    17. **Formato de la Lista de Servicios**:
       - Cuando envíes la lista completa de servicios al cliente, debes presentarla en el siguiente formato:
         - Incluir un emoji antes del nombre de cada categoría.
         - Mostrar el nombre de la categoría en negritas.
@@ -2075,8 +2134,12 @@ También puedes realizar las siguientes acciones:
     Información adicional:
     <informacion_adicional>${JSON.stringify(additionalInfo, null, 2)}</informacion_adicional>
 
-    Contexto de la conversación:
-    <contexto_de_la_conversacion>${contextStr}</contexto_de_la_conversacion>
+    ${missingFieldsInfo ? `Información del sistema:
+
+    ${missingFieldsInfo}` : ''}
+
+    Historial  de la conversación:
+    <historial_de_la_conversacion>${contextStr}</historial_de_la_conversacion>
 
     Responde al siguiente mensaje del cliente:`;
   }
