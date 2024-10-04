@@ -30,6 +30,8 @@ class FlowManager {
     this.messageQueue = new MessageQueue({ gapSeconds: config.messageQueueGapSeconds });
     this.cooldowns = new Map();
     this.initialMessagePromises = new Map();
+    this.initialMessageLocks = new Map(); // Añade esta línea
+
   }
 
 
@@ -71,27 +73,26 @@ class FlowManager {
 
   // Nuevo método centralizado para manejar mensajes iniciales
   async handleInitialMessagesOnce(userId, flowDynamic) {
+    logger.info(`Intentando enviar mensajes iniciales para usuario ${userId}`);
+    
+    if (this.initialMessageLocks.get(userId)) {
+      logger.info(`Usuario ${userId} ya tiene mensajes iniciales en proceso. Ignorando nueva solicitud.`);
+      return;
+    }
+
+    this.initialMessageLocks.set(userId, true);
+
     if (!this.initialMessagePromises.has(userId)) {
       this.initialMessagePromises.set(userId, (async () => {
         if (!userContextManager.hasUserInteracted(userId)) {
-          logger.info(`Enviando mensajes iniciales para usuario ${userId}`);
+          logger.info(`Iniciando envío de mensajes iniciales para usuario ${userId}`);
 
-          // Send initial image
-          await flowDynamic([{ 
-            body: `Promo campañas politicas`,
-            media: `https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg` 
-          }]);
-          await new Promise(resolve => setTimeout(resolve, 5000));
-
-          // Send services list
-          const servicesList = await commandProcessor.handleListAllServices(userId);
-          if (servicesList && servicesList.data) {
-            await flowDynamic(servicesList.data);
-          }
-          await new Promise(resolve => setTimeout(resolve, 5000));
-
-          // NEW: Send the additional message after services
-          const newMessage = `
+          try {
+            // Crear una cola de mensajes
+            const messageQueue = [
+              { type: 'image', content: 'https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg' },
+              { type: 'services', content: await commandProcessor.handleListAllServices(userId) },
+              { type: 'text', content: `
 👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
@@ -104,15 +105,35 @@ También puedes realizar las siguientes acciones:
 
 Si necesitas contactar a un agente, por favor escribe *agente* o *humano.*
 
-Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*`;
-          await flowDynamic(newMessage);
-          await new Promise(resolve => setTimeout(resolve, 5000));
+Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
+            ];
 
-          // Set initial messages sent and user has interacted
-          userContextManager.setInitialMessagesSent(userId, true);
-          userContextManager.setHasInteracted(userId, true); // Added to mark that user has interacted
+            // Enviar mensajes de la cola con un intervalo
+            for (const message of messageQueue) {
+              switch (message.type) {
+                case 'image':
+                  await flowDynamic([{ body: 'Promo campañas políticas', media: message.content }]);
+                  break;
+                case 'services':
+                  if (message.content && message.content.data) {
+                    await flowDynamic(message.content.data);
+                  }
+                  break;
+                case 'text':
+                  await flowDynamic(message.content);
+                  break;
+              }
+              await new Promise(resolve => setTimeout(resolve, 3000)); // Espera 3 segundos entre mensajes
+            }
 
-          logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
+            userContextManager.setInitialMessagesSent(userId, true);
+            userContextManager.setHasInteracted(userId, true);
+            logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
+          } catch (error) {
+            logger.error(`Error al enviar mensajes iniciales para usuario ${userId}: ${error.message}`);
+          } finally {
+            this.initialMessageLocks.delete(userId);
+          }
         } else {
           logger.info(`Usuario ${userId} ya ha interactuado, omitiendo mensajes iniciales`);
         }
@@ -129,17 +150,21 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*`;
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         const userId = ctx.from;
 
+        if (this.initialMessageLocks.get(userId)) {
+          logger.info(`Ignorando mensaje de usuario ${userId} durante el envío de mensajes iniciales`);
+          return;
+        }
+
         if (!userContextManager.hasUserInteracted(userId)) {
-          // Send initial messages without processing user input
           await this.handleInitialMessagesOnce(userId, flowDynamic);
         } else {
-          // Process user input in subsequent interactions
           this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
             await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });
         }
       });
   }
+
   createMediaFlow() {
     return addKeyword(EVENTS.MEDIA)
       .addAction(async (ctx, { flowDynamic }) => {
