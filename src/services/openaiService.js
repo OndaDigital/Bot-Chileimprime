@@ -44,7 +44,7 @@ class OpenAIService {
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
     console.log(contextStr);
-    console.log(JSON.stringify(allServices, null, 2));
+    //console.log(JSON.stringify(allServices, null, 2));
 
       // NUEVO: Incluir información sobre campos faltantes
       const missingFieldsMessage = chatContext.find(msg => msg.role === 'system' && msg.content.startsWith('Campos faltantes:'));
@@ -330,7 +330,7 @@ class OpenAIService {
         });
       });
     }
-    logger.info(`Servicios con precios: ${JSON.stringify(allServices, null, 2)}`);
+    //logger.info(`Servicios con precios: ${JSON.stringify(allServices, null, 2)}`);
     return allServices;
   }
 

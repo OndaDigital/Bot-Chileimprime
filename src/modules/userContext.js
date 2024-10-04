@@ -221,7 +221,6 @@ class UserContextManager {
     if (!order.filePath) missingFields.push('filePath');
     if (!order.fileAnalysis) missingFields.push('fileAnalysis');
     if (!order.fileAnalysisResponded) missingFields.push('fileAnalysisResponded');
-    if (!order.fileAnalysisHandled) missingFields.push('fileAnalysisHandled');
     if (!order.fileValidation) missingFields.push('fileValidation');
 
     // Verificar si el servicio requiere medidas
