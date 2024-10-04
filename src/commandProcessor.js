@@ -5,6 +5,7 @@ import openaiService from './services/openaiService.js';
 import config from './config/config.js';
 import sheetService from './services/sheetService.js'
 import { formatPrice, sendSplitMessages } from './utils/helpers.js';
+import { normalizeCommand, findClosestCommand, sanitizeJsonString } from './utils/commandUtils.js';
 
 class CommandProcessor {
   constructor() {}
@@ -12,6 +13,17 @@ class CommandProcessor {
   async processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
     try {
       logger.info(`Procesando comando para usuario ${userId}: ${JSON.stringify(command)}`);
+
+      // Normalizar y corregir el comando
+      const normalizedCommand = normalizeCommand(command.command);
+      const correctedCommand = findClosestCommand(normalizedCommand) || normalizedCommand;
+      
+      logger.info(`Comando normalizado: ${normalizedCommand}, Comando corregido: ${correctedCommand}`);
+      
+      if (correctedCommand !== command.command) {
+        logger.warn(`Comando corregido de "${command.command}" a "${correctedCommand}"`);
+      }
+
       switch (command.command) {
         case "LIST_ALL_SERVICES":
           return this.handleListAllServices(userId);
@@ -255,9 +267,14 @@ class CommandProcessor {
     const commands = aiResponse.match(commandRegex) || [];
     return commands.map(cmd => {
       try {
-        return JSON.parse(cmd);
+        const sanitizedCmd = sanitizeJsonString(cmd);
+        logger.debug(`Comando sanitizado: ${sanitizedCmd}`);
+        const parsedCmd = JSON.parse(sanitizedCmd);
+        logger.info(`Comando parseado correctamente: ${JSON.stringify(parsedCmd)}`);
+        return parsedCmd;
       } catch (error) {
         logger.error(`Error al parsear comando JSON: ${error.message}`);
+        logger.debug(`Comando problemático: ${cmd}`);
         return null;
       }
     }).filter(cmd => cmd !== null);
