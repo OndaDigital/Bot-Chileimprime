@@ -31,7 +31,7 @@ export default {
   idleWarningTime: parseInt(process.env.IDLE_WARNING_TIME) || 5 * 60 * 1000,
   idleTimeoutTime: parseInt(process.env.IDLE_TIMEOUT_TIME) || 10 * 60 * 1000,
   maxAudioSize: parseInt(process.env.MAX_AUDIO_SIZE) || 5 * 1024 * 1024,
-  languageModel: process.env.LANGUAGE_MODEL || 'gpt-4o-mini',
+  languageModel: process.env.LANGUAGE_MODEL || 'ft:gpt-4o-mini-2024-07-18:personal:modelo-chile-imprime:AEWZI9XK',
   timezone: process.env.TIMEZONE || 'America/Santiago',
   logLevel: process.env.LOG_LEVEL || 'info',
   maxTokens: parseInt(process.env.MAX_TOKENS) || 2000,

@@ -67,14 +67,14 @@ class OpenAIService {
 
     2. Inicio y Selección de Servicio:
        - SOLO Si es el primer mensaje, saluda al cliente de la siguiente forma:
-          👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
+👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
-          También puedes realizar las siguientes acciones:
-          - 🕒 Consultar horarios de atención
-          - 🎉 Conocer nuestras promociones actuales
-          - 🖨️ Resolver dudas sobre procesos de impresión
-          - 📄 Consultar especificaciones de archivos o parámetros técnicos
-          - 🎙️ Analizar archivos en tiempo real para evaluar validez. 
+También puedes realizar las siguientes acciones:
+- 🕒 Consultar horarios de atención
+- 🎉 Conocer nuestras promociones actuales
+- 🖨️ Resolver dudas sobre procesos de impresión
+- 📄 Consultar especificaciones de archivos o parámetros técnicos
+- 🎙️ Analizar archivos en tiempo real para evaluar validez. 
 
           Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
 
