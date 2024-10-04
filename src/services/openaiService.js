@@ -74,22 +74,7 @@ class OpenAIService {
        - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
 
-    2. Inicio y Selección de Servicio:
-       - (Obligatorio) SIEMPRE QUE SEA EL primer mensaje, saluda al cliente de la siguiente forma:
-"
-👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
-
-También puedes realizar las siguientes acciones:
-- 🕒 Consultar horarios de atención
-- 🎉 Conocer nuestras promociones actuales
-- 🖨️ Resolver dudas sobre procesos de impresión
-- 📄 Consultar especificaciones de archivos o parámetros técnicos
-- 🎙️ Analizar archivos en tiempo real para evaluar validez. 
-"
-          Si necesitas información sobre el estado de tu pedido, realizar el pago de una cotización, por favor escribe *agente* o *humano*.
-
-          Para reiniciar el bot en cualquier momento, simplemente escribe *bot*.
-
+  2. Inicio y Selección de Servicio:
        - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
        - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.

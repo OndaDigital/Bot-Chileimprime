@@ -75,22 +75,39 @@ class FlowManager {
       this.initialMessagePromises.set(userId, (async () => {
         if (!userContextManager.hasUserInteracted(userId)) {
           logger.info(`Enviando mensajes iniciales para usuario ${userId}`);
-          
+
+          // Send initial image
           await flowDynamic([{ 
             body: `Promo campañas politicas`,
             media: `https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg` 
           }]);
-          
           await new Promise(resolve => setTimeout(resolve, 5000));
 
+          // Send services list
           const servicesList = await commandProcessor.handleListAllServices(userId);
           if (servicesList && servicesList.data) {
             await flowDynamic(servicesList.data);
           }
-
           await new Promise(resolve => setTimeout(resolve, 5000));
 
+          // NEW: Send the additional message after services
+          const newMessage = `
+👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
+
+También puedes realizar las siguientes acciones:
+- 🕒 Consultar horarios de atención
+- 🎉 Conocer nuestras promociones actuales
+- 🖨️ Resolver dudas sobre procesos de impresión
+- 📄 Consultar especificaciones de archivos o parámetros técnicos
+- 🎙️ Analizar archivos en tiempo real para evaluar validez.
+          `;
+          await flowDynamic(newMessage);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+
+          // Set initial messages sent and user has interacted
           userContextManager.setInitialMessagesSent(userId, true);
+          userContextManager.setHasInteracted(userId, true); // Added to mark that user has interacted
+
           logger.info(`Mensajes iniciales enviados y estado actualizado para usuario ${userId}`);
         } else {
           logger.info(`Usuario ${userId} ya ha interactuado, omitiendo mensajes iniciales`);
@@ -107,17 +124,18 @@ class FlowManager {
     return addKeyword(EVENTS.WELCOME)
       .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         const userId = ctx.from;
-        
-        if (!userContextManager.hasUserInteracted(userId)) {
-          await this.handleInitialMessagesOnce(userId, flowDynamic);
-        }
 
-        this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
-          await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
-        });
+        if (!userContextManager.hasUserInteracted(userId)) {
+          // Send initial messages without processing user input
+          await this.handleInitialMessagesOnce(userId, flowDynamic);
+        } else {
+          // Process user input in subsequent interactions
+          this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
+            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
+          });
+        }
       });
   }
-
   createMediaFlow() {
     return addKeyword(EVENTS.MEDIA)
       .addAction(async (ctx, { flowDynamic }) => {
