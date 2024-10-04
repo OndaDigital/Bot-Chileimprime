@@ -95,12 +95,16 @@ class FlowManager {
 👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
+- 🔍 Ver el estado de tus pedidos anteriores
 - 🕒 Consultar horarios de atención
 - 🎉 Conocer nuestras promociones actuales
 - 🖨️ Resolver dudas sobre procesos de impresión
 - 📄 Consultar especificaciones de archivos o parámetros técnicos
 - 🎙️ Analizar archivos en tiempo real para evaluar validez.
-          `;
+
+Si necesitas contactar a un agente, por favor escribe *agente* o *humano.*
+
+Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*`;
           await flowDynamic(newMessage);
           await new Promise(resolve => setTimeout(resolve, 5000));
 
