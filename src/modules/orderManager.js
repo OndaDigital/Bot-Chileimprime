@@ -183,55 +183,70 @@ class OrderManager {
 
   calculatePrice(order) {
     const serviceInfo = userContextManager.getServiceInfo(order.service);
-
+  
     let total = 0;
     let area = 1;
     let precioM2 = serviceInfo.precio;
     let precioTerminaciones = 0;
-
+    let precioTotalTerminaciones = 0;
+  
+    logger.info(`Calculando precio para orden: ${JSON.stringify(order)}`);
+    logger.info(`Información del servicio: ${JSON.stringify(serviceInfo)}`);
+  
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
       area = order.measures.width * order.measures.height;
       total = area * precioM2 * order.quantity;
-
+  
+      // Calcula el precio de las terminaciones por m2
       if (order.finishes.sellado) {
         precioTerminaciones += serviceInfo.precioSellado;
-        total += serviceInfo.precioSellado * area;
       }
       if (order.finishes.ojetillos) {
         precioTerminaciones += serviceInfo.precioOjetillos;
-        total += serviceInfo.precioOjetillos * area;
       }
       if (order.finishes.bolsillo) {
         precioTerminaciones += serviceInfo.precioBolsillo;
-        total += serviceInfo.precioBolsillo * area;
       }
+  
+      // Calcula el precio total de las terminaciones
+      precioTotalTerminaciones = precioTerminaciones * area * order.quantity;
+      total += precioTotalTerminaciones;
+  
+      logger.info(`Precio de terminaciones por m2: ${precioTerminaciones}`);
+      logger.info(`Precio total de terminaciones: ${precioTotalTerminaciones}`);
     } else {
       total = precioM2 * order.quantity;
-
+  
+      // Para servicios sin medidas, calculamos las terminaciones por unidad
       if (order.finishes.sellado) {
         precioTerminaciones += serviceInfo.precioSellado;
-        total += serviceInfo.precioSellado * order.quantity;
       }
       if (order.finishes.ojetillos) {
         precioTerminaciones += serviceInfo.precioOjetillos;
-        total += serviceInfo.precioOjetillos * order.quantity;
       }
       if (order.finishes.bolsillo) {
         precioTerminaciones += serviceInfo.precioBolsillo;
-        total += serviceInfo.precioBolsillo * order.quantity;
       }
+  
+      precioTotalTerminaciones = precioTerminaciones * order.quantity;
+      total += precioTotalTerminaciones;
+  
+      logger.info(`Precio de terminaciones por unidad: ${precioTerminaciones}`);
+      logger.info(`Precio total de terminaciones: ${precioTotalTerminaciones}`);
     }
-
+  
     const precioBase = area * precioM2 * order.quantity;
-    const precioTotalConTerminaciones = total;
-
+  
+    logger.info(`Precio base: ${precioBase}`);
+    logger.info(`Precio total: ${total}`);
+  
     return { 
       total, 
       area, 
       precioM2, 
       precioBase, 
       precioTerminaciones, 
-      precioTotalConTerminaciones 
+      precioTotalTerminaciones
     };
   }
 
@@ -277,7 +292,7 @@ class OrderManager {
         .filter(([_, value]) => value)
         .map(([key, _]) => key),
       precioTerminaciones: calculatedPrices.precioTerminaciones,
-      precioTotalConTerminaciones: calculatedPrices.precioTotalConTerminaciones,
+      precioTotalTerminaciones: calculatedPrices.precioTotalTerminaciones,
       total: calculatedPrices.total,
       observaciones: order.observaciones || 'Sin observaciones'
     };
@@ -287,7 +302,7 @@ class OrderManager {
     try {
       const result = await sheetService.saveOrder(finalOrder);
       logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
-
+  
       if (result.success) {
         this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);

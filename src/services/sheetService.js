@@ -125,15 +125,22 @@ class GoogleSheetService {
   async fetchServices() {
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[0];
+      const sheet = this.doc.sheetsByIndex[0]; // La hoja "Control" es la primera hoja
       await sheet.loadCells('A1:Q1000');
+  
+      // Obtener los precios globales de las terminaciones
+      const precioSellado = sheet.getCell(1, 14).value; // Celda O2
+      const precioBolsillo = sheet.getCell(1, 15).value; // Celda P2
+      const precioOjetillos = sheet.getCell(1, 16).value; // Celda Q2
+  
+      logger.info(`Precios globales de terminaciones: Sellado: ${precioSellado}, Bolsillo: ${precioBolsillo}, Ojetillos: ${precioOjetillos}`);
   
       const services = {};
       for (let i = 1; i < sheet.rowCount; i++) {
         const id = sheet.getCell(i, 0).value;
         if (!id) break;
   
-        const service = this.extractServiceData(sheet, i);
+        const service = this.extractServiceData(sheet, i, { precioSellado, precioBolsillo, precioOjetillos });
         if (service) {
           if (!services[service.category]) {
             services[service.category] = [];
@@ -142,14 +149,16 @@ class GoogleSheetService {
         }
       }
   
+      logger.info(`Servicios cargados: ${Object.keys(services).length} categorías`);
       return services;
     } catch (err) {
       logger.error("Error al obtener los servicios:", err);
+      logger.error("Stack trace:", err.stack);
       throw new CustomError('ServicesFetchError', 'Error al obtener los servicios desde Google Sheets', err);
     }
   }
 
-  extractServiceData(sheet, row) {
+  extractServiceData(sheet, row, globalPrices) {
     try {
       const widthsString = sheet.getCell(row, 12).value;
       const availableWidths = widthsString ? this.parseAvailableWidths(widthsString) : [];
@@ -175,9 +184,9 @@ class GoogleSheetService {
         status: sheet.getCell(row, 10).value,
         precio: parseFloat(sheet.getCell(row, 11).value) || 0,
         availableWidths: availableWidths,
-        precioSellado: parseFloat(sheet.getCell(row, 14).value) || 0,
-        precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
-        precioOjetillos: parseFloat(sheet.getCell(row, 16).value) || 0
+        precioSellado: globalPrices.precioSellado,
+        precioBolsillo: globalPrices.precioBolsillo,
+        precioOjetillos: globalPrices.precioOjetillos
       };
   
       logger.info(`Servicio extraído: ${JSON.stringify(service)}`);
@@ -312,8 +321,10 @@ class GoogleSheetService {
     
     const neto = data.total / 1.19; // Cálculo del neto (sin IVA)
     const iva = data.total - neto; // Cálculo del IVA
-
-    return [
+  
+    logger.info(`Preparando datos para guardar en la hoja. Orden número: ${orderNumber}`);
+  
+    const rowData = [
       orderNumber,
       1, // Número de servicios (por ahora siempre 1)
       "Efectivo/transferencia",
@@ -343,6 +354,10 @@ class GoogleSheetService {
       "sin nota", // Anotaciones
       "COTIZACIÓN" // Extras
     ];
+  
+    logger.info(`Datos preparados para la fila: ${JSON.stringify(rowData)}`);
+  
+    return rowData;
   }
 
   processAddRowResult(result, sheet) {

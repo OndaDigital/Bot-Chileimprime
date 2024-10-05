@@ -108,6 +108,7 @@ import openaiService from './services/openaiService.js';
 import config from './config/config.js';
 import sheetService from './services/sheetService.js'
 import { formatPrice, sendSplitMessages } from './utils/helpers.js';
+import { normalizeCommand, findClosestCommand, sanitizeJsonString } from './utils/commandUtils.js';
 
 class CommandProcessor {
   constructor() {}
@@ -115,6 +116,17 @@ class CommandProcessor {
   async processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
     try {
       logger.info(`Procesando comando para usuario ${userId}: ${JSON.stringify(command)}`);
+
+      // Normalizar y corregir el comando
+      const normalizedCommand = normalizeCommand(command.command);
+      const correctedCommand = findClosestCommand(normalizedCommand) || normalizedCommand;
+      
+      logger.info(`Comando normalizado: ${normalizedCommand}, Comando corregido: ${correctedCommand}`);
+      
+      if (correctedCommand !== command.command) {
+        logger.warn(`Comando corregido de "${command.command}" a "${correctedCommand}"`);
+      }
+
       switch (command.command) {
         case "LIST_ALL_SERVICES":
           return this.handleListAllServices(userId);
@@ -358,9 +370,14 @@ class CommandProcessor {
     const commands = aiResponse.match(commandRegex) || [];
     return commands.map(cmd => {
       try {
-        return JSON.parse(cmd);
+        const sanitizedCmd = sanitizeJsonString(cmd);
+        logger.debug(`Comando sanitizado: ${sanitizedCmd}`);
+        const parsedCmd = JSON.parse(sanitizedCmd);
+        logger.info(`Comando parseado correctamente: ${JSON.stringify(parsedCmd)}`);
+        return parsedCmd;
       } catch (error) {
         logger.error(`Error al parsear comando JSON: ${error.message}`);
+        logger.debug(`Comando problemático: ${cmd}`);
         return null;
       }
     }).filter(cmd => cmd !== null);
@@ -429,27 +446,39 @@ class CommandProcessor {
 
   async handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
     try {
-      const result = await orderManager.handleConfirmOrder(userId);
+      logger.info(`Iniciando proceso de confirmación de orden para usuario ${userId}`);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+        logger.warn(errorMessage);
+        throw new CustomError('IncompleteOrderError', errorMessage);
+      }
+
+      // Añadir información del contexto
+      currentOrder.userName = ctx.pushName || 'Cliente';
+      currentOrder.userPhone = ctx.from;
+
+      const result = await orderManager.finalizeOrder(userId, currentOrder);
+      
       if (result.success) {
-        logger.info(`Pedido confirmado para usuario ${userId}`);
-        return { currentOrderUpdated: true, ...result, nextFlow: 'promoFlow' };
+        logger.info(`Pedido confirmado para usuario ${userId}. Número de pedido: ${result.orderNumber}`);
+        await flowDynamic(`¡Gracias por tu pedido! Tu número de cotización es: ${result.orderNumber}`);
+        await flowDynamic(result.message);
+        return { currentOrderUpdated: true, nextFlow: 'promoFlow' };
       } else {
-        // Este bloque no se ejecutará ya que se lanza una excepción en caso de error
+        throw new Error("Error al confirmar el pedido");
       }
     } catch (error) {
       logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
       if (error.name === 'IncompleteOrderError') {
-        // NUEVO: Obtener campos faltantes y actualizar el contexto del asistente
-        const missingFields = userContextManager.getIncompleteFields(userId);
-        const systemMessage = `Campos faltantes: ${missingFields.join(', ')}`;
+        const systemMessage = `Campos faltantes: ${error.message}`;
         userContextManager.updateContext(userId, systemMessage, "system");
-
-        return {
-          currentOrderUpdated: false,
-          error: error.message,
-          missingFields: missingFields
-        };
+        await flowDynamic("Lo siento, pero parece que falta información en tu pedido. Por favor, completa todos los detalles antes de confirmar.");
+        return { currentOrderUpdated: false, error: error.message };
       } else {
+        await flowDynamic("Lo siento, ha ocurrido un error al procesar tu pedido. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
         return { currentOrderUpdated: false, error: error.message };
       }
     }
@@ -1332,24 +1361,54 @@ class OrderManager {
     const serviceInfo = userContextManager.getServiceInfo(order.service);
 
     let total = 0;
-    let area = 0;
+    let area = 1;
+    let precioM2 = serviceInfo.precio;
+    let precioTerminaciones = 0;
 
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
       area = order.measures.width * order.measures.height;
-      total = area * serviceInfo.precio * order.quantity;
+      total = area * precioM2 * order.quantity;
 
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * area;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * area;
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+        total += serviceInfo.precioSellado * area;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+        total += serviceInfo.precioOjetillos * area;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+        total += serviceInfo.precioBolsillo * area;
+      }
     } else {
-      total = serviceInfo.precio * order.quantity;
+      total = precioM2 * order.quantity;
 
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+        total += serviceInfo.precioSellado * order.quantity;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+        total += serviceInfo.precioOjetillos * order.quantity;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+        total += serviceInfo.precioBolsillo * order.quantity;
+      }
     }
 
-    return { total, area };
+    const precioBase = area * precioM2 * order.quantity;
+    const precioTotalConTerminaciones = total;
+
+    return { 
+      total, 
+      area, 
+      precioM2, 
+      precioBase, 
+      precioTerminaciones, 
+      precioTotalConTerminaciones 
+    };
   }
 
   formatOrderSummary(order) {
@@ -1379,13 +1438,24 @@ class OrderManager {
   async finalizeOrder(userId, order) {
     logger.info(`Finalizando orden para usuario ${userId}`);
     
+    const calculatedPrices = this.calculatePrice(order);
     const finalOrder = {
-      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
+      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm:ss'),
       telefono: userId,
       nombre: order.userName || 'Cliente',
-      pedido: this.formatOrderForSheet(order),
-      observaciones: order.observaciones || 'Sin observaciones',
-      total: `$${formatPrice(order.total)}`
+      servicio: order.service,
+      cantidad: order.quantity,
+      measures: order.measures,
+      area: calculatedPrices.area,
+      precioM2: calculatedPrices.precioM2,
+      precioBase: calculatedPrices.precioBase,
+      terminaciones: Object.entries(order.finishes)
+        .filter(([_, value]) => value)
+        .map(([key, _]) => key),
+      precioTerminaciones: calculatedPrices.precioTerminaciones,
+      precioTotalConTerminaciones: calculatedPrices.precioTotalConTerminaciones,
+      total: calculatedPrices.total,
+      observaciones: order.observaciones || 'Sin observaciones'
     };
   
     logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
@@ -1395,7 +1465,9 @@ class OrderManager {
       logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
 
       if (result.success) {
+        this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
+        
         return { 
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
@@ -2520,10 +2592,11 @@ class GoogleSheetService {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1];
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
       await sheet.loadCells();
   
-      const rowData = this.prepareRowData(data);
+      const orderNumber = await this.getNextOrderNumber();
+      const rowData = this.prepareRowData(data, orderNumber);
       const result = await sheet.addRows([rowData]);
   
       return this.processAddRowResult(result, sheet);
@@ -2534,18 +2607,42 @@ class GoogleSheetService {
     }
   }
 
-  prepareRowData(data) {
-    const formattedDate = moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd');
-    const censoredPhone = this.censorPhoneNumber(data.telefono);
+  prepareRowData(data, orderNumber) {
+    const now = moment().tz(config.timezone);
+    const formattedDate = now.format('DD-MM-YYYY HH:mm:ss');
+    
+    const neto = data.total / 1.19; // Cálculo del neto (sin IVA)
+    const iva = data.total - neto; // Cálculo del IVA
+
     return [
+      orderNumber,
+      1, // Número de servicios (por ahora siempre 1)
+      "Efectivo/transferencia",
       formattedDate,
-      censoredPhone,
-      data.nombre,
-      data.correo || '',
-      data.pedido,
-      data.archivos || '',
+      formattedDate, // Fecha de modificación (igual a la fecha de ingreso por ahora)
+      "Sara - agente virtual",
+      data.servicio,
+      data.cantidad,
+      `${data.measures.width} x ${data.measures.height}`,
+      data.area,
+      data.precioM2,
+      data.precioBase,
+      data.terminaciones.join(", ") || "No",
+      data.precioTerminaciones, // Columna N: Precio de Terminación/m2
+      data.precioTotalTerminaciones, // Columna O: Precio Total con Terminación
+      "Boleta",
+      neto,
       data.total,
-      "Nueva cotización"
+      data.nombre,
+      "contacto@chileimprime.cl", // Correo por defecto
+      "66.666.666-6", // RUT por defecto
+      data.telefono,
+      '', '', '', '', '', '', '', '', '', '', '', '', // Columnas vacías
+      "Pendiente", // Estado de pago
+      "chileimprime.cl", // URL del diseño por defecto
+      "Pendiente", // Estado del proyecto
+      "sin nota", // Anotaciones
+      "COTIZACIÓN" // Extras
     ];
   }
 
@@ -2558,6 +2655,32 @@ class GoogleSheetService {
     } else {
       logger.warn("No se pudo obtener información de la fila añadida");
       return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
+    }
+  }
+
+  async getNextOrderNumber() {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
+      await sheet.loadCells('A:A');
+      
+      let lastOrderNumber = 0;
+      for (let i = sheet.rowCount - 1; i >= 2; i--) {
+        const cell = sheet.getCell(i, 0);
+        if (cell.value) {
+          const match = cell.value.match(/WA-(\d+)/);
+          if (match) {
+            lastOrderNumber = parseInt(match[1], 10);
+            break;
+          }
+        }
+      }
+      
+      const newOrderNumber = lastOrderNumber + 1;
+      return `WA-${newOrderNumber}`;
+    } catch (error) {
+      logger.error("Error al generar número de pedido:", error);
+      throw new CustomError('OrderNumberGenerationError', 'Error al generar número de pedido', error);
     }
   }
 
@@ -2703,6 +2826,86 @@ class WhatsAppService {
 }
 
 export default new WhatsAppService();
+
+
+// utils\commandUtils.js
+
+// utils/commandUtils.js
+
+import logger from './logger.js';
+
+const knownCommands = {
+  'LIST_ALL_SERVICES': ['list all services', 'listallservices'],
+  'SELECT_SERVICE': ['select service', 'selectservice'],
+  'SET_MEASURES': ['set measures', 'setmeasures'],
+  'SET_QUANTITY': ['set quantity', 'setquantity'],
+  'SET_FINISHES': ['set finishes', 'setfinishes'],
+  'CONFIRM_ORDER': ['confirm order', 'confirmorder'],
+  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis']
+};
+
+export function normalizeCommand(command) {
+  return command.toLowerCase().replace(/\s+/g, '_');
+}
+
+export function findClosestCommand(command) {
+  const normalizedCommand = normalizeCommand(command);
+  
+  // Primero, buscar una coincidencia exacta
+  for (const [knownCommand, variations] of Object.entries(knownCommands)) {
+    if (normalizedCommand === knownCommand.toLowerCase() || variations.includes(normalizedCommand)) {
+      return knownCommand;
+    }
+  }
+  
+  // Si no hay coincidencia exacta, usar la distancia de Levenshtein
+  let closestCommand = null;
+  let minDistance = Infinity;
+  
+  for (const knownCommand of Object.keys(knownCommands)) {
+    const distance = levenshteinDistance(normalizedCommand, knownCommand.toLowerCase());
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestCommand = knownCommand;
+    }
+  }
+  
+  // Solo devolver el comando más cercano si la distancia es menor que un umbral
+  return minDistance <= 3 ? closestCommand : null;
+}
+
+function levenshteinDistance(a, b) {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+export function sanitizeJsonString(jsonString) {
+  // Asegurar que las propiedades del JSON estén entre comillas dobles
+  return jsonString.replace(/(\w+):/g, '"$1":');
+}
 
 
 // utils\errorHandler.js

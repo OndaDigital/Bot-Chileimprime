@@ -352,11 +352,19 @@ class CommandProcessor {
         logger.warn(errorMessage);
         throw new CustomError('IncompleteOrderError', errorMessage);
       }
-
+  
       // Añadir información del contexto
       currentOrder.userName = ctx.pushName || 'Cliente';
       currentOrder.userPhone = ctx.from;
-
+  
+      // Calcular precios y actualizar la orden
+      const calculatedPrices = orderManager.calculatePrice(currentOrder);
+      currentOrder.precioTerminaciones = calculatedPrices.precioTerminaciones;
+      currentOrder.precioTotalTerminaciones = calculatedPrices.precioTotalTerminaciones;
+      currentOrder.total = calculatedPrices.total;
+  
+      logger.info(`Precios calculados para la orden: ${JSON.stringify(calculatedPrices)}`);
+  
       const result = await orderManager.finalizeOrder(userId, currentOrder);
       
       if (result.success) {
