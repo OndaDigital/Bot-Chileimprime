@@ -291,10 +291,11 @@ class GoogleSheetService {
     logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
     try {
       await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1];
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
       await sheet.loadCells();
   
-      const rowData = this.prepareRowData(data);
+      const orderNumber = await this.getNextOrderNumber();
+      const rowData = this.prepareRowData(data, orderNumber);
       const result = await sheet.addRows([rowData]);
   
       return this.processAddRowResult(result, sheet);
@@ -305,18 +306,42 @@ class GoogleSheetService {
     }
   }
 
-  prepareRowData(data) {
-    const formattedDate = moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd');
-    const censoredPhone = this.censorPhoneNumber(data.telefono);
+  prepareRowData(data, orderNumber) {
+    const now = moment().tz(config.timezone);
+    const formattedDate = now.format('DD-MM-YYYY HH:mm:ss');
+    
+    const neto = data.total / 1.19; // Cálculo del neto (sin IVA)
+    const iva = data.total - neto; // Cálculo del IVA
+
     return [
+      orderNumber,
+      1, // Número de servicios (por ahora siempre 1)
+      "Efectivo/transferencia",
       formattedDate,
-      censoredPhone,
-      data.nombre,
-      data.correo || '',
-      data.pedido,
-      data.archivos || '',
+      formattedDate, // Fecha de modificación (igual a la fecha de ingreso por ahora)
+      "Sara - agente virtual",
+      data.servicio,
+      data.cantidad,
+      `${data.measures.width} x ${data.measures.height}`,
+      data.area,
+      data.precioM2,
+      data.precioBase,
+      data.terminaciones.join(", ") || "No",
+      data.precioTerminaciones, // Columna N: Precio de Terminación/m2
+      data.precioTotalTerminaciones, // Columna O: Precio Total con Terminación
+      "Boleta",
+      neto,
       data.total,
-      "Nueva cotización"
+      data.nombre,
+      "contacto@chileimprime.cl", // Correo por defecto
+      "66.666.666-6", // RUT por defecto
+      data.telefono,
+      '', '', '', '', '', '', '', '', '', '', '', '', // Columnas vacías
+      "Pendiente", // Estado de pago
+      "chileimprime.cl", // URL del diseño por defecto
+      "Pendiente", // Estado del proyecto
+      "sin nota", // Anotaciones
+      "COTIZACIÓN" // Extras
     ];
   }
 
@@ -329,6 +354,32 @@ class GoogleSheetService {
     } else {
       logger.warn("No se pudo obtener información de la fila añadida");
       return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
+    }
+  }
+
+  async getNextOrderNumber() {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
+      await sheet.loadCells('A:A');
+      
+      let lastOrderNumber = 0;
+      for (let i = sheet.rowCount - 1; i >= 2; i--) {
+        const cell = sheet.getCell(i, 0);
+        if (cell.value) {
+          const match = cell.value.match(/WA-(\d+)/);
+          if (match) {
+            lastOrderNumber = parseInt(match[1], 10);
+            break;
+          }
+        }
+      }
+      
+      const newOrderNumber = lastOrderNumber + 1;
+      return `WA-${newOrderNumber}`;
+    } catch (error) {
+      logger.error("Error al generar número de pedido:", error);
+      throw new CustomError('OrderNumberGenerationError', 'Error al generar número de pedido', error);
     }
   }
 

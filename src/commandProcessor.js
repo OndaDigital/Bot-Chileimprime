@@ -343,27 +343,39 @@ class CommandProcessor {
 
   async handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
     try {
-      const result = await orderManager.handleConfirmOrder(userId);
+      logger.info(`Iniciando proceso de confirmación de orden para usuario ${userId}`);
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+        logger.warn(errorMessage);
+        throw new CustomError('IncompleteOrderError', errorMessage);
+      }
+
+      // Añadir información del contexto
+      currentOrder.userName = ctx.pushName || 'Cliente';
+      currentOrder.userPhone = ctx.from;
+
+      const result = await orderManager.finalizeOrder(userId, currentOrder);
+      
       if (result.success) {
-        logger.info(`Pedido confirmado para usuario ${userId}`);
-        return { currentOrderUpdated: true, ...result, nextFlow: 'promoFlow' };
+        logger.info(`Pedido confirmado para usuario ${userId}. Número de pedido: ${result.orderNumber}`);
+        await flowDynamic(`¡Gracias por tu pedido! Tu número de cotización es: ${result.orderNumber}`);
+        await flowDynamic(result.message);
+        return { currentOrderUpdated: true, nextFlow: 'promoFlow' };
       } else {
-        // Este bloque no se ejecutará ya que se lanza una excepción en caso de error
+        throw new Error("Error al confirmar el pedido");
       }
     } catch (error) {
       logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
       if (error.name === 'IncompleteOrderError') {
-        // NUEVO: Obtener campos faltantes y actualizar el contexto del asistente
-        const missingFields = userContextManager.getIncompleteFields(userId);
-        const systemMessage = `Campos faltantes: ${missingFields.join(', ')}`;
+        const systemMessage = `Campos faltantes: ${error.message}`;
         userContextManager.updateContext(userId, systemMessage, "system");
-
-        return {
-          currentOrderUpdated: false,
-          error: error.message,
-          missingFields: missingFields
-        };
+        await flowDynamic("Lo siento, pero parece que falta información en tu pedido. Por favor, completa todos los detalles antes de confirmar.");
+        return { currentOrderUpdated: false, error: error.message };
       } else {
+        await flowDynamic("Lo siento, ha ocurrido un error al procesar tu pedido. Por favor, intenta nuevamente o contacta con nuestro equipo de soporte.");
         return { currentOrderUpdated: false, error: error.message };
       }
     }

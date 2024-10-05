@@ -185,24 +185,54 @@ class OrderManager {
     const serviceInfo = userContextManager.getServiceInfo(order.service);
 
     let total = 0;
-    let area = 0;
+    let area = 1;
+    let precioM2 = serviceInfo.precio;
+    let precioTerminaciones = 0;
 
     if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
       area = order.measures.width * order.measures.height;
-      total = area * serviceInfo.precio * order.quantity;
+      total = area * precioM2 * order.quantity;
 
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * area;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * area;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * area;
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+        total += serviceInfo.precioSellado * area;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+        total += serviceInfo.precioOjetillos * area;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+        total += serviceInfo.precioBolsillo * area;
+      }
     } else {
-      total = serviceInfo.precio * order.quantity;
+      total = precioM2 * order.quantity;
 
-      if (order.finishes.sellado) total += serviceInfo.precioSellado * order.quantity;
-      if (order.finishes.ojetillos) total += serviceInfo.precioOjetillos * order.quantity;
-      if (order.finishes.bolsillo) total += serviceInfo.precioBolsillo * order.quantity;
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+        total += serviceInfo.precioSellado * order.quantity;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+        total += serviceInfo.precioOjetillos * order.quantity;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+        total += serviceInfo.precioBolsillo * order.quantity;
+      }
     }
 
-    return { total, area };
+    const precioBase = area * precioM2 * order.quantity;
+    const precioTotalConTerminaciones = total;
+
+    return { 
+      total, 
+      area, 
+      precioM2, 
+      precioBase, 
+      precioTerminaciones, 
+      precioTotalConTerminaciones 
+    };
   }
 
   formatOrderSummary(order) {
@@ -232,13 +262,24 @@ class OrderManager {
   async finalizeOrder(userId, order) {
     logger.info(`Finalizando orden para usuario ${userId}`);
     
+    const calculatedPrices = this.calculatePrice(order);
     const finalOrder = {
-      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm[hrs] - dddd'),
+      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm:ss'),
       telefono: userId,
       nombre: order.userName || 'Cliente',
-      pedido: this.formatOrderForSheet(order),
-      observaciones: order.observaciones || 'Sin observaciones',
-      total: `$${formatPrice(order.total)}`
+      servicio: order.service,
+      cantidad: order.quantity,
+      measures: order.measures,
+      area: calculatedPrices.area,
+      precioM2: calculatedPrices.precioM2,
+      precioBase: calculatedPrices.precioBase,
+      terminaciones: Object.entries(order.finishes)
+        .filter(([_, value]) => value)
+        .map(([key, _]) => key),
+      precioTerminaciones: calculatedPrices.precioTerminaciones,
+      precioTotalConTerminaciones: calculatedPrices.precioTotalConTerminaciones,
+      total: calculatedPrices.total,
+      observaciones: order.observaciones || 'Sin observaciones'
     };
   
     logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
@@ -248,7 +289,9 @@ class OrderManager {
       logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
 
       if (result.success) {
+        this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
+        
         return { 
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
