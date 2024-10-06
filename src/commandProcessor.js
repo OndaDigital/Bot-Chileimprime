@@ -330,12 +330,19 @@ class CommandProcessor {
   }
 
   async handleSelectService(userId, serviceName) {
+    if (!serviceName) {
+      logger.warn(`Nombre de servicio inválido: ${serviceName}`);
+      await flowDynamic('Parece que no has especificado un servicio válido. Por favor, indícanos qué servicio deseas.');
+      return { currentOrderUpdated: false, error: 'El nombre del servicio es inválido o no se proporcionó.' };
+    }
+
     try {
       const result = await orderManager.handleSelectService(userId, serviceName);
       logger.info(`Servicio seleccionado para usuario ${userId}: ${serviceName}`);
       return { currentOrderUpdated: true, ...result };
     } catch (error) {
       logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
+      await flowDynamic(`Lo siento, ha ocurrido un error al seleccionar el servicio. ${error.message}`);
       return { currentOrderUpdated: false, error: error.message };
     }
   }

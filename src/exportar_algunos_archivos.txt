@@ -1,105 +1,5 @@
 
-// app.js
-
-import "dotenv/config";
-import flowManager from './modules/flowManager.js';
-import whatsappService from './services/whatsappService.js';
-import sheetService from './services/sheetService.js';
-import logger from './utils/logger.js';
-import createMiddleware from './core/middleware.js';
-import logMiddleware from './core/log-middleware.js';
-import userContextManager from './modules/userContext.js';
-import config from './config/config.js';
-import { errorHandler } from './utils/errorHandler.js';
-import fileValidationService from './services/fileValidationService.js';
-
-const middleware = createMiddleware([logMiddleware]);
-
-const initializeServices = async () => {
-  let services = null;
-  let additionalInfo = null;
-
-  try {
-    await sheetService.initialize();
-
-    services = await sheetService.getServices();
-    additionalInfo = await sheetService.getAdditionalInfo();
-    
-    if (services && additionalInfo) {
-      userContextManager.setGlobalData(services, additionalInfo);
-      logger.info("Servicios e información adicional inicializados correctamente");
-    } else {
-      throw new Error("No se pudieron obtener los servicios o la información adicional");
-    }
-  } catch (error) {
-    logger.error(`Error al inicializar servicios: ${error.message}`);
-    logger.warn("Iniciando con funcionalidad reducida");
-  }
-
-  return { services, additionalInfo };
-};
-
-const main = async () => {
-  try {
-    const { services, additionalInfo } = await initializeServices();
-
-    const flows = await flowManager.initializeFlows();
-
-    flows.forEach(flow => {
-      flow.addAction(middleware);
-    });
-
-    await whatsappService.initialize(flows);
-
-    logger.info('Bot inicializado correctamente');
-
-    if (services && additionalInfo) {
-      logger.info('Bot iniciado con todas las funcionalidades');
-    } else {
-      logger.warn('Bot iniciado con funcionalidad reducida. Algunas características pueden no estar disponibles.');
-    }
-
-    // Configurar actualización periódica de los servicios y la información adicional
-    setInterval(async () => {
-      try {
-        await sheetService.reinitialize();
-        const updatedServices = await sheetService.getServices();
-        const updatedAdditionalInfo = await sheetService.getAdditionalInfo();
-        if (updatedServices && updatedAdditionalInfo) {
-          userContextManager.setGlobalData(updatedServices, updatedAdditionalInfo);
-          logger.info("Servicios e información adicional actualizados correctamente");
-        } else {
-          logger.warn("No se pudieron actualizar los servicios o la información adicional");
-        }
-      } catch (error) {
-        logger.error(`Error al actualizar servicios e información adicional: ${error.message}`);
-      }
-    }, config.servicesUpdateInterval);
-
-  } catch (error) {
-    logger.error(`Error crítico al inicializar el bot: ${error.message}`);
-    process.exit(1);
-  }
-};
-
-main().catch(err => {
-  logger.error('Error fatal en main:', err);
-  process.exit(1);
-});
-
-// Manejo de errores no capturados
-process.on('uncaughtException', (error) => {
-  logger.error(`Uncaught Exception: ${error.message}`);
-  // Implementar lógica adicional si es necesario (por ejemplo, reiniciar el bot)
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
-  // Implementar lógica adicional si es necesario
-});
-
-
-// commandProcessor.js
+// Archivo: commandProcessor.js
 
 import logger from './utils/logger.js';
 import userContextManager from './modules/userContext.js';
@@ -433,12 +333,19 @@ class CommandProcessor {
   }
 
   async handleSelectService(userId, serviceName) {
+    if (!serviceName) {
+      logger.warn(`Nombre de servicio inválido: ${serviceName}`);
+      await flowDynamic('Parece que no has especificado un servicio válido. Por favor, indícanos qué servicio deseas.');
+      return { currentOrderUpdated: false, error: 'El nombre del servicio es inválido o no se proporcionó.' };
+    }
+
     try {
       const result = await orderManager.handleSelectService(userId, serviceName);
       logger.info(`Servicio seleccionado para usuario ${userId}: ${serviceName}`);
       return { currentOrderUpdated: true, ...result };
     } catch (error) {
       logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
+      await flowDynamic(`Lo siento, ha ocurrido un error al seleccionar el servicio. ${error.message}`);
       return { currentOrderUpdated: false, error: error.message };
     }
   }
@@ -455,11 +362,19 @@ class CommandProcessor {
         logger.warn(errorMessage);
         throw new CustomError('IncompleteOrderError', errorMessage);
       }
-
+  
       // Añadir información del contexto
       currentOrder.userName = ctx.pushName || 'Cliente';
       currentOrder.userPhone = ctx.from;
-
+  
+      // Calcular precios y actualizar la orden
+      const calculatedPrices = orderManager.calculatePrice(currentOrder);
+      currentOrder.precioTerminaciones = calculatedPrices.precioTerminaciones;
+      currentOrder.precioTotalTerminaciones = calculatedPrices.precioTotalTerminaciones;
+      currentOrder.total = calculatedPrices.total;
+  
+      logger.info(`Precios calculados para la orden: ${JSON.stringify(calculatedPrices)}`);
+  
       const result = await orderManager.finalizeOrder(userId, currentOrder);
       
       if (result.success) {
@@ -491,143 +406,7 @@ class CommandProcessor {
 export default new CommandProcessor();
 
 
-// config\config.js
-
-// config/config.js
-
-import dotenv from 'dotenv';
-import { CustomError } from '../utils/errorHandler.js';
-
-dotenv.config();
-
-const requiredEnvVars = [
-  'PORT',
-  'GOOGLE_SHEET_ID',
-  'OPENAI_API_KEY',
-  'GOOGLE_SERVICE_ACCOUNT_EMAIL',
-  'GOOGLE_PRIVATE_KEY'
-];
-
-for (const envVar of requiredEnvVars) {
-  if (!process.env[envVar]) {
-    throw new CustomError('ConfigError', `Missing required environment variable: ${envVar}`);
-  }
-}
-
-export default {
-  port: process.env.PORT,
-  googleSheetId: process.env.GOOGLE_SHEET_ID,
-  openaiApiKey: process.env.OPENAI_API_KEY,
-  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  googlePrivateKey: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  blacklistDuration: parseInt(process.env.BLACKLIST_DURATION) || 10 * 60 * 1000,
-  humanBlacklistDuration: parseInt(process.env.HUMAN_BLACKLIST_DURATION) || 60 * 60 * 1000,
-  abuseBlacklistDuration: parseInt(process.env.ABUSE_BLACKLIST_DURATION) || 24 * 60 * 60 * 1000,
-  idleWarningTime: parseInt(process.env.IDLE_WARNING_TIME) || 5 * 60 * 1000,
-  idleTimeoutTime: parseInt(process.env.IDLE_TIMEOUT_TIME) || 10 * 60 * 1000,
-  maxAudioSize: parseInt(process.env.MAX_AUDIO_SIZE) || 5 * 1024 * 1024,
-  languageModel: process.env.LANGUAGE_MODEL || 'ft:gpt-4o-mini-2024-07-18:personal:modelo-chile-imprime:AEWZI9XK',
-  timezone: process.env.TIMEZONE || 'America/Santiago',
-  logLevel: process.env.LOG_LEVEL || 'info',
-  maxTokens: parseInt(process.env.MAX_TOKENS) || 2000,
-  temperature: parseFloat(process.env.TEMPERATURE) || 0.5,
-  messageQueueGapSeconds: parseInt(process.env.MESSAGE_QUEUE_GAP_SECONDS) || 3000,
-  promoMessageDelay: parseInt(process.env.PROMO_MESSAGE_DELAY) || 15000,
-  servicesUpdateInterval: parseInt(process.env.SERVICES_UPDATE_INTERVAL) || 60 * 60 * 1000,
-};
-
-
-// core\blacklist-middleware.js
-
-// core/blacklist-middleware.js
-
-import logger from '../utils/logger.js';
-
-const blacklistMiddleware = (flowManager) => async (ctx, { endFlow }) => {
-  const userId = ctx.from;
-
-  if (flowManager.isBlacklisted(userId)) {
-    logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
-    return endFlow();
-  }
-
-  return false; // Continuar con el flujo normal
-};
-
-export default blacklistMiddleware;
-
-
-// core\inactivity-middleware.js
-
-// core/inactivity-middleware.js
-
-import logger from '../utils/logger.js';
-import config from '../config/config.js';
-
-const inactivityMiddleware = (flowManager) => async (ctx, { flowDynamic, gotoFlow }) => {
-  const userId = ctx.from;
-
-  flowManager.clearIdleTimer(userId);
-  
-  const warningTimer = setTimeout(async () => {
-    await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
-  }, config.idleWarningTime);
-
-  const timeoutTimer = setTimeout(() => {
-    flowManager.resetConversation(userId);
-    gotoFlow(flowManager.getIdleTimeoutFlow());
-  }, config.idleTimeoutTime);
-
-  flowManager.setIdleTimers(userId, { warningTimer, timeoutTimer });
-
-  return false; // Continuar con el flujo normal
-};
-
-export default inactivityMiddleware;
-
-
-// core\log-middleware.js
-
-import logger from '../utils/logger.js';
-
-const logMiddleware = async (ctx) => {
-  const { from, body } = ctx;
-  logger.info(`Mensaje recibido de ${from}: ${body}`);
-  return false; // Continuar con el flujo normal
-};
-
-export default logMiddleware;
-
-
-// core\middleware.js
-
-// core/middleware.js
-
-import logger from '../utils/logger.js';
-
-const createMiddleware = (middlewares) => {
-  return async (ctx, { flowDynamic, endFlow }) => {
-    for (const middleware of middlewares) {
-      try {
-        const result = await middleware(ctx, { flowDynamic, endFlow });
-        if (result === true) {
-          return true; // Middleware ha manejado la solicitud, detener el flujo
-        }
-      } catch (error) {
-        logger.error(`Error en middleware: ${error.message}`);
-        await flowDynamic('Lo siento, ha ocurrido un error. Por favor, inténtalo de nuevo más tarde.');
-        return endFlow();
-      }
-    }
-    return false; // Continuar con el flujo normal
-  };
-};
-
-export default createMiddleware;
-
-
-
-// modules\flowManager.js
+// Archivo: modules\flowManager.js
 
 import { addKeyword, EVENTS } from '@builderbot/bot';
 import logger from '../utils/logger.js';
@@ -961,64 +740,79 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
-        
+  
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
           [...chatContext, { role: "user", content: message }],
           instruction
         );
-    
+  
         logger.info(`Respuesta inicial de AI para ${userId}: ${aiResponse}`);
-    
+  
         // Procesar comandos en la respuesta de la IA
         const commands = this.processAIResponse(aiResponse);
         let currentOrderUpdated = false;
         let missingFields = [];
-    
+        let responseHandled = false; // Nueva variable para controlar si la respuesta ya fue manejada
+  
         for (const command of commands) {
-          const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-          if (result.currentOrderUpdated) {
-            currentOrderUpdated = true;
+          // Validar comando antes de procesarlo
+          const { validatedCommand, responseSent } = await this.validateCommand(command, userId, aiResponse, message, ctx, flowDynamic);
+          if (validatedCommand) {
+            if (typeof validatedCommand === 'object') {
+              const result = await commandProcessor.processCommand(validatedCommand, userId, ctx, { flowDynamic, gotoFlow, endFlow });
+              if (result.currentOrderUpdated) {
+                currentOrderUpdated = true;
+              }
+              if (result.missingFields && result.missingFields.length > 0) {
+                missingFields = result.missingFields;
+              }
+              if (result.messagesSent) {
+                logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
+              }
+              if (result.data) {
+                await flowDynamic(result.data);
+                responseHandled = true;
+              }
+            }
           }
-          if (result.missingFields && result.missingFields.length > 0) {
-            missingFields = result.missingFields;
-          }
-          if (result.messagesSent) {
-            logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
-          }
-          if (result.data) {
-            await flowDynamic(result.data);
+  
+          // Si la respuesta ya fue manejada en validateCommand, establecemos responseHandled en true
+          if (responseSent) {
+            responseHandled = true;
+            break; // Salimos del bucle ya que la respuesta ha sido manejada
           }
         }
-
-        // NUEVO: Actualizar el contexto del asistente con los campos faltantes
-        if (missingFields.length > 0) {
-          const missingFieldsInfo = `Los siguientes campos están incompletos en la orden: ${missingFields.join(', ')}`;
-          userContextManager.updateContext(userId, missingFieldsInfo, "system");
+  
+        // Solo enviar la respuesta original de la IA si no ha sido manejada ya
+        if (!responseHandled) {
+          const filteredResponse = this.filterJsonCommands(aiResponse);
+          if (filteredResponse) {
+            await flowDynamic(filteredResponse);
+            // Actualizar el contexto con la respuesta enviada
+            userContextManager.updateContext(userId, aiResponse, "assistant");
+          }
         }
-    
-        // Enviar la parte de texto de la respuesta de la IA al usuario
-        const filteredResponse = this.filterJsonCommands(aiResponse);
-        if (filteredResponse) {
-          await flowDynamic(filteredResponse);
-        }
-    
+  
+        // Actualizar el contexto con el mensaje del usuario
         userContextManager.updateContext(userId, message, "user");
-        userContextManager.updateContext(userId, aiResponse, "assistant");
-    
+  
+        // Manejo de orden completa
         if (userContextManager.isOrderComplete(userId)) {
           logger.info(`Orden completa para ${userId}. Confirmando pedido.`);
           // Enviar comando de confirmación
           await commandProcessor.processCommand({ command: "CONFIRM_ORDER" }, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           return gotoFlow(this.getFlowByName('confirmedFlow'));
         }
-    
+  
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);
         await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
     }
+
+
   
     processAIResponse(aiResponse) {
       const commandRegex = /{[^}]+}/g;
@@ -1101,420 +895,111 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       }
       return false;
     }
+
+   // Modificar la función validateCommand
+  async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
+    if (command.command === "CONFIRM_ORDER") {
+      if (!userContextManager.isOrderComplete(userId)) {
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
+
+        // Invocar a la función reevaluateCommand
+        const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
+
+        if (newCommandOrResponse) {
+          // Procesar el nuevo comando si existe
+          if (newCommandOrResponse.command) {
+            logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
+            await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+          }
+
+          // Enviar la respuesta al usuario si existe
+          if (newCommandOrResponse.response) {
+            await flowDynamic(newCommandOrResponse.response);
+            userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
+          }
+
+          // Indicar que la respuesta ya ha sido manejada
+          return { validatedCommand: null, responseSent: true };
+        } else {
+          // Actualizar el contexto del asistente con los campos faltantes
+          const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+          userContextManager.updateContext(userId, systemMessage, "system");
+
+          // Informar al usuario
+          await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
+
+          // Indicar que la respuesta ya ha sido manejada
+          return { validatedCommand: null, responseSent: true };
+        }
+      }
+    }
+    return { validatedCommand: command, responseSent: false };
+  }
+
+   // Modificar la función reevaluateCommand
+   async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
+    logger.info(`Reevaluando comando para usuario ${userId}`);
+
+    // Obtener el historial reciente de la conversación
+    const chatContext = userContextManager.getChatContext(userId);
+    const lastMessages = chatContext.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n');
+
+    // Obtener la lista de servicios disponibles
+    const services = userContextManager.getGlobalServices();
+    const servicesList = Object.values(services).flat().map(service => service.name).join(', ');
+
+    const prompt = `
+Eres un asistente experto en impresión y gestión de pedidos. Aquí está la última interacción:
+
+${lastMessages}
+
+Basado en esta interacción y el estado actual de la orden:
+${JSON.stringify(userContextManager.getCurrentOrder(userId))}
+
+Lista de servicios disponibles: ${servicesList}
+
+Los campos faltantes en la orden son: ${missingFields.join(', ')}
+
+Analiza si el comando 'CONFIRM_ORDER' es apropiado. Si la orden está incompleta, determina el comando correcto que se debe ejecutar o proporciona la mejor respuesta posible al usuario para ayudarlo a completar la información faltante.
+
+Recuerda:
+- Debes proporcionar comandos válidos según el estado de la orden.
+- Si el usuario está confirmando la selección de un servicio, el comando correcto podría ser 'SELECT_SERVICE' con el servicio confirmado.
+- Asegúrate de incluir el nombre exacto del servicio en el comando si corresponde.
+
+Devuelve el comando en formato JSON si es necesario, seguido de una respuesta apropiada al usuario que continúe la conversación.
+    `;
+
+    try {
+      const aiResponse = await openaiService.getChatCompletion(prompt, []);
+      logger.info(`Respuesta de reevaluación del modelo para usuario ${userId}: ${aiResponse}`);
+
+      // Procesar la respuesta para extraer el comando y la respuesta
+      const commands = this.processAIResponse(aiResponse);
+      const filteredResponse = this.filterJsonCommands(aiResponse);
+
+      if (commands.length > 0) {
+        return { command: commands[0], response: filteredResponse };
+      } else {
+        // No hay comando, devolver la respuesta al usuario
+        return { command: null, response: aiResponse.trim() };
+      }
+    } catch (error) {
+      logger.error(`Error al reevaluar comando para usuario ${userId}: ${error.message}`);
+      return null;
+    }
+  }
+
+
+
+
   }
   
   export default new FlowManager();
 
 
-// modules\messageQueue.js
-
-// modules/messageQueue.js
-
-import logger from '../utils/logger.js';
-
-class MessageQueue {
-  constructor(config) {
-    this.queue = new Map();
-    this.config = config;
-  }
-
-  enqueueMessage(userId, messageText, callback) {
-    logger.info(`Encolando mensaje para usuario ${userId}. Mensaje: ${messageText}`);
-    
-    if (!this.queue.has(userId)) {
-      this.queue.set(userId, { messages: [], timer: null });
-      logger.info(`Nueva cola creada para usuario ${userId}`);
-    }
-
-    const userQueue = this.queue.get(userId);
-    userQueue.messages.push(messageText);
-
-    logger.info(`Mensaje añadido a la cola del usuario ${userId}. Mensajes en cola: ${userQueue.messages.length}`);
-
-    clearTimeout(userQueue.timer);
-
-    userQueue.timer = setTimeout(() => {
-      logger.info(`Temporizador expirado para usuario ${userId}. Procesando cola...`);
-      const messages = userQueue.messages;
-      this.queue.delete(userId);
-      logger.info(`Cola procesada y eliminada para usuario ${userId}. Mensajes procesados: ${messages.length}`);
-      if (typeof callback === 'function') {
-        try {
-          callback(messages.join(" "));
-        } catch (error) {
-          logger.error(`Error en el callback para usuario ${userId}: ${error.message}`);
-        }
-      }
-    }, this.config.gapSeconds);
-  }
-
-  clearQueue(userId) {
-    if (this.queue.has(userId)) {
-      const userQueue = this.queue.get(userId);
-      clearTimeout(userQueue.timer);
-      this.queue.delete(userId);
-      logger.info(`Cola eliminada para usuario ${userId}`);
-    }
-  }
-
-  getQueueSize(userId) {
-    if (this.queue.has(userId)) {
-      return this.queue.get(userId).messages.length;
-    }
-    return 0;
-  }
-
-  isQueueEmpty(userId) {
-    return this.getQueueSize(userId) === 0;
-  }
-}
-
-export default MessageQueue;
-
-
-// modules\orderManager.js
-
-import logger from '../utils/logger.js';
-import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
-import moment from 'moment-timezone';
-import config from '../config/config.js';
-import sheetService from '../services/sheetService.js';
-import userContextManager from './userContext.js';
-import { CustomError } from '../utils/errorHandler.js';
-
-class OrderManager {
-  constructor() {
-    this.orderConfirmed = new Set();
-  }
-
-  async handleSelectService(userId, serviceName) {
-    logger.info(`Manejando selección de servicio para usuario ${userId}: ${serviceName}`);
-    try {
-      const serviceInfo = userContextManager.getServiceInfo(serviceName);
-      
-      if (!serviceInfo) {
-        const similarServices = userContextManager.findSimilarServices(serviceName);
-        return {
-          action: "INVALID_SERVICE",
-          similarServices,
-          order: userContextManager.getCurrentOrder(userId)
-        };
-      }
-
-      userContextManager.updateCurrentOrder(userId, { 
-        service: serviceName,
-        category: serviceInfo.category,
-        availableWidths: serviceInfo.availableWidths,
-        availableFinishes: userContextManager.getAvailableFinishes(serviceInfo)
-      });
-      
-      return {
-        action: "SELECT_SERVICE",
-        order: userContextManager.getCurrentOrder(userId),
-        serviceInfo: serviceInfo
-      };
-    } catch (error) {
-      logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
-      throw new CustomError('ServiceSelectionError', 'Error al seleccionar el servicio', error);
-    }
-  }
-
-  async handleSetMeasures(userId, width, height) {
-    logger.info(`Manejando configuración de medidas para usuario ${userId}: ${width}x${height}`);
-    try {
-      const currentOrder = userContextManager.getCurrentOrder(userId);
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
-      }
-
-      const validWidth = serviceInfo.availableWidths.find(w => w.material === parseFloat(width));
-      if (!validWidth) {
-        throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
-      }
-
-      if (parseFloat(height) < 1) {
-        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor o igual a 1 metro');
-      }
-
-      const measures = { width: validWidth.material, height: parseFloat(height) };
-      const areaServicio = measures.width * measures.height; // Calcular área del servicio
-      const { total, area } = this.calculatePrice({ ...currentOrder, measures });
-
-      userContextManager.updateCurrentOrder(userId, { measures, areaServicio, total, area }); // Actualizar areaServicio
-
-      return {
-        action: "SET_MEASURES",
-        order: userContextManager.getCurrentOrder(userId)
-      };
-    } catch (error) {
-      logger.error(`Error al configurar medidas para usuario ${userId}: ${error.message}`);
-      throw new CustomError('MeasuresSetupError', 'Error al configurar las medidas', error);
-    }
-  }
-
-  async handleSetQuantity(userId, quantity) {
-    logger.info(`Manejando configuración de cantidad para usuario ${userId}: ${quantity}`);
-    try {
-      if (quantity <= 0) {
-        throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
-      }
-
-      const currentOrder = userContextManager.getCurrentOrder(userId);
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-        // Para categorías sin medidas personalizadas, calculamos el precio directamente
-        const { total } = this.calculatePrice({ ...currentOrder, quantity });
-        userContextManager.updateCurrentOrder(userId, { quantity, total });
-      } else {
-        userContextManager.updateCurrentOrder(userId, { quantity });
-      }
-
-      return {
-        action: "SET_QUANTITY",
-        order: userContextManager.getCurrentOrder(userId)
-      };
-    } catch (error) {
-      logger.error(`Error al configurar cantidad para usuario ${userId}: ${error.message}`);
-      throw new CustomError('QuantitySetupError', 'Error al configurar la cantidad', error);
-    }
-  }
-
-  async setFinishes(userId, sellado, ojetillos, bolsillo) {
-    logger.info(`Manejando configuración de acabados para usuario ${userId}`);
-    try {
-      const currentOrder = userContextManager.getCurrentOrder(userId);
-      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
-
-      const finishes = {
-        sellado: sellado && serviceInfo.sellado,
-        ojetillos: ojetillos && serviceInfo.ojetillos,
-        bolsillo: bolsillo && serviceInfo.bolsillo
-      };
-
-      userContextManager.updateCurrentOrder(userId, { finishes: finishes});
-
-      return {
-        action: "SET_FINISHES",
-        order: userContextManager.getCurrentOrder(userId)
-      };
-    } catch (error) {
-      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
-      throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
-    }
-  }
-
-  async handleValidateFile(userId, isValid, reason) {
-    logger.info(`Manejando validación de archivo para usuario ${userId}`);
-    try {
-      userContextManager.updateCurrentOrder(userId, {
-        fileAnalysis: { isValid, reason }
-      });
-      
-      return {
-        action: "VALIDATE_FILE",
-        order: userContextManager.getCurrentOrder(userId)
-      };
-    } catch (error) {
-      logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
-      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
-    }
-  }
-
-  async handleConfirmOrder(userId) {
-    logger.info(`Manejando confirmación de pedido para usuario ${userId}`);
-    try {
-      const currentOrder = userContextManager.getCurrentOrder(userId);
-      
-      if (!userContextManager.isOrderComplete(userId)) {
-        
-         // NUEVO: Lanzar excepción con detalles de campos faltantes
-         const missingFields = userContextManager.getIncompleteFields(userId);
-         const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
-         logger.warn(errorMessage);
-         throw new CustomError('IncompleteOrderError', errorMessage);
-      }
-
-      const total = this.calculatePrice(currentOrder);
-      userContextManager.updateCurrentOrder(userId, { total: total });
-
-      const orderSummary = this.formatOrderSummary(currentOrder);
-      const result = await this.finalizeOrder(userId, currentOrder);
-
-      this.orderConfirmed.add(userId);
-
-      return {
-        action: "CONFIRM_ORDER",
-        order: currentOrder,
-        summary: orderSummary,
-        result: result
-      };
-    } catch (error) {
-      logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
-      throw new CustomError(error.name || 'OrderConfirmationError', error.message);
-    }
-  }
-
-  calculatePrice(order) {
-    const serviceInfo = userContextManager.getServiceInfo(order.service);
-
-    let total = 0;
-    let area = 1;
-    let precioM2 = serviceInfo.precio;
-    let precioTerminaciones = 0;
-
-    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
-      area = order.measures.width * order.measures.height;
-      total = area * precioM2 * order.quantity;
-
-      if (order.finishes.sellado) {
-        precioTerminaciones += serviceInfo.precioSellado;
-        total += serviceInfo.precioSellado * area;
-      }
-      if (order.finishes.ojetillos) {
-        precioTerminaciones += serviceInfo.precioOjetillos;
-        total += serviceInfo.precioOjetillos * area;
-      }
-      if (order.finishes.bolsillo) {
-        precioTerminaciones += serviceInfo.precioBolsillo;
-        total += serviceInfo.precioBolsillo * area;
-      }
-    } else {
-      total = precioM2 * order.quantity;
-
-      if (order.finishes.sellado) {
-        precioTerminaciones += serviceInfo.precioSellado;
-        total += serviceInfo.precioSellado * order.quantity;
-      }
-      if (order.finishes.ojetillos) {
-        precioTerminaciones += serviceInfo.precioOjetillos;
-        total += serviceInfo.precioOjetillos * order.quantity;
-      }
-      if (order.finishes.bolsillo) {
-        precioTerminaciones += serviceInfo.precioBolsillo;
-        total += serviceInfo.precioBolsillo * order.quantity;
-      }
-    }
-
-    const precioBase = area * precioM2 * order.quantity;
-    const precioTotalConTerminaciones = total;
-
-    return { 
-      total, 
-      area, 
-      precioM2, 
-      precioBase, 
-      precioTerminaciones, 
-      precioTotalConTerminaciones 
-    };
-  }
-
-  formatOrderSummary(order) {
-    let summary = "📋 Resumen final de tu cotización:\n\n";
-
-    const serviceInfo = userContextManager.getServiceInfo(order.service);
-    summary += `*Servicio:* ${order.service} (${serviceInfo.category})\n`;
-
-    if (order.measures) {
-      summary += `*Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
-    }
-
-    summary += `*Cantidad:* ${order.quantity}\n`;
-
-    if (order.finishes) {
-      summary += "*Terminaciones:*\n";
-      if (order.finishes.sellado) summary += "- Sellado\n";
-      if (order.finishes.ojetillos) summary += "- Ojetillos\n";
-      if (order.finishes.bolsillo) summary += "- Bolsillo\n";
-    }
-
-    summary += `\n💰 *Total:* $${formatPrice(order.total)}\n`;
-
-    return summary;
-  }
-
-  async finalizeOrder(userId, order) {
-    logger.info(`Finalizando orden para usuario ${userId}`);
-    
-    const calculatedPrices = this.calculatePrice(order);
-    const finalOrder = {
-      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm:ss'),
-      telefono: userId,
-      nombre: order.userName || 'Cliente',
-      servicio: order.service,
-      cantidad: order.quantity,
-      measures: order.measures,
-      area: calculatedPrices.area,
-      precioM2: calculatedPrices.precioM2,
-      precioBase: calculatedPrices.precioBase,
-      terminaciones: Object.entries(order.finishes)
-        .filter(([_, value]) => value)
-        .map(([key, _]) => key),
-      precioTerminaciones: calculatedPrices.precioTerminaciones,
-      precioTotalConTerminaciones: calculatedPrices.precioTotalConTerminaciones,
-      total: calculatedPrices.total,
-      observaciones: order.observaciones || 'Sin observaciones'
-    };
-  
-    logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
-  
-    try {
-      const result = await sheetService.saveOrder(finalOrder);
-      logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
-
-      if (result.success) {
-        this.orderConfirmed.add(userId);
-        logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
-        
-        return { 
-          success: true,
-          message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
-          orderNumber: result.rowIndex
-        };
-      } else {
-        throw new Error("Error al guardar la cotización");
-      }
-    } catch (error) {
-      logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
-      throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
-    }
-  }
-
-
-  formatOrderForSheet(order) {
-    let details = `Servicio: ${order.service}\n`;
-    
-    if (order.measures) {
-      details += `Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
-    }
-    
-    details += `Cantidad: ${order.quantity}\n`;
-    
-    if (order.finishes) {
-      details += "Terminaciones:\n";
-      if (order.finishes.sellado) details += "- Sellado\n";
-      if (order.finishes.ojetillos) details += "- Ojetillos\n";
-      if (order.finishes.bolsillo) details += "- Bolsillo\n";
-    }
-    
-    return details.trim();
-  }
-
-  isOrderConfirmed(userId) {
-    return this.orderConfirmed.has(userId);
-  }
-
-  resetOrderConfirmation(userId) {
-    this.orderConfirmed.delete(userId);
-  }
-}
-
-export default new OrderManager();
-
-
-// modules\userContext.js
+// Archivo: modules\userContext.js
 
 import logger from '../utils/logger.js';
 import sheetService from '../services/sheetService.js';
@@ -1774,166 +1259,7 @@ class UserContextManager {
 export default new UserContextManager();
 
 
-// services\fileValidationService.js
-
-// services/fileValidationService.js
-
-import fs from 'fs';
-import { promisify } from 'util';
-import path from 'path';
-import logger from '../utils/logger.js';
-import { CustomError } from '../utils/errorHandler.js';
-import sharp from 'sharp';
-import fileType from 'file-type';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
-
-const readFile = promisify(fs.readFile);
-
-class FileValidationService {
-  constructor() {
-    this.supportedFormats = ['jpg', 'jpeg', 'png', 'pdf', 'ai', 'psd', 'cdr'];
-  }
-
-  async analyzeFile(filePath) {
-    try {
-      if (!fs.existsSync(filePath)) {
-        throw new CustomError('FileNotFoundError', `El archivo no existe: ${filePath}`);
-      }
-
-      const fileStats = fs.statSync(filePath);
-      const fileSize = this.formatFileSize(fileStats.size);
-
-      const buffer = await readFile(filePath);
-      const fileTypeResult = await fileType.fromBuffer(buffer);
-      const fileExtension = fileTypeResult ? fileTypeResult.ext : path.extname(filePath).toLowerCase().slice(1);
-
-      if (!this.supportedFormats.includes(fileExtension)) {
-        return {
-          format: fileExtension,
-          supported: false,
-          reason: `Formato de archivo no soportado: ${fileExtension}`,
-          fileSize: fileSize
-        };
-      }
-
-      let fileInfo;
-      if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
-        fileInfo = await this.analyzeImage(buffer);
-      } else if (fileExtension === 'pdf') {
-        fileInfo = await this.analyzePDF(buffer);
-      } else {
-        fileInfo = { format: fileExtension };
-      }
-
-      fileInfo.mimeType = fileTypeResult ? fileTypeResult.mime : '';
-      fileInfo.supported = true;
-      fileInfo.fileSize = fileSize;
-      return fileInfo;
-    } catch (error) {
-      logger.error(`Error al analizar el archivo: ${error.message}`);
-      throw new CustomError('FileAnalysisError', 'Error al analizar el archivo', error);
-    }
-  }
-
-  async analyzeImage(buffer) {
-    const image = sharp(buffer);
-    const metadata = await image.metadata();
-
-    logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
-
-    const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
-    const area = this.calculateDesignArea(physicalWidth, physicalHeight);
-
-    const colorSpace = metadata.space || 'desconocido';
-    const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
-      ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
-      : colorSpace;
-
-    logger.info(`Análisis de imagen completado: ${physicalWidth}x${physicalHeight} m, ${area} m², ${colorSpaceInfo}`);
-
-    return {
-      format: metadata.format,
-      width: metadata.width,
-      height: metadata.height,
-      dpi: metadata.density || 72,
-      colorSpace: colorSpaceInfo,
-      physicalWidth,
-      physicalHeight,
-      area
-    };
-  }
-
-  async analyzePDF(buffer) {
-    try {
-      const data = await pdfParse(buffer);
-
-      // Asumir dimensiones estándar si no se pueden obtener
-      const width = 595; // A4 width in points
-      const height = 842; // A4 height in points
-      const dpi = 72; // Asumimos 72 DPI para PDFs
-
-      const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
-      const area = this.calculateDesignArea(physicalWidth, physicalHeight);
-
-      return {
-        format: 'pdf',
-        pages: data.numpages,
-        width,
-        height,
-        dpi,
-        physicalWidth,
-        physicalHeight,
-        area
-      };
-    } catch (error) {
-      logger.error(`Error al analizar PDF: ${error.message}`);
-      throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
-    }
-  }
-
-  calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
-    logger.info(`Calculando dimensiones físicas: ${widthPixels}x${heightPixels} píxeles, ${dpi} DPI`);
-    
-    // Convertir píxeles a pulgadas
-    const widthInches = widthPixels / dpi;
-    const heightInches = heightPixels / dpi;
-    
-    // Convertir pulgadas a metros (1 pulgada = 0.0254 metros)
-    const widthMeters = widthInches * 0.0254;
-    const heightMeters = heightInches * 0.0254;
-    
-    // Redondear a dos decimales
-    const physicalWidth = Number(widthMeters.toFixed(2));
-    const physicalHeight = Number(heightMeters.toFixed(2));
-    
-    logger.info(`Dimensiones físicas calculadas: ${physicalWidth}x${physicalHeight} metros`);
-    
-    return { physicalWidth, physicalHeight };
-  }
-
-  calculateDesignArea(widthM, heightM) {
-    const areaM2 = widthM * heightM;
-    const roundedArea = Number(areaM2.toFixed(2));
-    logger.info(`Área calculada: ${roundedArea} m²`);
-    return roundedArea;
-  }
-
-  formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-}
-
-export default new FileValidationService();
-
-
-
-// services\openaiService.js
+// Archivo: services\openaiService.js
 
 // services/openaiService.js
 
@@ -1980,7 +1306,9 @@ class OpenAIService {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
+    console.log("****historial****");
     console.log(contextStr);
+    console.log("****fin historial****");
     //console.log(JSON.stringify(allServices, null, 2));
 
       // NUEVO: Incluir información sobre campos faltantes
@@ -2297,406 +1625,7 @@ class OpenAIService {
 export default new OpenAIService();
 
 
-// services\sheetService.js
-
-import { JWT } from "google-auth-library";
-import { GoogleSpreadsheet } from "google-spreadsheet";
-import moment from 'moment-timezone';
-import 'moment/locale/es.js';
-import config from '../config/config.js';
-import logger from '../utils/logger.js';
-import { CustomError } from '../utils/errorHandler.js';
-
-class GoogleSheetService {
-  constructor() {
-    this.jwtFromEnv = new JWT({
-      email: config.googleServiceAccountEmail,
-      key: config.googlePrivateKey,
-      scopes: [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.file",
-      ],
-    });
-    this.doc = new GoogleSpreadsheet(config.googleSheetId, this.jwtFromEnv);
-    moment.locale('es');
-    moment.tz.setDefault(config.timezone);
-    this.services = null;
-    this.additionalInfo = null;
-    this.isInitialized = false;
-    this.lastFetchTime = null;
-    this.cacheDuration = 60 * 60 * 1000; // 1 hour
-  }
-
-  async initialize() {
-    try {
-      logger.info("Iniciando inicialización de SheetService");
-      await this.doc.loadInfo();
-      logger.info("Documento de Google Sheets cargado correctamente");
-      
-      await this.loadServices();
-      logger.info("Servicios cargados correctamente");
-      await this.loadAdditionalInfo();
-      logger.info("Información adicional cargada correctamente");
-      
-      this.isInitialized = true;
-      this.lastFetchTime = Date.now();
-      logger.info("SheetService inicializado completamente");
-    } catch (error) {
-      logger.error(`Error al inicializar SheetService: ${error.message}`);
-      throw new CustomError('SheetServiceInitError', 'Error al inicializar el servicio de Google Sheets', error);
-    }
-  }
-
-  async loadServices() {
-    logger.info("Iniciando carga de servicios");
-    this.services = await this.fetchServices();
-    logger.info(`Servicios cargados: ${Object.keys(this.services).length} categorías`);
-  }
-
-  async loadAdditionalInfo() {
-    logger.info("Iniciando carga de información adicional");
-    this.additionalInfo = await this.fetchAdditionalInfo();
-    logger.info("Información adicional cargada");
-  }
-
-  getServices() {
-    if (!this.services || this.shouldRefreshCache()) {
-      this.loadServices();
-    }
-    return this.services;
-  }
-
-  getAdditionalInfo() {
-    if (!this.additionalInfo || this.shouldRefreshCache()) {
-      this.loadAdditionalInfo();
-    }
-    return this.additionalInfo;
-  }
-
-  shouldRefreshCache() {
-    return !this.lastFetchTime || (Date.now() - this.lastFetchTime > this.cacheDuration);
-  }
-
-  getServiceInfo(serviceName) {
-    if (!serviceName || typeof serviceName !== 'string') {
-      logger.warn(`Nombre de servicio inválido: ${serviceName}`);
-      return null;
-    }
-
-    const services = this.getServices();
-    const lowerServiceName = serviceName.toLowerCase();
-    for (const category in services) {
-      const service = services[category].find(s => s.name.toLowerCase() === lowerServiceName);
-      if (service) {
-        return service;
-      }
-    }
-    logger.warn(`Servicio no encontrado: ${serviceName}`);
-    return null;
-  }
-
-  getAllServices() {
-    const services = this.getServices();
-    return Object.values(services).flat();
-  }
-
-  getServicesInCategory(category) {
-    const services = this.getServices();
-    return services[category] || [];
-  }
-
-  getFileValidationCriteria() {
-    const additionalInfo = this.getAdditionalInfo();
-    return additionalInfo.criteriosValidacion;
-  }
-
-  findSimilarServices(serviceName) {
-    const allServices = this.getAllServices();
-    return allServices
-      .filter(service => 
-        service.name.toLowerCase().includes(serviceName.toLowerCase()) || 
-        serviceName.toLowerCase().includes(service.name.toLowerCase())
-      )
-      .map(service => ({
-        name: service.name,
-        category: service.category
-      }));
-  }
-
-  async fetchServices() {
-    try {
-      await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[0];
-      await sheet.loadCells('A1:Q1000');
-  
-      const services = {};
-      for (let i = 1; i < sheet.rowCount; i++) {
-        const id = sheet.getCell(i, 0).value;
-        if (!id) break;
-  
-        const service = this.extractServiceData(sheet, i);
-        if (service) {
-          if (!services[service.category]) {
-            services[service.category] = [];
-          }
-          services[service.category].push(service);
-        }
-      }
-  
-      return services;
-    } catch (err) {
-      logger.error("Error al obtener los servicios:", err);
-      throw new CustomError('ServicesFetchError', 'Error al obtener los servicios desde Google Sheets', err);
-    }
-  }
-
-  extractServiceData(sheet, row) {
-    try {
-      const widthsString = sheet.getCell(row, 12).value;
-      const availableWidths = widthsString ? this.parseAvailableWidths(widthsString) : [];
-  
-      const sellado = sheet.getCell(row, 4).value.toLowerCase();
-      const ojetillos = sheet.getCell(row, 5).value.toLowerCase();
-      const bolsillo = sheet.getCell(row, 6).value.toLowerCase();
-  
-      logger.info(`Valores leídos para el servicio en la fila ${row}:`);
-      logger.info(`Sellado: ${sellado}, Ojetillos: ${ojetillos}, Bolsillo: ${bolsillo}`);
-  
-      const service = {
-        id: sheet.getCell(row, 0).value,
-        category: sheet.getCell(row, 1).value,
-        type: sheet.getCell(row, 2).value,
-        name: sheet.getCell(row, 3).value,
-        sellado: sellado === 'sí' || sellado === 'si',
-        ojetillos: ojetillos === 'sí' || ojetillos === 'si',
-        bolsillo: bolsillo === 'sí' || bolsillo === 'si',
-        format: sheet.getCell(row, 7).value,
-        minDPI: parseInt(sheet.getCell(row, 8).value) || 0,
-        stock: parseInt(sheet.getCell(row, 9).value) || 0,
-        status: sheet.getCell(row, 10).value,
-        precio: parseFloat(sheet.getCell(row, 11).value) || 0,
-        availableWidths: availableWidths,
-        precioSellado: parseFloat(sheet.getCell(row, 14).value) || 0,
-        precioBolsillo: parseFloat(sheet.getCell(row, 15).value) || 0,
-        precioOjetillos: parseFloat(sheet.getCell(row, 16).value) || 0
-      };
-  
-      logger.info(`Servicio extraído: ${JSON.stringify(service)}`);
-  
-      return service;
-    } catch (error) {
-      logger.error(`Error al extraer datos del servicio en la fila ${row}: ${error.message}`);
-      return null;
-    }
-  }
-
-  parseAvailableWidths(widthsString) {
-    if (!widthsString || widthsString.toLowerCase().includes('no tiene rollos')) {
-      return [];
-    }
-    
-    logger.info(`Procesando medidas: ${widthsString}`);
-    
-    const lines = widthsString.split('\n').filter(line => !line.includes('Ancho material'));
-    
-    return lines.map(line => {
-      const [material, imprimible] = line.split('-').map(part => part.trim());
-      
-      const parseMeasure = (measure) => {
-        if (typeof measure !== 'string') {
-          logger.warn(`Medida no es un string: ${measure}`);
-          return 0;
-        }
-        return parseFloat(measure.replace('m', '').replace(',', '.')) || 0;
-      };
-      
-      const parsedMaterial = parseMeasure(material);
-      const parsedImprimible = parseMeasure(imprimible);
-      
-      if (parsedMaterial && parsedImprimible) {
-        logger.info(`Medida procesada: material ${parsedMaterial}m, imprimible ${parsedImprimible}m`);
-        return {
-          material: parsedMaterial,
-          imprimible: parsedImprimible
-        };
-      } else {
-        logger.warn(`No se pudo procesar la medida: ${line}`);
-        return null;
-      }
-    }).filter(w => w !== null);
-  }
-
-  async fetchAdditionalInfo() {
-    try {
-      await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[2];
-      await sheet.loadCells();
-  
-      logger.info("Cargando información adicional de la hoja 'Informacion'");
-  
-      const additionalInfo = {
-        horarios: {},
-        zonasDespacho: [],
-        direccionRetiro: '',
-        promocionDia: '',
-        metodosPago: '',
-        tiempoPreparacion: '',
-        criteriosValidacion: '',
-        estadoBot: ''
-      };
-  
-      this.extractAdditionalInfo(sheet, additionalInfo);
-  
-      logger.info("Información adicional cargada completamente");
-      logger.debug(`Información adicional: ${JSON.stringify(additionalInfo)}`);
-  
-      return additionalInfo;
-    } catch (err) {
-      logger.error("Error al obtener información adicional:", err);
-      throw new CustomError('AdditionalInfoError', 'Error al obtener información adicional desde Google Sheets', err);
-    }
-  }
-
-  extractAdditionalInfo(sheet, additionalInfo) {
-    const safeGetCellValue = (row, col) => {
-      try {
-        const cell = sheet.getCell(row, col);
-        return cell.value || '';
-      } catch (error) {
-        logger.warn(`No se pudo obtener el valor de la celda (${row}, ${col}): ${error.message}`);
-        return '';
-      }
-    };
-
-    ['Lunes a viernes', 'Sábados', 'Domingos'].forEach((dia, index) => {
-      additionalInfo.horarios[dia] = `${safeGetCellValue(index + 1, 0)} ${safeGetCellValue(index + 1, 1)}`.trim() || 'No disponible';
-    });
-  
-    for (let row = 1; row <= 9; row++) {
-      const zona = safeGetCellValue(row, 2);
-      if (zona && zona.trim()) additionalInfo.zonasDespacho.push(zona.trim());
-    }
-  
-    additionalInfo.direccionRetiro = safeGetCellValue(1, 4) || 'No disponible';
-    additionalInfo.promocionDia = safeGetCellValue(1, 5) || 'No hay promociones actualmente';
-    additionalInfo.metodosPago = safeGetCellValue(1, 6) || 'No especificado';
-    additionalInfo.tiempoPreparacion = safeGetCellValue(1, 7) || 'No especificado';
-    additionalInfo.criteriosValidacion = safeGetCellValue(1, 8) || 'No especificado';
-    additionalInfo.estadoBot = safeGetCellValue(1, 9) || 'No especificado';
-  
-    logger.info(`Criterios de validación extraídos: ${additionalInfo.criteriosValidacion}`);
-    logger.info(`Estado del bot: ${additionalInfo.estadoBot}`);
-  }
-
-  async saveOrder(data) {
-    logger.info(`Iniciando guardado de cotización en Google Sheets: ${JSON.stringify(data)}`);
-    try {
-      await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
-      await sheet.loadCells();
-  
-      const orderNumber = await this.getNextOrderNumber();
-      const rowData = this.prepareRowData(data, orderNumber);
-      const result = await sheet.addRows([rowData]);
-  
-      return this.processAddRowResult(result, sheet);
-    } catch (err) {
-      logger.error("Error detallado al guardar la cotización en Google Sheets:", err.message);
-      logger.error("Stack trace:", err.stack);
-      throw new CustomError('OrderSaveError', `Error al guardar la cotización: ${err.message}`, err);
-    }
-  }
-
-  prepareRowData(data, orderNumber) {
-    const now = moment().tz(config.timezone);
-    const formattedDate = now.format('DD-MM-YYYY HH:mm:ss');
-    
-    const neto = data.total / 1.19; // Cálculo del neto (sin IVA)
-    const iva = data.total - neto; // Cálculo del IVA
-
-    return [
-      orderNumber,
-      1, // Número de servicios (por ahora siempre 1)
-      "Efectivo/transferencia",
-      formattedDate,
-      formattedDate, // Fecha de modificación (igual a la fecha de ingreso por ahora)
-      "Sara - agente virtual",
-      data.servicio,
-      data.cantidad,
-      `${data.measures.width} x ${data.measures.height}`,
-      data.area,
-      data.precioM2,
-      data.precioBase,
-      data.terminaciones.join(", ") || "No",
-      data.precioTerminaciones, // Columna N: Precio de Terminación/m2
-      data.precioTotalTerminaciones, // Columna O: Precio Total con Terminación
-      "Boleta",
-      neto,
-      data.total,
-      data.nombre,
-      "contacto@chileimprime.cl", // Correo por defecto
-      "66.666.666-6", // RUT por defecto
-      data.telefono,
-      '', '', '', '', '', '', '', '', '', '', '', '', // Columnas vacías
-      "Pendiente", // Estado de pago
-      "chileimprime.cl", // URL del diseño por defecto
-      "Pendiente", // Estado del proyecto
-      "sin nota", // Anotaciones
-      "COTIZACIÓN" // Extras
-    ];
-  }
-
-  processAddRowResult(result, sheet) {
-    if (Array.isArray(result) && result.length > 0) {
-      const firstRow = result[0];
-      const rowIndex = firstRow.rowIndex || firstRow._rowNumber || sheet.rowCount;
-      logger.info(`Fila añadida exitosamente. ID de la nueva fila: ${rowIndex}`);
-      return { success: true, message: "Cotización guardada exitosamente", rowIndex: rowIndex };
-    } else {
-      logger.warn("No se pudo obtener información de la fila añadida");
-      return { success: true, message: "Cotización guardada exitosamente, pero no se pudo obtener el ID de la fila" };
-    }
-  }
-
-  async getNextOrderNumber() {
-    try {
-      await this.doc.loadInfo();
-      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
-      await sheet.loadCells('A:A');
-      
-      let lastOrderNumber = 0;
-      for (let i = sheet.rowCount - 1; i >= 2; i--) {
-        const cell = sheet.getCell(i, 0);
-        if (cell.value) {
-          const match = cell.value.match(/WA-(\d+)/);
-          if (match) {
-            lastOrderNumber = parseInt(match[1], 10);
-            break;
-          }
-        }
-      }
-      
-      const newOrderNumber = lastOrderNumber + 1;
-      return `WA-${newOrderNumber}`;
-    } catch (error) {
-      logger.error("Error al generar número de pedido:", error);
-      throw new CustomError('OrderNumberGenerationError', 'Error al generar número de pedido', error);
-    }
-  }
-
-  censorPhoneNumber(phoneNumber) {
-    if (phoneNumber.length <= 5) return phoneNumber;
-    const firstTwo = phoneNumber.slice(0, 2);
-    const lastThree = phoneNumber.slice(-3);
-    const middleLength = phoneNumber.length - 5;
-    return `${firstTwo}${'*'.repeat(middleLength)}${lastThree}`;
-  }
-}
-
-export default new GoogleSheetService();
-
-
-// services\whatsappService.js
+// Archivo: services\whatsappService.js
 
 // services/whatsappService.js
 
@@ -2826,198 +1755,4 @@ class WhatsAppService {
 }
 
 export default new WhatsAppService();
-
-
-// utils\commandUtils.js
-
-// utils/commandUtils.js
-
-import logger from './logger.js';
-
-const knownCommands = {
-  'LIST_ALL_SERVICES': ['list all services', 'listallservices'],
-  'SELECT_SERVICE': ['select service', 'selectservice'],
-  'SET_MEASURES': ['set measures', 'setmeasures'],
-  'SET_QUANTITY': ['set quantity', 'setquantity'],
-  'SET_FINISHES': ['set finishes', 'setfinishes'],
-  'CONFIRM_ORDER': ['confirm order', 'confirmorder'],
-  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis']
-};
-
-export function normalizeCommand(command) {
-  return command.toLowerCase().replace(/\s+/g, '_');
-}
-
-export function findClosestCommand(command) {
-  const normalizedCommand = normalizeCommand(command);
-  
-  // Primero, buscar una coincidencia exacta
-  for (const [knownCommand, variations] of Object.entries(knownCommands)) {
-    if (normalizedCommand === knownCommand.toLowerCase() || variations.includes(normalizedCommand)) {
-      return knownCommand;
-    }
-  }
-  
-  // Si no hay coincidencia exacta, usar la distancia de Levenshtein
-  let closestCommand = null;
-  let minDistance = Infinity;
-  
-  for (const knownCommand of Object.keys(knownCommands)) {
-    const distance = levenshteinDistance(normalizedCommand, knownCommand.toLowerCase());
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestCommand = knownCommand;
-    }
-  }
-  
-  // Solo devolver el comando más cercano si la distancia es menor que un umbral
-  return minDistance <= 3 ? closestCommand : null;
-}
-
-function levenshteinDistance(a, b) {
-  const matrix = [];
-
-  for (let i = 0; i <= b.length; i++) {
-    matrix[i] = [i];
-  }
-
-  for (let j = 0; j <= a.length; j++) {
-    matrix[0][j] = j;
-  }
-
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-
-  return matrix[b.length][a.length];
-}
-
-export function sanitizeJsonString(jsonString) {
-  // Asegurar que las propiedades del JSON estén entre comillas dobles
-  return jsonString.replace(/(\w+):/g, '"$1":');
-}
-
-
-// utils\errorHandler.js
-
-import logger from './logger.js';
-
-export class CustomError extends Error {
-  constructor(name, message, originalError = null) {
-    super(message);
-    this.name = name;
-    this.originalError = originalError;
-  }
-}
-
-export const errorHandler = async (error, ctx, { flowDynamic, endFlow }) => {
-  logger.error(`Error: ${error.name} - ${error.message}`);
-  if (error.originalError) {
-    logger.error(`Error original: ${error.originalError.message}`);
-    logger.error(`Stack trace: ${error.originalError.stack}`);
-  }
-
-  let userMessage = 'Lo siento, ha ocurrido un error inesperado. Por favor, inténtalo de nuevo más tarde.';
-
-  switch (error.name) {
-    case 'OpenAIError':
-      userMessage = 'Estamos experimentando problemas con nuestro servicio de IA. Por favor, inténtalo de nuevo en unos minutos.';
-      break;
-    case 'SheetServiceError':
-      userMessage = 'Hay un problema temporal con nuestro sistema de pedidos. Por favor, inténtalo de nuevo más tarde.';
-      break;
-    case 'WhatsAppError':
-      userMessage = 'Estamos teniendo dificultades para procesar tu mensaje. Por favor, inténtalo de nuevo.';
-      break;
-    case 'MiddlewareError':
-      userMessage = 'Ha ocurrido un error al procesar tu solicitud. Por favor, inténtalo de nuevo.';
-      break;
-  }
-
-  await flowDynamic(userMessage);
-  return endFlow();
-};
-
-
-// utils\helpers.js
-
-// utils/helpers.js
-
-export function formatPrice(price) {
-  const formattedPrice = price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return formattedPrice;
-}
-  
-  export function censorPhoneNumber(phoneNumber) {
-    if (phoneNumber.length <= 5) {
-      return phoneNumber;
-    }
-    const firstTwo = phoneNumber.slice(0, 2);
-    const lastThree = phoneNumber.slice(-3);
-    const middleLength = phoneNumber.length - 5;
-    const censoredMiddle = '*'.repeat(middleLength);
-    return `${firstTwo}${censoredMiddle}${lastThree}`;
-  }
-
-
-  // Nueva función para enviar mensajes divididos
-export async function sendSplitMessages(flowDynamic, aiResponse) {
-  // Filtrar el comando JSON inicial
-  const filteredResponse = aiResponse.replace(/^\s*\{.*?\}\s*/, '').trim();
-
-  // Dividir la respuesta en secciones basadas en los encabezados "### "
-  const sections = filteredResponse.split(/(?=### )/).map(s => s.trim()).filter(s => s);
-
-  for (const section of sections) {
-    await flowDynamic(section);
-    // Espera de 3 segundos antes de enviar el siguiente mensaje
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  }
-}
-
-
-// utils\logger.js
-
-import winston from 'winston';
-import config from '../config/config.js';
-import moment from 'moment-timezone';
-
-const { combine, timestamp, printf } = winston.format;
-
-const myFormat = printf(({ level, message, timestamp }) => {
-  const formattedTimestamp = moment(timestamp).tz('America/Santiago').format('DD-MM-YY - HH:mm:ss a');
-  return `${formattedTimestamp} : [${level.toUpperCase()}] ${message}`;
-});
-
-const logger = winston.createLogger({
-  level: config.logLevel || 'info',
-  format: combine(
-    timestamp(),
-    myFormat
-  ),
-  defaultMeta: { service: 'chatbot-service' },
-  transports: [
-    new winston.transports.File({ filename: 'error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'combined.log' }),
-  ],
-});
-
-if (process.env.NODE_ENV !== 'production') {
-  logger.add(new winston.transports.Console({
-    format: myFormat,
-  }));
-}
-
-export default logger;
-
 

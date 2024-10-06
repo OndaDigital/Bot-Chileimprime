@@ -43,7 +43,9 @@ class OpenAIService {
     const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     const allServices = this.getAllServicesInfo(services);
     const criteria = userContextManager.getFileValidationCriteria();
+    console.log("****historial****");
     console.log(contextStr);
+    console.log("****fin historial****");
     //console.log(JSON.stringify(allServices, null, 2));
 
       // NUEVO: Incluir información sobre campos faltantes

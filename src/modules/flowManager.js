@@ -330,64 +330,79 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
-        
+  
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
           [...chatContext, { role: "user", content: message }],
           instruction
         );
-    
+  
         logger.info(`Respuesta inicial de AI para ${userId}: ${aiResponse}`);
-    
+  
         // Procesar comandos en la respuesta de la IA
         const commands = this.processAIResponse(aiResponse);
         let currentOrderUpdated = false;
         let missingFields = [];
-    
+        let responseHandled = false; // Nueva variable para controlar si la respuesta ya fue manejada
+  
         for (const command of commands) {
-          const result = await commandProcessor.processCommand(command, userId, ctx, { flowDynamic, gotoFlow, endFlow });
-          if (result.currentOrderUpdated) {
-            currentOrderUpdated = true;
+          // Validar comando antes de procesarlo
+          const { validatedCommand, responseSent } = await this.validateCommand(command, userId, aiResponse, message, ctx, flowDynamic);
+          if (validatedCommand) {
+            if (typeof validatedCommand === 'object') {
+              const result = await commandProcessor.processCommand(validatedCommand, userId, ctx, { flowDynamic, gotoFlow, endFlow });
+              if (result.currentOrderUpdated) {
+                currentOrderUpdated = true;
+              }
+              if (result.missingFields && result.missingFields.length > 0) {
+                missingFields = result.missingFields;
+              }
+              if (result.messagesSent) {
+                logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
+              }
+              if (result.data) {
+                await flowDynamic(result.data);
+                responseHandled = true;
+              }
+            }
           }
-          if (result.missingFields && result.missingFields.length > 0) {
-            missingFields = result.missingFields;
-          }
-          if (result.messagesSent) {
-            logger.info(`Mensajes enviados por comando ${command.command} para ${userId}`);
-          }
-          if (result.data) {
-            await flowDynamic(result.data);
+  
+          // Si la respuesta ya fue manejada en validateCommand, establecemos responseHandled en true
+          if (responseSent) {
+            responseHandled = true;
+            break; // Salimos del bucle ya que la respuesta ha sido manejada
           }
         }
-
-        // NUEVO: Actualizar el contexto del asistente con los campos faltantes
-        if (missingFields.length > 0) {
-          const missingFieldsInfo = `Los siguientes campos están incompletos en la orden: ${missingFields.join(', ')}`;
-          userContextManager.updateContext(userId, missingFieldsInfo, "system");
+  
+        // Solo enviar la respuesta original de la IA si no ha sido manejada ya
+        if (!responseHandled) {
+          const filteredResponse = this.filterJsonCommands(aiResponse);
+          if (filteredResponse) {
+            await flowDynamic(filteredResponse);
+            // Actualizar el contexto con la respuesta enviada
+            userContextManager.updateContext(userId, aiResponse, "assistant");
+          }
         }
-    
-        // Enviar la parte de texto de la respuesta de la IA al usuario
-        const filteredResponse = this.filterJsonCommands(aiResponse);
-        if (filteredResponse) {
-          await flowDynamic(filteredResponse);
-        }
-    
+  
+        // Actualizar el contexto con el mensaje del usuario
         userContextManager.updateContext(userId, message, "user");
-        userContextManager.updateContext(userId, aiResponse, "assistant");
-    
+  
+        // Manejo de orden completa
         if (userContextManager.isOrderComplete(userId)) {
           logger.info(`Orden completa para ${userId}. Confirmando pedido.`);
           // Enviar comando de confirmación
           await commandProcessor.processCommand({ command: "CONFIRM_ORDER" }, userId, ctx, { flowDynamic, gotoFlow, endFlow });
           return gotoFlow(this.getFlowByName('confirmedFlow'));
         }
-    
+  
       } catch (error) {
         logger.error(`Error al procesar respuesta para usuario ${userId}: ${error.message}`);
         logger.error(`Stack trace: ${error.stack}`);
         await flowDynamic("Lo siento, ha ocurrido un error inesperado. Por favor, intenta nuevamente en unos momentos.");
       }
     }
+
+
   
     processAIResponse(aiResponse) {
       const commandRegex = /{[^}]+}/g;
@@ -470,6 +485,100 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       }
       return false;
     }
+
+   // Modificar la función validateCommand
+  async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
+    if (command.command === "CONFIRM_ORDER") {
+      if (!userContextManager.isOrderComplete(userId)) {
+        const missingFields = userContextManager.getIncompleteFields(userId);
+        logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
+
+        // Invocar a la función reevaluateCommand
+        const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
+
+        if (newCommandOrResponse) {
+          // Procesar el nuevo comando si existe
+          if (newCommandOrResponse.command) {
+            logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
+            await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+          }
+
+          // Enviar la respuesta al usuario si existe
+          if (newCommandOrResponse.response) {
+            await flowDynamic(newCommandOrResponse.response);
+            userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
+          }
+
+          // Indicar que la respuesta ya ha sido manejada
+          return { validatedCommand: null, responseSent: true };
+        } else {
+          // Actualizar el contexto del asistente con los campos faltantes
+          const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+          userContextManager.updateContext(userId, systemMessage, "system");
+
+          // Informar al usuario
+          await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
+
+          // Indicar que la respuesta ya ha sido manejada
+          return { validatedCommand: null, responseSent: true };
+        }
+      }
+    }
+    return { validatedCommand: command, responseSent: false };
+  }
+
+
+  async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
+    logger.info(`Reevaluando comando para usuario ${userId}`);
+
+    // Obtener el historial reciente de la conversación
+    const chatContext = userContextManager.getChatContext(userId);
+    const lastMessages = chatContext.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n');
+
+    // Obtener la lista de servicios disponibles
+    const services = userContextManager.getGlobalServices();
+    const servicesList = Object.values(services).flat().map(service => service.name).join(', ');
+
+    // Modificación del prompt para evitar que el asistente asuma valores por defecto
+    const prompt = `
+Eres un asistente experto en impresión y gestión de pedidos. Aquí está la última interacción:
+
+${lastMessages}
+
+Basado en esta interacción y el estado actual de la orden:
+${JSON.stringify(userContextManager.getCurrentOrder(userId))}
+
+Lista de servicios disponibles: ${servicesList}
+
+Los campos faltantes en la orden son: ${missingFields.join(', ')}
+
+Tu objetivo es ayudar al usuario a completar la información faltante sin asumir ningún valor por defecto. No debes asignar valores a campos faltantes a menos que el usuario los haya proporcionado explícitamente.
+
+Analiza si el comando 'CONFIRM_ORDER' es apropiado. Si la orden está incompleta, determina la mejor respuesta posible al usuario para ayudarlo a proporcionar la información faltante.
+
+Recuerda:
+- No asumas servicios o valores que el usuario no haya mencionado explícitamente.
+- Si el usuario está confirmando la selección de un servicio, pero no ha proporcionado el nombre del servicio, pídele amablemente que especifique el servicio que desea.
+- Proporciona una respuesta clara y amable que guíe al usuario a proporcionar la información faltante.
+
+No debes devolver ningún comando en este caso. Responde al usuario de manera que continúe la conversación y facilite la obtención de la información necesaria.
+    `;
+
+    try {
+        const aiResponse = await openaiService.getChatCompletion(prompt, []);
+        logger.info(`Respuesta de reevaluación del modelo para usuario ${userId}: ${aiResponse}`);
+
+        // Como hemos instruido al asistente a no devolver comandos, procesamos solo la respuesta
+        return { command: null, response: aiResponse.trim() };
+    } catch (error) {
+        logger.error(`Error al reevaluar comando para usuario ${userId}: ${error.message}`);
+        return null;
+    }
+}
+
+
+
+
   }
   
   export default new FlowManager();
