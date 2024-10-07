@@ -226,7 +226,7 @@ class CommandProcessor {
     - Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
       1. ### 🔍 Criterios de Validación Aplicados:
         - Explica brevemente los criterios que aplicaste en este caso específico.
-      2. ### ✅ Resultado de la Validación:
+      2. ### {EMOJI de cruz o check dependiendo del resultado} Resultado de la Validación:
         - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el resultado es negativo,
           explica y brinda detalladamente lo que debe hacer el cliente para que su archivo sea valido para su impresion en funcion al area de impresion.
       3. ### 👉 Siguiente Paso:
