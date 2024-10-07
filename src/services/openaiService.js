@@ -241,7 +241,7 @@ class OpenAIService {
     
     15. **Manejo de Órdenes Incompletas**:
 
-    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height"), debes:
+    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height, fileValidation, fileAnalysis, etc"), debes:
       - Identificar los campos faltantes mencionados.
       - Solicitar amablemente al usuario la información faltante, proporcionando orientación clara sobre cómo proporcionarla.
       - Utilizar los comandos JSON apropiados cuando el usuario proporcione la información.
@@ -305,7 +305,7 @@ class OpenAIService {
     Información adicional:
     <informacion_adicional>${JSON.stringify(additionalInfo, null, 2)}</informacion_adicional>
 
-    ${missingFieldsInfo ? `Información del sistema:
+    ${missingFieldsInfo ? `Campos faltantes::
 
     ${missingFieldsInfo}` : ''}
 

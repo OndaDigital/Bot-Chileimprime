@@ -188,8 +188,9 @@ class CommandProcessor {
     El usuario acaba de subir un archivo. Ahora eres un **experto en impresión de gran formato** e **ingeniero en color**. Verifica el *currentOrder* y responde según las siguientes condiciones:
 
     1. 📐 **Análisis del Archivo**:
-      - Analiza el archivo proporcionado considerando una tolerancia del *70%* en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
-      
+      - Analiza el archivo proporcionado considerando una tolerancia del *20%* en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
+      - Ten mucho cuidado con el area del servicio con respecto al area del diseño
+
     2. 📊 **Directrices de DPI**:
       - Ten en cuenta las siguientes directrices para el DPI:
       <dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
@@ -200,7 +201,7 @@ class CommandProcessor {
       verifica la resolucion del archivo enviado por el cliente y en caso de que no cumpla con su area de impresion pero si con los DPI darle los pasos para corregir su archivo.
       
     4. 🧐 **Evaluación de Adecuación**:
-      - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *80%*.
+      - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *20%*.
       
     5. ✅ **Validación del Archivo**:
       - Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
