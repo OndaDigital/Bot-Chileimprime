@@ -6,6 +6,7 @@ import config from './config/config.js';
 import sheetService from './services/sheetService.js'
 import { formatPrice, sendSplitMessages } from './utils/helpers.js';
 import { normalizeCommand, findClosestCommand, sanitizeJsonString } from './utils/commandUtils.js';
+import { CustomError } from './utils/errorHandler.js';
 
 class CommandProcessor {
   constructor() {}
