@@ -486,46 +486,169 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       return false;
     }
 
-   // Modificar la función validateCommand
-  async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
-    if (command.command === "CONFIRM_ORDER") {
-      if (!userContextManager.isOrderComplete(userId)) {
-        const missingFields = userContextManager.getIncompleteFields(userId);
-        logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
-
-        // Invocar a la función reevaluateCommand
-        const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
-
-        if (newCommandOrResponse) {
-          // Procesar el nuevo comando si existe
-          if (newCommandOrResponse.command) {
-            logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
-            await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+    async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
+      if (command.command === "CONFIRM_ORDER") {
+        if (!userContextManager.isOrderComplete(userId)) {
+          const missingFields = userContextManager.getIncompleteFields(userId);
+          logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
+  
+          // Llamar primero a extractDataFromUserMessage
+          const extractedCommand = await this.extractDataFromUserMessage(userMessage, userId);
+  
+          if (extractedCommand) {
+            logger.info(`Comando extraído de extractDataFromUserMessage para usuario ${userId}: ${JSON.stringify(extractedCommand)}`);
+  
+            // Procesar el comando extraído
+            await commandProcessor.processCommand(extractedCommand, userId, ctx, { flowDynamic });
+  
+            // Generar una instrucción para getChatCompletion
+            const instruction = `
+  El cliente acaba de ${this.getActionDescription(extractedCommand)}.
+  
+  Continúa la conversación con el cliente para avanzar en la cotización.
+  
+  Importante:
+  - No incluyas ningún comando JSON en tu respuesta.
+  - No muestres los comandos al cliente.
+  - Responde de manera natural y amable, siguiendo las pautas del SystemPrompt.
+  
+  Responde al cliente:
+            `;
+  
+            // Obtener el SystemPrompt actualizado
+            const userContext = userContextManager.getUserContext(userId);
+            const systemPrompt = openaiService.getSystemPrompt(
+              userContext.services,
+              userContext.currentOrder,
+              userContext.additionalInfo,
+              userContext.chatContext
+            );
+  
+            // Llamar a getChatCompletion con la instrucción
+            const aiResponse = await openaiService.getChatCompletion(
+              systemPrompt,
+              userContext.chatContext,
+              instruction
+            );
+  
+            // Actualizar el contexto
+            userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+            // Enviar la respuesta al cliente
+            await flowDynamic(aiResponse);
+  
+            // Indicar que la respuesta ha sido manejada
+            return { validatedCommand: null, responseSent: true };
+          } else {
+            // Si no se extrae un comando válido, proceder a reevaluateCommand
+            const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
+  
+            if (newCommandOrResponse) {
+              // Procesar el nuevo comando si existe
+              if (newCommandOrResponse.command) {
+                logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
+                await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+              }
+  
+              // Enviar la respuesta al usuario si existe
+              if (newCommandOrResponse.response) {
+                await flowDynamic(newCommandOrResponse.response);
+                userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
+              }
+  
+              // Indicar que la respuesta ha sido manejada
+              return { validatedCommand: null, responseSent: true };
+            } else {
+              // Actualizar el contexto del asistente con los campos faltantes
+              const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+              userContextManager.updateContext(userId, systemMessage, "system");
+  
+              // Informar al usuario
+              await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
+  
+              // Indicar que la respuesta ha sido manejada
+              return { validatedCommand: null, responseSent: true };
+            }
           }
-
-          // Enviar la respuesta al usuario si existe
-          if (newCommandOrResponse.response) {
-            await flowDynamic(newCommandOrResponse.response);
-            userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
-          }
-
-          // Indicar que la respuesta ya ha sido manejada
-          return { validatedCommand: null, responseSent: true };
-        } else {
-          // Actualizar el contexto del asistente con los campos faltantes
-          const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
-          userContextManager.updateContext(userId, systemMessage, "system");
-
-          // Informar al usuario
-          await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
-
-          // Indicar que la respuesta ya ha sido manejada
-          return { validatedCommand: null, responseSent: true };
         }
       }
+      return { validatedCommand: command, responseSent: false };
+    }  
+
+
+    // Nueva función para describir la acción basada en el comando
+    getActionDescription(command) {
+      switch (command.command) {
+        case "SELECT_SERVICE":
+          return `seleccionado el servicio: ${command.service}`;
+        case "SET_MEASURES":
+          return `establecido las medidas: ancho ${command.width} m, alto ${command.height} m`;
+        case "SET_QUANTITY":
+          return `establecido la cantidad: ${command.quantity}`;
+        case "SET_FINISHES":
+          return `seleccionado las terminaciones: sellado ${command.sellado}, ojetillos ${command.ojetillos}, bolsillo ${command.bolsillo}`;
+        default:
+          return `realizado una acción`;
+      }
     }
-    return { validatedCommand: command, responseSent: false };
-  }
+
+
+
+
+    // Nueva función extractDataFromUserMessage
+    async extractDataFromUserMessage(userMessage, userId) {
+      logger.info(`Intentando extraer comando del mensaje del usuario ${userId}: "${userMessage}"`);
+  
+      const chatContext = userContextManager.getChatContext(userId);
+      const lastMessages = chatContext.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n');
+  
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+  
+      const prompt = `
+  Eres un asistente experto en impresión y gestión de pedidos. A partir del siguiente mensaje del usuario y el contexto de la conversación, extrae el comando apropiado para procesar su solicitud.
+  
+  Historial de la conversación:
+  ${lastMessages}
+  
+  Mensaje del usuario:
+  "${userMessage}"
+  
+  Información actual de la orden:
+  ${JSON.stringify(currentOrder)}
+  
+  Lista de servicios disponibles:
+  ${JSON.stringify(userContextManager.getAllServices())}
+  
+  Tu tarea es analizar el mensaje del usuario y, si es posible, extraer el comando adecuado para avanzar en el procesamiento de su pedido. Solo debes devolver un comando JSON válido si estás seguro de que el mensaje del usuario contiene la información necesaria.
+  
+  Posibles comandos:
+  - {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
+  - {"command": "SET_MEASURES", "width": X, "height": Y}
+  - {"command": "SET_QUANTITY", "quantity": Z}
+  - {"command": "SET_FINISHES", "sellado": true/false, "ojetillos": true/false, "bolsillo": true/false}
+  
+  Si no es posible extraer un comando válido, no devuelvas nada.
+  
+  No debes devolver ninguna explicación ni texto adicional. Solo devuelve el comando JSON si es aplicable.
+  `;
+  
+      try {
+        const aiResponse = await openaiService.getChatCompletion(prompt, []);
+        logger.info(`Respuesta de extractDataFromUserMessage para usuario ${userId}: ${aiResponse}`);
+  
+        // Intentar parsear la respuesta como JSON
+        try {
+          const extractedCommand = JSON.parse(aiResponse);
+          return extractedCommand;
+        } catch (parseError) {
+          logger.warn(`No se pudo parsear el comando extraído para usuario ${userId}: ${parseError.message}`);
+          return null;
+        }
+      } catch (error) {
+        logger.error(`Error al extraer comando del mensaje del usuario ${userId}: ${error.message}`);
+        return null;
+      }
+    }
 
 
   async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
@@ -538,6 +661,7 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
     // Obtener la lista de servicios disponibles
     const services = userContextManager.getGlobalServices();
     const servicesList = Object.values(services).flat().map(service => service.name).join(', ');
+    const currentOrder = userContextManager.getCurrentOrder(userId);
 
     // Modificación del prompt para evitar que el asistente asuma valores por defecto
     const prompt = `
@@ -547,6 +671,23 @@ ${lastMessages}
 
 Basado en esta interacción y el estado actual de la orden:
 ${JSON.stringify(userContextManager.getCurrentOrder(userId))}
+
+Presta especial atención a los siguientes detalles del currentOrder:
+- Servicio actual: ${currentOrder.service || 'No seleccionado'}
+- Categoría: ${currentOrder.category || 'No especificada'}
+- Tipo: ${currentOrder.type || 'No especificado'}
+- Medidas seleccionadas: 
+  * Ancho: ${currentOrder.measures?.width || 'No especificado'} metros
+  * Alto: ${currentOrder.measures?.height || 'No especificado'} metros
+- Terminaciones elegidas: 
+  * Sellado: ${currentOrder.finishes?.sellado ? 'Sí' : 'No'}
+  * Ojetillos: ${currentOrder.finishes?.ojetillos ? 'Sí' : 'No'}
+  * Bolsillo: ${currentOrder.finishes?.bolsillo ? 'Sí' : 'No'}
+- Cantidad: ${currentOrder.quantity || 'No especificada'}
+- Archivo de diseño: ${currentOrder.filePath ? 'Subido' : 'No subido'}
+- Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
+- Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
+- Área del servicio: ${currentOrder.areaServicio || 'No calculada'} m²
 
 Lista de servicios disponibles: ${servicesList}
 

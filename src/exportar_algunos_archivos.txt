@@ -937,8 +937,8 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
     return { validatedCommand: command, responseSent: false };
   }
 
-   // Modificar la función reevaluateCommand
-   async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
+
+  async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
     logger.info(`Reevaluando comando para usuario ${userId}`);
 
     // Obtener el historial reciente de la conversación
@@ -948,7 +948,9 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
     // Obtener la lista de servicios disponibles
     const services = userContextManager.getGlobalServices();
     const servicesList = Object.values(services).flat().map(service => service.name).join(', ');
+    const currentOrder = userContextManager.getCurrentOrder(userId);
 
+    // Modificación del prompt para evitar que el asistente asuma valores por defecto
     const prompt = `
 Eres un asistente experto en impresión y gestión de pedidos. Aquí está la última interacción:
 
@@ -957,39 +959,50 @@ ${lastMessages}
 Basado en esta interacción y el estado actual de la orden:
 ${JSON.stringify(userContextManager.getCurrentOrder(userId))}
 
+Presta especial atención a los siguientes detalles del currentOrder:
+- Servicio actual: ${currentOrder.service || 'No seleccionado'}
+- Categoría: ${currentOrder.category || 'No especificada'}
+- Tipo: ${currentOrder.type || 'No especificado'}
+- Medidas seleccionadas: 
+  * Ancho: ${currentOrder.measures?.width || 'No especificado'} metros
+  * Alto: ${currentOrder.measures?.height || 'No especificado'} metros
+- Terminaciones elegidas: 
+  * Sellado: ${currentOrder.finishes?.sellado ? 'Sí' : 'No'}
+  * Ojetillos: ${currentOrder.finishes?.ojetillos ? 'Sí' : 'No'}
+  * Bolsillo: ${currentOrder.finishes?.bolsillo ? 'Sí' : 'No'}
+- Cantidad: ${currentOrder.quantity || 'No especificada'}
+- Archivo de diseño: ${currentOrder.filePath ? 'Subido' : 'No subido'}
+- Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
+- Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
+- Área del servicio: ${currentOrder.areaServicio || 'No calculada'} m²
+
 Lista de servicios disponibles: ${servicesList}
 
 Los campos faltantes en la orden son: ${missingFields.join(', ')}
 
-Analiza si el comando 'CONFIRM_ORDER' es apropiado. Si la orden está incompleta, determina el comando correcto que se debe ejecutar o proporciona la mejor respuesta posible al usuario para ayudarlo a completar la información faltante.
+Tu objetivo es ayudar al usuario a completar la información faltante sin asumir ningún valor por defecto. No debes asignar valores a campos faltantes a menos que el usuario los haya proporcionado explícitamente.
+
+Analiza si el comando 'CONFIRM_ORDER' es apropiado. Si la orden está incompleta, determina la mejor respuesta posible al usuario para ayudarlo a proporcionar la información faltante.
 
 Recuerda:
-- Debes proporcionar comandos válidos según el estado de la orden.
-- Si el usuario está confirmando la selección de un servicio, el comando correcto podría ser 'SELECT_SERVICE' con el servicio confirmado.
-- Asegúrate de incluir el nombre exacto del servicio en el comando si corresponde.
+- No asumas servicios o valores que el usuario no haya mencionado explícitamente.
+- Si el usuario está confirmando la selección de un servicio, pero no ha proporcionado el nombre del servicio, pídele amablemente que especifique el servicio que desea.
+- Proporciona una respuesta clara y amable que guíe al usuario a proporcionar la información faltante.
 
-Devuelve el comando en formato JSON si es necesario, seguido de una respuesta apropiada al usuario que continúe la conversación.
+No debes devolver ningún comando en este caso. Responde al usuario de manera que continúe la conversación y facilite la obtención de la información necesaria.
     `;
 
     try {
-      const aiResponse = await openaiService.getChatCompletion(prompt, []);
-      logger.info(`Respuesta de reevaluación del modelo para usuario ${userId}: ${aiResponse}`);
+        const aiResponse = await openaiService.getChatCompletion(prompt, []);
+        logger.info(`Respuesta de reevaluación del modelo para usuario ${userId}: ${aiResponse}`);
 
-      // Procesar la respuesta para extraer el comando y la respuesta
-      const commands = this.processAIResponse(aiResponse);
-      const filteredResponse = this.filterJsonCommands(aiResponse);
-
-      if (commands.length > 0) {
-        return { command: commands[0], response: filteredResponse };
-      } else {
-        // No hay comando, devolver la respuesta al usuario
+        // Como hemos instruido al asistente a no devolver comandos, procesamos solo la respuesta
         return { command: null, response: aiResponse.trim() };
-      }
     } catch (error) {
-      logger.error(`Error al reevaluar comando para usuario ${userId}: ${error.message}`);
-      return null;
+        logger.error(`Error al reevaluar comando para usuario ${userId}: ${error.message}`);
+        return null;
     }
-  }
+}
 
 
 
@@ -1623,136 +1636,4 @@ class OpenAIService {
 }
 
 export default new OpenAIService();
-
-
-// Archivo: services\whatsappService.js
-
-// services/whatsappService.js
-
-import { createBot, createProvider, createFlow, addKeyword, MemoryDB } from '@builderbot/bot';
-import { BaileysProvider } from '@builderbot/provider-baileys';
-import config from '../config/config.js';
-import logger from '../utils/logger.js';
-import { CustomError } from '../utils/errorHandler.js';
-import fs from 'fs/promises';
-import path from 'path';
-
-class WhatsAppService {
-  constructor() {
-    this.provider = null;
-    this.bot = null;
-  }
-
-  async initialize(flows) {
-    try {
-      const adapterDB = new MemoryDB();
-      const adapterFlow = createFlow(flows);
-      const adapterProvider = createProvider(BaileysProvider, {
-        groupsIgnore: true,
-      });
-
-      this.provider = adapterProvider;
-
-      const { bot, httpServer } = await createBot({
-        flow: adapterFlow,
-        provider: adapterProvider,
-        database: adapterDB,
-      }, {
-        queue: {
-          timeout: 60000,
-          concurrencyLimit: 100
-        }
-      });
-
-      this.bot = bot;
-
-      httpServer(config.port);
-      logger.info(`Bot iniciado en el puerto ${config.port}`);
-    } catch (error) {
-      logger.error('Error al inicializar WhatsApp Service:', error);
-      throw new CustomError('WhatsAppInitError', 'Error al inicializar el servicio de WhatsApp', error);
-    }
-  }
-
-  async sendMessage(to, message, options = {}) {
-    try {
-      await this.bot.sendMessage(to, message, options);
-      logger.info(`Mensaje enviado a ${to}`);
-    } catch (error) {
-      logger.error(`Error al enviar mensaje a ${to}:`, error);
-      throw new CustomError('MessageSendError', 'Error al enviar mensaje de WhatsApp', error);
-    }
-  }
-
-  async saveAudioFile(ctx) {
-    try {
-      const savedFile = await this.provider.saveFile(ctx);
-      if (typeof savedFile === 'string') {
-        return savedFile;
-      } else if (savedFile && savedFile.path) {
-        return savedFile.path;
-      } else {
-        throw new Error('No se pudo obtener la ruta del archivo de audio');
-      }
-    } catch (error) {
-      logger.error('Error al guardar archivo de audio:', error);
-      throw new CustomError('AudioSaveError', 'Error al guardar archivo de audio', error);
-    }
-  }
-
-  async saveFile(ctx) {
-    try {
-      if (!this.provider) {
-        throw new Error('El proveedor de WhatsApp no está inicializado');
-      }
-      const savedFile = await this.provider.saveFile(ctx);
-      if (typeof savedFile === 'string') {
-        return savedFile;
-      } else if (savedFile && savedFile.path) {
-        return savedFile.path;
-      } else {
-        throw new Error('No se pudo obtener la ruta del archivo');
-      }
-    } catch (error) {
-      logger.error('Error al guardar archivo:', error);
-      throw new CustomError('FileSaveError', 'Error al guardar archivo', error);
-    }
-  }
-
-  async processVoiceNote(ctx, audioPath) {
-    try {
-      logger.info(`Procesando nota de voz para usuario ${ctx.from}`);
-      const transcription = await openaiService.transcribeAudio(audioPath);
-      await fs.unlink(audioPath);
-      logger.info(`Nota de voz procesada y archivo eliminado: ${audioPath}`);
-      return transcription;
-    } catch (error) {
-      logger.error(`Error procesando nota de voz: ${error.message}`);
-      throw new CustomError('VoiceNoteProcessError', 'Error al procesar nota de voz', error);
-    }
-  }
-
-  getPromoMessage() {
-    return `🤖 *¡Gracias por probar nuestro Bot de Demostración!* 🚀
-  
-  Desarrollado con ❤️ por *SuperPyme*
-  
-  🍽️ *Ver Menú y Pedidos:*
-  https://docs.google.com/spreadsheets/d/1ZFq1c0IWbR3prkuZdnbJ_Och-GhxI9iMh56yqYlmAjo/edit?usp=sharing
-  
-  🔒 _Nota: Los números están censurados para proteger la privacidad de nuestros usuarios de prueba._
-  
-  ✨ *¿Quieres un bot así para tu negocio?* ✨
-  
-  📱 Whatsapp: *+56 9 7147 1884*
-  📧 Escríbenos: *oficina@superpyme.cl*
-  🌐 Más información: *superpyme.cl*
-  
-  🚀 *¡Lleva tu negocio al siguiente nivel con SuperPyme!* 💼
-  
-  PD: Puedes volver a probar el bot en 10 minutos, si quieres probarlo de inmediato, escribe desde otro número.`;
-  }
-}
-
-export default new WhatsAppService();
 
