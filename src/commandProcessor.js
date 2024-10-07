@@ -25,7 +25,7 @@ class CommandProcessor {
         logger.warn(`Comando corregido de "${command.command}" a "${correctedCommand}"`);
       }
 
-      switch (command.command) {
+      switch (correctedCommand) {
         case "LIST_ALL_SERVICES":
           return this.handleListAllServices(userId);
         case "SELECT_SERVICE":

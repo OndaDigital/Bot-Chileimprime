@@ -9,6 +9,7 @@ import config from './config/config.js';
 import sheetService from './services/sheetService.js'
 import { formatPrice, sendSplitMessages } from './utils/helpers.js';
 import { normalizeCommand, findClosestCommand, sanitizeJsonString } from './utils/commandUtils.js';
+import { CustomError } from './utils/errorHandler.js';
 
 class CommandProcessor {
   constructor() {}
@@ -190,8 +191,9 @@ class CommandProcessor {
     El usuario acaba de subir un archivo. Ahora eres un **experto en impresión de gran formato** e **ingeniero en color**. Verifica el *currentOrder* y responde según las siguientes condiciones:
 
     1. 📐 **Análisis del Archivo**:
-      - Analiza el archivo proporcionado considerando una tolerancia del *70%* en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
-      
+      - Analiza el archivo proporcionado considerando una tolerancia del *20%* en cuanto a las medidas y el área del diseño comparado con el servicio solicitado.
+      - Ten mucho cuidado con el area del servicio con respecto al area del diseño
+
     2. 📊 **Directrices de DPI**:
       - Ten en cuenta las siguientes directrices para el DPI:
       <dpiGuidelines>${dpiGuidelines}</dpiGuidelines>
@@ -202,7 +204,7 @@ class CommandProcessor {
       verifica la resolucion del archivo enviado por el cliente y en caso de que no cumpla con su area de impresion pero si con los DPI darle los pasos para corregir su archivo.
       
     4. 🧐 **Evaluación de Adecuación**:
-      - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *80%*.
+      - Aplica tu expertise en impresión para evaluar si el archivo es adecuado, incluso si no cumple exactamente con los criterios, pero está dentro de la tolerancia del *20%*.
       
     5. ✅ **Validación del Archivo**:
       - Si el archivo es válido o puede ser aceptado con modificaciones menores, indica que es válido.
@@ -896,46 +898,169 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       return false;
     }
 
-   // Modificar la función validateCommand
-  async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
-    if (command.command === "CONFIRM_ORDER") {
-      if (!userContextManager.isOrderComplete(userId)) {
-        const missingFields = userContextManager.getIncompleteFields(userId);
-        logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
-
-        // Invocar a la función reevaluateCommand
-        const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
-
-        if (newCommandOrResponse) {
-          // Procesar el nuevo comando si existe
-          if (newCommandOrResponse.command) {
-            logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
-            await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+    async validateCommand(command, userId, assistantMessage, userMessage, ctx, flowDynamic) {
+      if (command.command === "CONFIRM_ORDER") {
+        if (!userContextManager.isOrderComplete(userId)) {
+          const missingFields = userContextManager.getIncompleteFields(userId);
+          logger.warn(`La orden está incompleta para el usuario ${userId}. Campos faltantes: ${missingFields.join(', ')}. Revaluando comando CONFIRM_ORDER.`);
+  
+          // Llamar primero a extractDataFromUserMessage
+          const extractedCommand = await this.extractDataFromUserMessage(userMessage, userId);
+  
+          if (extractedCommand) {
+            logger.info(`Comando extraído de extractDataFromUserMessage para usuario ${userId}: ${JSON.stringify(extractedCommand)}`);
+  
+            // Procesar el comando extraído
+            await commandProcessor.processCommand(extractedCommand, userId, ctx, { flowDynamic });
+  
+            // Generar una instrucción para getChatCompletion
+            const instruction = `
+  El cliente acaba de ${this.getActionDescription(extractedCommand)}.
+  
+  Continúa la conversación con el cliente para avanzar en la cotización.
+  
+  Importante:
+  - No incluyas ningún comando JSON en tu respuesta.
+  - No muestres los comandos al cliente.
+  - Responde de manera natural y amable, siguiendo las pautas del SystemPrompt.
+  
+  Responde al cliente:
+            `;
+  
+            // Obtener el SystemPrompt actualizado
+            const userContext = userContextManager.getUserContext(userId);
+            const systemPrompt = openaiService.getSystemPrompt(
+              userContext.services,
+              userContext.currentOrder,
+              userContext.additionalInfo,
+              userContext.chatContext
+            );
+  
+            // Llamar a getChatCompletion con la instrucción
+            const aiResponse = await openaiService.getChatCompletion(
+              systemPrompt,
+              userContext.chatContext,
+              instruction
+            );
+  
+            // Actualizar el contexto
+            userContextManager.updateContext(userId, aiResponse, "assistant");
+  
+            // Enviar la respuesta al cliente
+            await flowDynamic(aiResponse);
+  
+            // Indicar que la respuesta ha sido manejada
+            return { validatedCommand: null, responseSent: true };
+          } else {
+            // Si no se extrae un comando válido, proceder a reevaluateCommand
+            const newCommandOrResponse = await this.reevaluateCommand(assistantMessage, userMessage, userId, missingFields);
+  
+            if (newCommandOrResponse) {
+              // Procesar el nuevo comando si existe
+              if (newCommandOrResponse.command) {
+                logger.info(`Nuevo comando obtenido tras revaluación: ${JSON.stringify(newCommandOrResponse.command)}`);
+                await commandProcessor.processCommand(newCommandOrResponse.command, userId, ctx, { flowDynamic });
+              }
+  
+              // Enviar la respuesta al usuario si existe
+              if (newCommandOrResponse.response) {
+                await flowDynamic(newCommandOrResponse.response);
+                userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
+              }
+  
+              // Indicar que la respuesta ha sido manejada
+              return { validatedCommand: null, responseSent: true };
+            } else {
+              // Actualizar el contexto del asistente con los campos faltantes
+              const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+              userContextManager.updateContext(userId, systemMessage, "system");
+  
+              // Informar al usuario
+              await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
+  
+              // Indicar que la respuesta ha sido manejada
+              return { validatedCommand: null, responseSent: true };
+            }
           }
-
-          // Enviar la respuesta al usuario si existe
-          if (newCommandOrResponse.response) {
-            await flowDynamic(newCommandOrResponse.response);
-            userContextManager.updateContext(userId, newCommandOrResponse.response, "assistant");
-          }
-
-          // Indicar que la respuesta ya ha sido manejada
-          return { validatedCommand: null, responseSent: true };
-        } else {
-          // Actualizar el contexto del asistente con los campos faltantes
-          const systemMessage = `Campos faltantes: La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
-          userContextManager.updateContext(userId, systemMessage, "system");
-
-          // Informar al usuario
-          await flowDynamic("Parece que aún falta información para completar tu pedido. Por favor, proporciónanos los detalles faltantes.");
-
-          // Indicar que la respuesta ya ha sido manejada
-          return { validatedCommand: null, responseSent: true };
         }
       }
+      return { validatedCommand: command, responseSent: false };
+    }  
+
+
+    // Nueva función para describir la acción basada en el comando
+    getActionDescription(command) {
+      switch (command.command) {
+        case "SELECT_SERVICE":
+          return `seleccionado el servicio: ${command.service}`;
+        case "SET_MEASURES":
+          return `establecido las medidas: ancho ${command.width} m, alto ${command.height} m`;
+        case "SET_QUANTITY":
+          return `establecido la cantidad: ${command.quantity}`;
+        case "SET_FINISHES":
+          return `seleccionado las terminaciones: sellado ${command.sellado}, ojetillos ${command.ojetillos}, bolsillo ${command.bolsillo}`;
+        default:
+          return `realizado una acción`;
+      }
     }
-    return { validatedCommand: command, responseSent: false };
-  }
+
+
+
+
+    // Nueva función extractDataFromUserMessage
+    async extractDataFromUserMessage(userMessage, userId) {
+      logger.info(`Intentando extraer comando del mensaje del usuario ${userId}: "${userMessage}"`);
+  
+      const chatContext = userContextManager.getChatContext(userId);
+      const lastMessages = chatContext.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n');
+  
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+  
+      const prompt = `
+  Eres un asistente experto en impresión y gestión de pedidos. A partir del siguiente mensaje del usuario y el contexto de la conversación, extrae el comando apropiado para procesar su solicitud.
+  
+  Historial de la conversación:
+  ${lastMessages}
+  
+  Mensaje del usuario:
+  "${userMessage}"
+  
+  Información actual de la orden:
+  ${JSON.stringify(currentOrder)}
+  
+  Lista de servicios disponibles:
+  ${JSON.stringify(userContextManager.getAllServices())}
+  
+  Tu tarea es analizar el mensaje del usuario y, si es posible, extraer el comando adecuado para avanzar en el procesamiento de su pedido. Solo debes devolver un comando JSON válido si estás seguro de que el mensaje del usuario contiene la información necesaria.
+  
+  Posibles comandos:
+  - {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
+  - {"command": "SET_MEASURES", "width": X, "height": Y}
+  - {"command": "SET_QUANTITY", "quantity": Z}
+  - {"command": "SET_FINISHES", "sellado": true/false, "ojetillos": true/false, "bolsillo": true/false}
+  
+  Si no es posible extraer un comando válido, no devuelvas nada.
+  
+  No debes devolver ninguna explicación ni texto adicional. Solo devuelve el comando JSON si es aplicable.
+  `;
+  
+      try {
+        const aiResponse = await openaiService.getChatCompletion(prompt, []);
+        logger.info(`Respuesta de extractDataFromUserMessage para usuario ${userId}: ${aiResponse}`);
+  
+        // Intentar parsear la respuesta como JSON
+        try {
+          const extractedCommand = JSON.parse(aiResponse);
+          return extractedCommand;
+        } catch (parseError) {
+          logger.warn(`No se pudo parsear el comando extraído para usuario ${userId}: ${parseError.message}`);
+          return null;
+        }
+      } catch (error) {
+        logger.error(`Error al extraer comando del mensaje del usuario ${userId}: ${error.message}`);
+        return null;
+      }
+    }
 
 
   async reevaluateCommand(assistantMessage, userMessage, userId, missingFields) {
@@ -1517,7 +1642,7 @@ class OpenAIService {
     
     15. **Manejo de Órdenes Incompletas**:
 
-    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height"), debes:
+    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height, fileValidation, fileAnalysis, etc"), debes:
       - Identificar los campos faltantes mencionados.
       - Solicitar amablemente al usuario la información faltante, proporcionando orientación clara sobre cómo proporcionarla.
       - Utilizar los comandos JSON apropiados cuando el usuario proporcione la información.
@@ -1581,7 +1706,7 @@ class OpenAIService {
     Información adicional:
     <informacion_adicional>${JSON.stringify(additionalInfo, null, 2)}</informacion_adicional>
 
-    ${missingFieldsInfo ? `Información del sistema:
+    ${missingFieldsInfo ? `Campos faltantes:
 
     ${missingFieldsInfo}` : ''}
 
