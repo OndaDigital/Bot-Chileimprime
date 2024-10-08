@@ -353,6 +353,14 @@ class CommandProcessor {
   async handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow }) {
     try {
       logger.info(`Iniciando proceso de confirmación de orden para usuario ${userId}`);
+
+      // Modificación: Verificar si la orden ya está confirmada
+      if (orderManager.isOrderConfirmed(userId)) {
+        logger.warn(`La orden para el usuario ${userId} ya ha sido confirmada. Evitando doble confirmación.`);
+        await flowDynamic("✅ Tu pedido ya ha sido confirmado previamente. Si necesitas asistencia adicional, por favor contacta con un representante.");
+        return { currentOrderUpdated: false };
+      }
+
       const currentOrder = userContextManager.getCurrentOrder(userId);
       
       if (!userContextManager.isOrderComplete(userId)) {
@@ -378,8 +386,13 @@ class CommandProcessor {
       
       if (result.success) {
         logger.info(`Pedido confirmado para usuario ${userId}. Número de pedido: ${result.orderNumber}`);
-        await flowDynamic(`¡Gracias por tu pedido! Tu número de cotización es: ${result.orderNumber}`);
+
+        // Modificación: Enviar resumen de la orden
+        const orderSummary = orderManager.formatOrderSummary(currentOrder);
+        await flowDynamic(`🎉 ¡Gracias por tu pedido! Tu número de cotización es: *WA-${result.orderNumber}*`);
+        await flowDynamic(orderSummary);
         await flowDynamic(result.message);
+
         return { currentOrderUpdated: true, nextFlow: 'promoFlow' };
       } else {
         throw new Error("Error al confirmar el pedido");

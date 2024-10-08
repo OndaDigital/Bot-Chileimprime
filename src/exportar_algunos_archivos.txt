@@ -28,7 +28,7 @@ class CommandProcessor {
         logger.warn(`Comando corregido de "${command.command}" a "${correctedCommand}"`);
       }
 
-      switch (command.command) {
+      switch (correctedCommand) {
         case "LIST_ALL_SERVICES":
           return this.handleListAllServices(userId);
         case "SELECT_SERVICE":
@@ -229,7 +229,7 @@ class CommandProcessor {
     - Luego, proporciona la respuesta al usuario siguiendo un formato fijo de 3 secciones, separadas por encabezados "### ":
       1. ### 🔍 Criterios de Validación Aplicados:
         - Explica brevemente los criterios que aplicaste en este caso específico.
-      2. ### ✅ Resultado de la Validación:
+      2. ### {EMOJI de cruz o check dependiendo del resultado} Resultado de la Validación:
         - Indica si el archivo es válido o no, y proporciona detalles, sobretodo si el resultado es negativo,
           explica y brinda detalladamente lo que debe hacer el cliente para que su archivo sea valido para su impresion en funcion al area de impresion.
       3. ### 👉 Siguiente Paso:
@@ -1137,264 +1137,520 @@ No debes devolver ningún comando en este caso. Responde al usuario de manera qu
   export default new FlowManager();
 
 
-// Archivo: modules\userContext.js
+// Archivo: modules\orderManager.js
 
 import logger from '../utils/logger.js';
+import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
+import moment from 'moment-timezone';
+import config from '../config/config.js';
 import sheetService from '../services/sheetService.js';
+import userContextManager from './userContext.js';
+import { CustomError } from '../utils/errorHandler.js';
 
-class UserContextManager {
+class OrderManager {
   constructor() {
-    this.userContexts = new Map();
+    this.orderConfirmed = new Set();
   }
 
-  // Método existente para obtener el contexto del usuario
-  getUserContext(userId) {
-    if (!this.userContexts.has(userId)) {
-      this.userContexts.set(userId, {
-        context: "",
-        chatContext: [],
-        currentOrder: this.getEmptyOrder(),
-        services: sheetService.getServices(),
-        additionalInfo: sheetService.getAdditionalInfo(),
-        initialMessagesSent: false,
-        hasInteracted: false  // Nuevo estado para rastrear cualquier interacción
+  async handleSelectService(userId, serviceName) {
+    logger.info(`Manejando selección de servicio para usuario ${userId}: ${serviceName}`);
+    try {
+      const serviceInfo = userContextManager.getServiceInfo(serviceName);
+      
+      if (!serviceInfo) {
+        const similarServices = userContextManager.findSimilarServices(serviceName);
+        return {
+          action: "INVALID_SERVICE",
+          similarServices,
+          order: userContextManager.getCurrentOrder(userId)
+        };
+      }
+
+      userContextManager.updateCurrentOrder(userId, { 
+        service: serviceName,
+        category: serviceInfo.category,
+        availableWidths: serviceInfo.availableWidths,
+        availableFinishes: userContextManager.getAvailableFinishes(serviceInfo)
       });
-      logger.info(`Nuevo contexto creado para usuario ${userId}`);
+      
+      return {
+        action: "SELECT_SERVICE",
+        order: userContextManager.getCurrentOrder(userId),
+        serviceInfo: serviceInfo
+      };
+    } catch (error) {
+      logger.error(`Error al seleccionar servicio para usuario ${userId}: ${error.message}`);
+      throw new CustomError('ServiceSelectionError', 'Error al seleccionar el servicio', error);
     }
-    return this.userContexts.get(userId);
   }
 
-  getEmptyOrder() {
-    return {
-      service: null,
-      category: null,
-      type: null,
-      measures: null,
-      finishes: {
-        sellado: false,
-        ojetillos: false,
-        bolsillo: false
-      },
-      quantity: null,
-      filePath: null,
-      fileAnalysis: null,
-      fileAnalysisResponded: false,
-      fileAnalysisHandled: false,
-      fileValidation: null,
-      availableWidths: [],
-      availableFinishes: [],
-      price: 0,
-      areaServicio: null,
+  async handleSetMeasures(userId, width, height) {
+    logger.info(`Manejando configuración de medidas para usuario ${userId}: ${width}x${height}`);
+    try {
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        throw new CustomError('InvalidMeasuresError', 'Este servicio no requiere medidas personalizadas');
+      }
+
+      const validWidth = serviceInfo.availableWidths.find(w => w.material === parseFloat(width));
+      if (!validWidth) {
+        throw new CustomError('InvalidWidthError', 'Ancho no válido para este servicio');
+      }
+
+      if (parseFloat(height) < 1) {
+        throw new CustomError('InvalidHeightError', 'El alto debe ser mayor o igual a 1 metro');
+      }
+
+      const measures = { width: validWidth.material, height: parseFloat(height) };
+      const areaServicio = measures.width * measures.height; // Calcular área del servicio
+      const { total, area } = this.calculatePrice({ ...currentOrder, measures });
+
+      userContextManager.updateCurrentOrder(userId, { measures, areaServicio, total, area }); // Actualizar areaServicio
+
+      return {
+        action: "SET_MEASURES",
+        order: userContextManager.getCurrentOrder(userId)
+      };
+    } catch (error) {
+      logger.error(`Error al configurar medidas para usuario ${userId}: ${error.message}`);
+      throw new CustomError('MeasuresSetupError', 'Error al configurar las medidas', error);
+    }
+  }
+
+  async handleSetQuantity(userId, quantity) {
+    logger.info(`Manejando configuración de cantidad para usuario ${userId}: ${quantity}`);
+    try {
+      if (quantity <= 0) {
+        throw new CustomError('InvalidQuantityError', 'La cantidad debe ser mayor que cero');
+      }
+
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+      if (!['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+        // Para categorías sin medidas personalizadas, calculamos el precio directamente
+        const { total } = this.calculatePrice({ ...currentOrder, quantity });
+        userContextManager.updateCurrentOrder(userId, { quantity, total });
+      } else {
+        userContextManager.updateCurrentOrder(userId, { quantity });
+      }
+
+      return {
+        action: "SET_QUANTITY",
+        order: userContextManager.getCurrentOrder(userId)
+      };
+    } catch (error) {
+      logger.error(`Error al configurar cantidad para usuario ${userId}: ${error.message}`);
+      throw new CustomError('QuantitySetupError', 'Error al configurar la cantidad', error);
+    }
+  }
+
+  async setFinishes(userId, sellado, ojetillos, bolsillo) {
+    logger.info(`Manejando configuración de acabados para usuario ${userId}`);
+    try {
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      const serviceInfo = userContextManager.getServiceInfo(currentOrder.service);
+
+      const finishes = {
+        sellado: sellado && serviceInfo.sellado,
+        ojetillos: ojetillos && serviceInfo.ojetillos,
+        bolsillo: bolsillo && serviceInfo.bolsillo
+      };
+
+      userContextManager.updateCurrentOrder(userId, { finishes: finishes});
+
+      return {
+        action: "SET_FINISHES",
+        order: userContextManager.getCurrentOrder(userId)
+      };
+    } catch (error) {
+      logger.error(`Error al configurar acabados para usuario ${userId}: ${error.message}`);
+      throw new CustomError('FinishesSetupError', 'Error al configurar los acabados', error);
+    }
+  }
+
+  async handleValidateFile(userId, isValid, reason) {
+    logger.info(`Manejando validación de archivo para usuario ${userId}`);
+    try {
+      userContextManager.updateCurrentOrder(userId, {
+        fileAnalysis: { isValid, reason }
+      });
+      
+      return {
+        action: "VALIDATE_FILE",
+        order: userContextManager.getCurrentOrder(userId)
+      };
+    } catch (error) {
+      logger.error(`Error al validar archivo para usuario ${userId}: ${error.message}`);
+      throw new CustomError('FileValidationError', 'Error al validar el archivo', error);
+    }
+  }
+
+  async handleConfirmOrder(userId) {
+    logger.info(`Manejando confirmación de pedido para usuario ${userId}`);
+    try {
+      const currentOrder = userContextManager.getCurrentOrder(userId);
+      
+      if (!userContextManager.isOrderComplete(userId)) {
+        
+         // NUEVO: Lanzar excepción con detalles de campos faltantes
+         const missingFields = userContextManager.getIncompleteFields(userId);
+         const errorMessage = `La orden no está completa. Faltan los siguientes campos: ${missingFields.join(', ')}`;
+         logger.warn(errorMessage);
+         throw new CustomError('IncompleteOrderError', errorMessage);
+      }
+
+      const total = this.calculatePrice(currentOrder);
+      userContextManager.updateCurrentOrder(userId, { total: total });
+
+      const orderSummary = this.formatOrderSummary(currentOrder);
+      const result = await this.finalizeOrder(userId, currentOrder);
+
+      this.orderConfirmed.add(userId);
+
+      return {
+        action: "CONFIRM_ORDER",
+        order: currentOrder,
+        summary: orderSummary,
+        result: result
+      };
+    } catch (error) {
+      logger.error(`Error al confirmar el pedido para usuario ${userId}: ${error.message}`);
+      throw new CustomError(error.name || 'OrderConfirmationError', error.message);
+    }
+  }
+
+  calculatePrice(order) {
+    const serviceInfo = userContextManager.getServiceInfo(order.service);
+  
+    let total = 0;
+    let area = 1;
+    let precioM2 = serviceInfo.precio;
+    let precioTerminaciones = 0;
+    let precioTotalTerminaciones = 0;
+  
+    logger.info(`Calculando precio para orden: ${JSON.stringify(order)}`);
+    logger.info(`Información del servicio: ${JSON.stringify(serviceInfo)}`);
+  
+    if (['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceInfo.category)) {
+      area = order.measures.width * order.measures.height;
+      total = area * precioM2 * order.quantity;
+  
+      // Calcula el precio de las terminaciones por m2
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+      }
+  
+      // Calcula el precio total de las terminaciones
+      precioTotalTerminaciones = precioTerminaciones * area * order.quantity;
+      total += precioTotalTerminaciones;
+  
+      logger.info(`Precio de terminaciones por m2: ${precioTerminaciones}`);
+      logger.info(`Precio total de terminaciones: ${precioTotalTerminaciones}`);
+    } else {
+      total = precioM2 * order.quantity;
+  
+      // Para servicios sin medidas, calculamos las terminaciones por unidad
+      if (order.finishes.sellado) {
+        precioTerminaciones += serviceInfo.precioSellado;
+      }
+      if (order.finishes.ojetillos) {
+        precioTerminaciones += serviceInfo.precioOjetillos;
+      }
+      if (order.finishes.bolsillo) {
+        precioTerminaciones += serviceInfo.precioBolsillo;
+      }
+  
+      precioTotalTerminaciones = precioTerminaciones * order.quantity;
+      total += precioTotalTerminaciones;
+  
+      logger.info(`Precio de terminaciones por unidad: ${precioTerminaciones}`);
+      logger.info(`Precio total de terminaciones: ${precioTotalTerminaciones}`);
+    }
+  
+    const precioBase = area * precioM2 * order.quantity;
+  
+    logger.info(`Precio base: ${precioBase}`);
+    logger.info(`Precio total: ${total}`);
+  
+    return { 
+      total, 
+      area, 
+      precioM2, 
+      precioBase, 
+      precioTerminaciones, 
+      precioTotalTerminaciones
     };
   }
 
-  setInitialMessagesSent(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.initialMessagesSent = value;
-    userContext.hasInteracted = true;
-    logger.info(`Estado de mensajes iniciales y interacción actualizados para usuario ${userId}: ${value}`);
-  }
+  formatOrderSummary(order) {
+    let summary = "📋 Resumen final de tu cotización:\n\n";
 
-  setHasInteracted(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.hasInteracted = value;
-    logger.info(`Estado de interacción actualizado para usuario ${userId}: ${value}`);
-  }
+    const serviceInfo = userContextManager.getServiceInfo(order.service);
+    summary += `*Servicio:* ${order.service} (${serviceInfo.category})\n`;
 
-  hasUserInteracted(userId) {
-    return this.getUserContext(userId).hasInteracted;
-  }
-
-  updateContext(userId, message, role) {
-    const userContext = this.getUserContext(userId);
-    userContext.context += `${role}: ${message}\n`;
-    userContext.chatContext.push({ role, content: message });
-    this.limitContextSize(userId);
-    logger.info(`Contexto actualizado para usuario ${userId}. Mensajes en contexto: ${userContext.chatContext.length}`);
-  }
-
-  limitContextSize(userId) {
-    const userContext = this.getUserContext(userId);
-    if (userContext.chatContext.length > 30) {
-      userContext.chatContext = userContext.chatContext.slice(-10);
+    if (order.measures) {
+      summary += `*Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
     }
-    const words = userContext.context.split(/\s+/);
-    if (words.length > 1500) {
-      userContext.context = words.slice(-1500).join(" ");
+
+    summary += `*Cantidad:* ${order.quantity}\n`;
+
+    if (order.finishes) {
+      summary += "*Terminaciones:*\n";
+      if (order.finishes.sellado) summary += "- Sellado\n";
+      if (order.finishes.ojetillos) summary += "- Ojetillos\n";
+      if (order.finishes.bolsillo) summary += "- Bolsillo\n";
     }
-    logger.info(`Contexto limitado para usuario ${userId}`);
+
+    summary += `\n💰 *Total:* $${formatPrice(order.total)}\n`;
+
+    return summary;
   }
 
-  setGlobalData(services, additionalInfo) {
-    this.services = services;
-    this.additionalInfo = additionalInfo;
-    logger.info('Datos globales actualizados en UserContextManager');
-    logger.info(`Menú global: ${JSON.stringify(this.services)}`);
-    logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
-  }
-
-  updateCurrentOrder(userId, updates) {
-    const userContext = this.getUserContext(userId);
-    userContext.currentOrder = { ...userContext.currentOrder, ...updates };
-    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+  async finalizeOrder(userId, order) {
+    logger.info(`Finalizando orden para usuario ${userId}`);
     
-    if (updates.service) {
-      const serviceInfo = sheetService.getServiceInfo(updates.service);
-      if (serviceInfo) {
-        userContext.currentOrder.category = serviceInfo.category;
-        userContext.currentOrder.type = serviceInfo.type;
-        userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
-        userContext.currentOrder.availableFinishes = {
-          sellado: serviceInfo.sellado,
-          ojetillos: serviceInfo.ojetillos,
-          bolsillo: serviceInfo.bolsillo
+    const calculatedPrices = this.calculatePrice(order);
+    const finalOrder = {
+      fecha: moment().tz(config.timezone).format('DD-MM-YYYY HH:mm:ss'),
+      telefono: userId,
+      nombre: order.userName || 'Cliente',
+      servicio: order.service,
+      cantidad: order.quantity,
+      measures: order.measures,
+      area: calculatedPrices.area,
+      precioM2: calculatedPrices.precioM2,
+      precioBase: calculatedPrices.precioBase,
+      terminaciones: Object.entries(order.finishes)
+        .filter(([_, value]) => value)
+        .map(([key, _]) => key),
+      precioTerminaciones: calculatedPrices.precioTerminaciones,
+      precioTotalTerminaciones: calculatedPrices.precioTotalTerminaciones,
+      total: calculatedPrices.total,
+      observaciones: order.observaciones || 'Sin observaciones'
+    };
+  
+    logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
+  
+    try {
+      const result = await sheetService.saveOrder(finalOrder);
+      logger.info(`Resultado de guardado para usuario ${userId}: ${JSON.stringify(result)}`);
+  
+      if (result.success) {
+        this.orderConfirmed.add(userId);
+        logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
+        
+        return { 
+          success: true,
+          message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
+          orderNumber: result.rowIndex
         };
-        userContext.currentOrder.fileValidationCriteria = {
-          format: serviceInfo.format,
-          minDPI: serviceInfo.minDPI,
-        };
-        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
       } else {
-        logger.warn(`Servicio no encontrado: ${updates.service}`);
+        throw new Error("Error al guardar la cotización");
       }
+    } catch (error) {
+      logger.error(`Error detallado al finalizar la cotización para usuario ${userId}:`, error);
+      throw new CustomError('OrderFinalizationError', 'Error al finalizar la cotización', error);
     }
+  }
 
-    if (updates.fileAnalysis) {
-      userContext.currentOrder.fileAnalysisResponded = false;
-    }
 
-    if (updates.fileValidation) {
-      userContext.currentOrder.fileValidation = updates.fileValidation;
+  formatOrderForSheet(order) {
+    let details = `Servicio: ${order.service}\n`;
+    
+    if (order.measures) {
+      details += `Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
     }
     
-    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
-  }
-
-  updateFileAnalysisResponded(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.currentOrder.fileAnalysisResponded = value;
-    logger.info(`FileAnalysisResponded actualizado para usuario ${userId}: ${value}`);
-  }
-
-  updateFileAnalysisHandled(userId, value) {
-    const userContext = this.getUserContext(userId);
-    userContext.currentOrder.fileAnalysisHandled = value;
-    logger.info(`FileAnalysisHandled actualizado para usuario ${userId}: ${value}`);
-  }
-
-  hasFileAnalysisBeenResponded(userId) {
-    const userContext = this.getUserContext(userId);
-    return userContext.currentOrder.fileAnalysisResponded;
-  }
-
-  hasFileAnalysisBeenHandled(userId) {
-    const userContext = this.getUserContext(userId);
-    return userContext.currentOrder.fileAnalysisHandled;
-  }
-
-  getCurrentOrder(userId) {
-    const userContext = this.getUserContext(userId);
-    const currentOrder = userContext.currentOrder;
-    currentOrder.requiresMeasures = () => this.isServiceRequiringMeasures(currentOrder.category);
-    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(currentOrder)}`);
-    return currentOrder;
-  }
-
-  resetContext(userId, resetInitialMessages = false) {
-    const userContext = this.getUserContext(userId);
-    const initialMessagesSent = resetInitialMessages ? false : userContext.initialMessagesSent;
-    this.userContexts.set(userId, {
-      context: "",
-      chatContext: [],
-      currentOrder: this.getEmptyOrder(),
-      services: sheetService.getServices(),
-      additionalInfo: sheetService.getAdditionalInfo(),
-      initialMessagesSent: initialMessagesSent,
-      hasInteracted: false  // Reiniciar hasInteracted
-    });
-    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}, hasInteracted reset`);
-  }
-
-  getGlobalServices() {
-    return sheetService.getServices();
-  }
-
-  getGlobalAdditionalInfo() {
-    return sheetService.getAdditionalInfo();
-  }
-
-  getServiceInfo(serviceName) {
-    return sheetService.getServiceInfo(serviceName);
-  }
-
-  getAllServices() {
-    return sheetService.getAllServices();
-  }
-
-  findSimilarServices(serviceName) {
-    return sheetService.findSimilarServices(serviceName);
-  }
-
-  getServicesInCategory(category) {
-    return sheetService.getServicesInCategory(category);
-  }
-
-  getFileValidationCriteria() {
-    return sheetService.getFileValidationCriteria();
-  }
-
-  getAvailableFinishes(serviceInfo) {
-    const finishes = [];
-    if (serviceInfo.sellado) finishes.push("sellado");
-    if (serviceInfo.ojetillos) finishes.push("ojetillos");
-    if (serviceInfo.bolsillo) finishes.push("bolsillo");
-    return finishes;
-  }
-
-  // NUEVO: Función para obtener los campos faltantes en la orden actual
-  getIncompleteFields(userId) {
-    const order = this.getCurrentOrder(userId);
-    const missingFields = [];
-
-    // Verificar campos obligatorios
-    if (!order.service) missingFields.push('service');
-    if (!order.quantity) missingFields.push('quantity');
-    if (!order.filePath) missingFields.push('filePath');
-    if (!order.fileAnalysis) missingFields.push('fileAnalysis');
-    if (!order.fileAnalysisResponded) missingFields.push('fileAnalysisResponded');
-    if (!order.fileValidation) missingFields.push('fileValidation');
-
-    // Verificar si el servicio requiere medidas
-    if (this.isServiceRequiringMeasures(order.category)) {
-      if (!order.measures || !order.measures.width) missingFields.push('width');
-      if (!order.measures || !order.measures.height) missingFields.push('height');
-      if (!order.areaServicio) missingFields.push('areaServicio');
+    details += `Cantidad: ${order.quantity}\n`;
+    
+    if (order.finishes) {
+      details += "Terminaciones:\n";
+      if (order.finishes.sellado) details += "- Sellado\n";
+      if (order.finishes.ojetillos) details += "- Ojetillos\n";
+      if (order.finishes.bolsillo) details += "- Bolsillo\n";
     }
-
-    logger.info(`Campos faltantes para usuario ${userId}: ${missingFields.join(', ')}`);
-
-    return missingFields;
+    
+    return details.trim();
   }
 
-  // MODIFICADO: isOrderComplete ahora utiliza getIncompleteFields
-  isOrderComplete(userId) {
-    const missingFields = this.getIncompleteFields(userId);
-    return missingFields.length === 0;
+  isOrderConfirmed(userId) {
+    return this.orderConfirmed.has(userId);
   }
 
-
-    // Método para determinar si el servicio requiere medidas
-    isServiceRequiringMeasures(serviceCategory) {
-      return ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory);
-    }
-  
-  
-  getChatContext(userId) {
-    return this.getUserContext(userId).chatContext;
+  resetOrderConfirmation(userId) {
+    this.orderConfirmed.delete(userId);
   }
 }
 
-export default new UserContextManager();
+export default new OrderManager();
+
+
+// Archivo: services\fileValidationService.js
+
+// services/fileValidationService.js
+
+import fs from 'fs';
+import { promisify } from 'util';
+import path from 'path';
+import logger from '../utils/logger.js';
+import { CustomError } from '../utils/errorHandler.js';
+import sharp from 'sharp';
+import fileType from 'file-type';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
+const readFile = promisify(fs.readFile);
+
+class FileValidationService {
+  constructor() {
+    this.supportedFormats = ['jpg', 'jpeg', 'png', 'pdf', 'ai', 'psd', 'cdr'];
+  }
+
+  async analyzeFile(filePath) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        throw new CustomError('FileNotFoundError', `El archivo no existe: ${filePath}`);
+      }
+
+      const fileStats = fs.statSync(filePath);
+      const fileSize = this.formatFileSize(fileStats.size);
+
+      const buffer = await readFile(filePath);
+      const fileTypeResult = await fileType.fromBuffer(buffer);
+      const fileExtension = fileTypeResult ? fileTypeResult.ext : path.extname(filePath).toLowerCase().slice(1);
+
+      if (!this.supportedFormats.includes(fileExtension)) {
+        return {
+          format: fileExtension,
+          supported: false,
+          reason: `Formato de archivo no soportado: ${fileExtension}`,
+          fileSize: fileSize
+        };
+      }
+
+      let fileInfo;
+      if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
+        fileInfo = await this.analyzeImage(buffer);
+      } else if (fileExtension === 'pdf') {
+        fileInfo = await this.analyzePDF(buffer);
+      } else {
+        fileInfo = { format: fileExtension };
+      }
+
+      fileInfo.mimeType = fileTypeResult ? fileTypeResult.mime : '';
+      fileInfo.supported = true;
+      fileInfo.fileSize = fileSize;
+      return fileInfo;
+    } catch (error) {
+      logger.error(`Error al analizar el archivo: ${error.message}`);
+      throw new CustomError('FileAnalysisError', 'Error al analizar el archivo', error);
+    }
+  }
+
+  async analyzeImage(buffer) {
+    const image = sharp(buffer);
+    const metadata = await image.metadata();
+
+    logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
+
+    const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
+    const area = this.calculateDesignArea(physicalWidth, physicalHeight);
+
+    const colorSpace = metadata.space || 'desconocido';
+    const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
+      ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
+      : colorSpace;
+
+    logger.info(`Análisis de imagen completado: ${physicalWidth}x${physicalHeight} m, ${area} m², ${colorSpaceInfo}`);
+
+    return {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      dpi: metadata.density || 72,
+      colorSpace: colorSpaceInfo,
+      physicalWidth,
+      physicalHeight,
+      area
+    };
+  }
+
+  async analyzePDF(buffer) {
+    try {
+      const data = await pdfParse(buffer);
+
+      // Asumir dimensiones estándar si no se pueden obtener
+      const width = 595; // A4 width in points
+      const height = 842; // A4 height in points
+      const dpi = 72; // Asumimos 72 DPI para PDFs
+
+      const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
+      const area = this.calculateDesignArea(physicalWidth, physicalHeight);
+
+      return {
+        format: 'pdf',
+        pages: data.numpages,
+        width,
+        height,
+        dpi,
+        physicalWidth,
+        physicalHeight,
+        area
+      };
+    } catch (error) {
+      logger.error(`Error al analizar PDF: ${error.message}`);
+      throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
+    }
+  }
+
+  calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
+    logger.info(`Calculando dimensiones físicas: ${widthPixels}x${heightPixels} píxeles, ${dpi} DPI`);
+    
+    // Convertir píxeles a pulgadas
+    const widthInches = widthPixels / dpi;
+    const heightInches = heightPixels / dpi;
+    
+    // Convertir pulgadas a metros (1 pulgada = 0.0254 metros)
+    const widthMeters = widthInches * 0.0254;
+    const heightMeters = heightInches * 0.0254;
+    
+    // Redondear a dos decimales
+    const physicalWidth = Number(widthMeters.toFixed(2));
+    const physicalHeight = Number(heightMeters.toFixed(2));
+    
+    logger.info(`Dimensiones físicas calculadas: ${physicalWidth}x${physicalHeight} metros`);
+    
+    return { physicalWidth, physicalHeight };
+  }
+
+  calculateDesignArea(widthM, heightM) {
+    const areaM2 = widthM * heightM;
+    const roundedArea = Number(areaM2.toFixed(2));
+    logger.info(`Área calculada: ${roundedArea} m²`);
+    return roundedArea;
+  }
+
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+}
+
+export default new FileValidationService();
+
 
 
 // Archivo: services\openaiService.js
@@ -1684,6 +1940,16 @@ class OpenAIService {
 
           Y así con las demás categorías.
 
+    18. **Manejo de Insistencia del Cliente para Aceptar Archivos No Válidos**:
+    - Si el archivo ha sido subido (\`currentOrder.filePath\` existe) y el análisis del archivo ha sido respondido (\`currentOrder.fileAnalysisResponded\` es \`true\`), y el cliente insiste en continuar con el archivo no válido por razones como urgencia o necesidad inmediata:
+      - Verifica que el cliente entiende que el archivo no cumple con los criterios y que desea proceder bajo su responsabilidad.
+      - Asegúrate de que el cliente acepta que Chileimprime no se hace responsable por posibles problemas en la impresión debido al archivo.
+      - **Importante**: Si el cliente confirma lo anterior, envía el siguiente comando JSON **antes** de tu respuesta
+        {"command": "RESULT_ANALYSIS", "result": true}
+        
+      - Luego, responde al cliente confirmando que procederás con el archivo bajo su responsabilidad, enfatizando que Chileimprime no se hace responsable por la calidad del resultado.
+      - Usa un tono amable y profesional, manteniendo la claridad en la comunicación.
+
      IMPORTANTE:
     - SIEMPRE utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
     - Actúa como un experto humano en impresión, no como una IA.
@@ -1761,4 +2027,136 @@ class OpenAIService {
 }
 
 export default new OpenAIService();
+
+
+// Archivo: services\whatsappService.js
+
+// services/whatsappService.js
+
+import { createBot, createProvider, createFlow, addKeyword, MemoryDB } from '@builderbot/bot';
+import { BaileysProvider } from '@builderbot/provider-baileys';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+import { CustomError } from '../utils/errorHandler.js';
+import fs from 'fs/promises';
+import path from 'path';
+
+class WhatsAppService {
+  constructor() {
+    this.provider = null;
+    this.bot = null;
+  }
+
+  async initialize(flows) {
+    try {
+      const adapterDB = new MemoryDB();
+      const adapterFlow = createFlow(flows);
+      const adapterProvider = createProvider(BaileysProvider, {
+        groupsIgnore: true,
+      });
+
+      this.provider = adapterProvider;
+
+      const { bot, httpServer } = await createBot({
+        flow: adapterFlow,
+        provider: adapterProvider,
+        database: adapterDB,
+      }, {
+        queue: {
+          timeout: 60000,
+          concurrencyLimit: 100
+        }
+      });
+
+      this.bot = bot;
+
+      httpServer(config.port);
+      logger.info(`Bot iniciado en el puerto ${config.port}`);
+    } catch (error) {
+      logger.error('Error al inicializar WhatsApp Service:', error);
+      throw new CustomError('WhatsAppInitError', 'Error al inicializar el servicio de WhatsApp', error);
+    }
+  }
+
+  async sendMessage(to, message, options = {}) {
+    try {
+      await this.bot.sendMessage(to, message, options);
+      logger.info(`Mensaje enviado a ${to}`);
+    } catch (error) {
+      logger.error(`Error al enviar mensaje a ${to}:`, error);
+      throw new CustomError('MessageSendError', 'Error al enviar mensaje de WhatsApp', error);
+    }
+  }
+
+  async saveAudioFile(ctx) {
+    try {
+      const savedFile = await this.provider.saveFile(ctx);
+      if (typeof savedFile === 'string') {
+        return savedFile;
+      } else if (savedFile && savedFile.path) {
+        return savedFile.path;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo de audio');
+      }
+    } catch (error) {
+      logger.error('Error al guardar archivo de audio:', error);
+      throw new CustomError('AudioSaveError', 'Error al guardar archivo de audio', error);
+    }
+  }
+
+  async saveFile(ctx) {
+    try {
+      if (!this.provider) {
+        throw new Error('El proveedor de WhatsApp no está inicializado');
+      }
+      const savedFile = await this.provider.saveFile(ctx);
+      if (typeof savedFile === 'string') {
+        return savedFile;
+      } else if (savedFile && savedFile.path) {
+        return savedFile.path;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo');
+      }
+    } catch (error) {
+      logger.error('Error al guardar archivo:', error);
+      throw new CustomError('FileSaveError', 'Error al guardar archivo', error);
+    }
+  }
+
+  async processVoiceNote(ctx, audioPath) {
+    try {
+      logger.info(`Procesando nota de voz para usuario ${ctx.from}`);
+      const transcription = await openaiService.transcribeAudio(audioPath);
+      await fs.unlink(audioPath);
+      logger.info(`Nota de voz procesada y archivo eliminado: ${audioPath}`);
+      return transcription;
+    } catch (error) {
+      logger.error(`Error procesando nota de voz: ${error.message}`);
+      throw new CustomError('VoiceNoteProcessError', 'Error al procesar nota de voz', error);
+    }
+  }
+
+  getPromoMessage() {
+    return `🤖 *¡Gracias por probar nuestro Bot de Demostración!* 🚀
+  
+  Desarrollado con ❤️ por *SuperPyme*
+  
+  🍽️ *Ver Menú y Pedidos:*
+  https://docs.google.com/spreadsheets/d/1ZFq1c0IWbR3prkuZdnbJ_Och-GhxI9iMh56yqYlmAjo/edit?usp=sharing
+  
+  🔒 _Nota: Los números están censurados para proteger la privacidad de nuestros usuarios de prueba._
+  
+  ✨ *¿Quieres un bot así para tu negocio?* ✨
+  
+  📱 Whatsapp: *+56 9 7147 1884*
+  📧 Escríbenos: *oficina@superpyme.cl*
+  🌐 Más información: *superpyme.cl*
+  
+  🚀 *¡Lleva tu negocio al siguiente nivel con SuperPyme!* 💼
+  
+  PD: Puedes volver a probar el bot en 10 minutos, si quieres probarlo de inmediato, escribe desde otro número.`;
+  }
+}
+
+export default new WhatsAppService();
 

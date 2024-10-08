@@ -251,25 +251,25 @@ class OrderManager {
   }
 
   formatOrderSummary(order) {
-    let summary = "📋 Resumen final de tu cotización:\n\n";
+    let summary = "📋 *Resumen de tu cotización:*\n\n";
 
-    const serviceInfo = userContextManager.getServiceInfo(order.service);
-    summary += `*Servicio:* ${order.service} (${serviceInfo.category})\n`;
+    summary += `🛍️ *Servicio:* ${order.service}\n`;
 
     if (order.measures) {
-      summary += `*Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
+      summary += `📐 *Medidas:* ${order.measures.width}m x ${order.measures.height}m\n`;
+      summary += `📏 *Área:* ${order.area} m²\n`;
     }
 
-    summary += `*Cantidad:* ${order.quantity}\n`;
+    summary += `🔢 *Cantidad:* ${order.quantity}\n`;
 
-    if (order.finishes) {
-      summary += "*Terminaciones:*\n";
-      if (order.finishes.sellado) summary += "- Sellado\n";
-      if (order.finishes.ojetillos) summary += "- Ojetillos\n";
-      if (order.finishes.bolsillo) summary += "- Bolsillo\n";
+    if (order.finishes && order.finishes.length > 0) {
+      summary += `🎨 *Terminaciones:*\n`;
+      order.finishes.forEach(finish => {
+        summary += `- ${finish}\n`;
+      });
     }
 
-    summary += `\n💰 *Total:* $${formatPrice(order.total)}\n`;
+    summary += `💵 *Total:* $${formatPrice(order.total)}\n`;
 
     return summary;
   }
@@ -307,10 +307,12 @@ class OrderManager {
         this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
         
+        // Modificación: Usar el número de pedido correcto
+        const orderNumber = result.orderNumber || result.rowIndex;
         return { 
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
-          orderNumber: result.rowIndex
+          orderNumber: orderNumber // Usar el número de pedido correcto
         };
       } else {
         throw new Error("Error al guardar la cotización");

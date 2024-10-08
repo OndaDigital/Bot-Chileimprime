@@ -231,7 +231,7 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       return addKeyword(EVENTS.ACTION)
         .addAction(this.blacklistMiddleware.bind(this))
         .addAction(async (ctx, { flowDynamic, endFlow }) => {
-          await flowDynamic("SOLICITUD_HUMANO");
+          // Modificación: Eliminar envío de "SOLICITUD_HUMANO"
           this.addToBlacklist(ctx.from, config.humanBlacklistDuration);
           logger.info(`Cotización ya confirmada para ${ctx.from}. Redirigiendo a atención humana.`);
           return endFlow("Un representante se pondrá en contacto contigo pronto para finalizar tu cotización. Gracias por tu paciencia.");
