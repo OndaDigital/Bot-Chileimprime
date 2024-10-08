@@ -349,7 +349,7 @@ class GoogleSheetService {
       data.telefono,
       '', '', '', '', '', '', '', '', '', '', '', '', // Columnas vacías
       "Pendiente", // Estado de pago
-      "chileimprime.cl", // URL del diseño por defecto
+      data.fileUrl || "chileimprime.cl", // Columna AJ: URL del diseño
       "Pendiente", // Estado del proyecto
       "sin nota", // Anotaciones
       "COTIZACIÓN" // Extras
@@ -358,6 +358,25 @@ class GoogleSheetService {
     logger.info(`Datos preparados para la fila: ${JSON.stringify(rowData)}`);
   
     return rowData;
+  }
+
+  // Nueva función para actualizar la URL del archivo después de subirlo
+  async updateOrderWithFileUrl(rowIndex, fileUrl) {
+    try {
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
+      await sheet.loadCells();
+
+      const row = await sheet.getRows();
+      const targetRow = row[rowIndex - 2]; // Ajuste por el índice base 0 y la fila de encabezado
+
+      targetRow['Archivo'] = fileUrl; // Ajusta el nombre de la columna según tu hoja
+      await targetRow.save();
+
+      logger.info(`Fila ${rowIndex} actualizada con la URL del archivo en Google Sheets.`);
+    } catch (error) {
+      logger.error(`Error al actualizar la fila ${rowIndex} con la URL del archivo: ${error.message}`);
+    }
   }
 
   processAddRowResult(result, sheet) {

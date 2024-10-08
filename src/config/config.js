@@ -13,9 +13,16 @@ const requiredEnvVars = [
   'GOOGLE_PRIVATE_KEY'
 ];
 
-for (const envVar of requiredEnvVars) {
+// Añade las nuevas variables de entorno para Google Drive
+const requiredDriveEnvVars = [
+  'GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL',
+  'GOOGLE_DRIVE_PRIVATE_KEY',
+  'GOOGLE_DRIVE_FOLDER_ID',
+];
+
+for (const envVar of requiredDriveEnvVars) {
   if (!process.env[envVar]) {
-    throw new CustomError('ConfigError', `Missing required environment variable: ${envVar}`);
+    throw new CustomError('ConfigError', `Missing required environment variable for Google Drive: ${envVar}`);
   }
 }
 
@@ -39,4 +46,8 @@ export default {
   messageQueueGapSeconds: parseInt(process.env.MESSAGE_QUEUE_GAP_SECONDS) || 3000,
   promoMessageDelay: parseInt(process.env.PROMO_MESSAGE_DELAY) || 15000,
   servicesUpdateInterval: parseInt(process.env.SERVICES_UPDATE_INTERVAL) || 60 * 60 * 1000,
+   // Credenciales para Google Drive
+   googleDriveServiceAccountEmail: process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL,
+   googleDrivePrivateKey: process.env.GOOGLE_DRIVE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+   googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
 };
