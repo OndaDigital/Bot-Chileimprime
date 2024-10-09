@@ -313,7 +313,7 @@ class OrderManager {
         // Subir archivo a Google Drive de forma asíncrona
         if (order.filePath) {
           // Pasar orderNumber en lugar de rowNumber
-          this.uploadFileToDrive(order.filePath, order.telefono, result.orderNumber);
+          this.uploadFileToDrive(order.filePath, userId, result.orderNumber);
         }
 
         const orderNumber = result.orderNumber;
@@ -336,7 +336,9 @@ class OrderManager {
   // Modificación en uploadFileToDrive
   async uploadFileToDrive(filePath, userPhone, orderNumber) {
     try {
-      const fileName = `Pedido_${orderNumber}_${userPhone}_${Date.now()}`;
+      // Formatear la fecha de manera legible
+      const dateFormatted = moment().tz(config.timezone).format('DD-MM-YYYY-HH_mm');
+      const fileName = `Pedido_${orderNumber}_${userPhone}_${dateFormatted}`;
       const mimeType = 'application/octet-stream'; // Ajustar según el tipo de archivo
 
       logger.info(`Iniciando subida de archivo para el pedido ${orderNumber}`);
