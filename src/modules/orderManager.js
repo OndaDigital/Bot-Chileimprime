@@ -295,7 +295,8 @@ class OrderManager {
       precioTerminaciones: calculatedPrices.precioTerminaciones,
       precioTotalTerminaciones: calculatedPrices.precioTotalTerminaciones,
       total: calculatedPrices.total,
-      observaciones: order.observaciones || 'Sin observaciones'
+      observaciones: order.observaciones || 'Sin observaciones',
+      fileUrl: order.fileUrl
     };
   
     logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);
@@ -311,10 +312,10 @@ class OrderManager {
 
         // Subir archivo a Google Drive de forma asíncrona
         if (order.filePath) {
-          this.uploadFileToDrive(order.filePath, order.telefono, result.rowIndex);
+          this.uploadFileToDrive(order.filePath, order.telefono, result.rowNumber);
         }
 
-        const orderNumber = result.orderNumber || result.rowIndex;
+        const orderNumber = result.orderNumber || result.rowNumber;
         return {
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
@@ -329,24 +330,25 @@ class OrderManager {
     }
   }
 
-  // Nueva función para subir el archivo a Google Drive
-  async uploadFileToDrive(filePath, userPhone, rowIndex) {
-    try {
-      const fileName = `Pedido_${rowIndex}_${userPhone}_${Date.now()}`;
-      const mimeType = 'application/octet-stream'; // Puedes ajustar esto según el tipo de archivo
 
-      logger.info(`Iniciando subida de archivo para el pedido ${rowIndex}`);
+ // Modificación en uploadFileToDrive
+  async uploadFileToDrive(filePath, userPhone, rowNumber) {
+    try {
+      const fileName = `Pedido_${rowNumber}_${userPhone}_${Date.now()}`;
+      const mimeType = 'application/octet-stream'; // Ajustar según el tipo de archivo
+
+      logger.info(`Iniciando subida de archivo para el pedido ${rowNumber}`);
 
       const fileUrl = await googleDriveService.uploadFile(filePath, fileName, mimeType);
 
       logger.info(`Archivo subido correctamente. URL: ${fileUrl}`);
 
       // Actualizar la hoja de cálculo con la URL del archivo
-      await sheetService.updateOrderWithFileUrl(rowIndex, fileUrl);
+      await sheetService.updateOrderWithFileUrl(rowNumber, fileUrl);
 
-      logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${rowIndex}`);
+      logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${rowNumber}`);
     } catch (error) {
-      logger.error(`Error al subir archivo a Google Drive para el pedido ${rowIndex}: ${error.message}`);
+      logger.error(`Error al subir archivo a Google Drive para el pedido ${rowNumber}: ${error.message}`);
     }
   }
 

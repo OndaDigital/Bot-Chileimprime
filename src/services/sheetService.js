@@ -301,13 +301,14 @@ class GoogleSheetService {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
-      await sheet.loadCells();
-  
+
       const orderNumber = await this.getNextOrderNumber();
       const rowData = this.prepareRowData(data, orderNumber);
-      const result = await sheet.addRows([rowData]);
-  
-      return this.processAddRowResult(result, sheet);
+      const newRow = await sheet.addRow(rowData);
+
+      logger.info(`Fila añadida exitosamente. Número de fila: ${newRow.rowNumber}`);
+
+      return { success: true, message: "Cotización guardada exitosamente", rowNumber: newRow.rowNumber, orderNumber: orderNumber };
     } catch (err) {
       logger.error("Error detallado al guardar la cotización en Google Sheets:", err.message);
       logger.error("Stack trace:", err.stack);
@@ -318,64 +319,81 @@ class GoogleSheetService {
   prepareRowData(data, orderNumber) {
     const now = moment().tz(config.timezone);
     const formattedDate = now.format('DD-MM-YYYY HH:mm:ss');
-    
+
     const neto = data.total / 1.19; // Cálculo del neto (sin IVA)
     const iva = data.total - neto; // Cálculo del IVA
-  
+
     logger.info(`Preparando datos para guardar en la hoja. Orden número: ${orderNumber}`);
-  
-    const rowData = [
-      orderNumber,
-      1, // Número de servicios (por ahora siempre 1)
-      "Efectivo/transferencia",
-      formattedDate,
-      formattedDate, // Fecha de modificación (igual a la fecha de ingreso por ahora)
-      "Sara - agente virtual",
-      data.servicio,
-      data.cantidad,
-      `${data.measures.width} x ${data.measures.height}`,
-      data.area,
-      data.precioM2,
-      data.precioBase,
-      data.terminaciones.join(", ") || "No",
-      data.precioTerminaciones, // Columna N: Precio de Terminación/m2
-      data.precioTotalTerminaciones, // Columna O: Precio Total con Terminación
-      "Boleta",
-      neto,
-      data.total,
-      data.nombre,
-      "contacto@chileimprime.cl", // Correo por defecto
-      "66.666.666-6", // RUT por defecto
-      data.telefono,
-      '', '', '', '', '', '', '', '', '', '', '', '', // Columnas vacías
-      "Pendiente", // Estado de pago
-      data.fileUrl || "chileimprime.cl", // Columna AJ: URL del diseño
-      "Pendiente", // Estado del proyecto
-      "sin nota", // Anotaciones
-      "COTIZACIÓN" // Extras
-    ];
-  
+
+    // Modificación: Usar un objeto con los nombres de los encabezados
+    const rowData = {
+      'pedido': orderNumber,
+      'numero_servicios': 1, // Número de servicios (por ahora siempre 1)
+      'medio_de_pago': "Efectivo/transferencia",
+      'fecha_de_ingreso': formattedDate,
+      'fecha_modificacion': formattedDate,
+      'cajero': "Sara - agente virtual",
+      'nombre_del_servicio': data.servicio,
+      'cant': data.cantidad,
+      'medidas': `${data.measures.width} x ${data.measures.height}`,
+      'area': data.area,
+      'precio_por_m2': data.precioM2,
+      'precio_base': data.precioBase,
+      'tipo_de_terminacion': data.terminaciones.join(", ") || "No",
+      'precio_de_terminacion_m2': data.precioTerminaciones,
+      'precio_total_con_terminacion': data.precioTotalTerminaciones,
+      'dte': "Boleta",
+      'neto_subtotal': neto,
+      'total_iva': data.total,
+      'nombre': data.nombre,
+      'correo': "contacto@chileimprime.cl", // Correo por defecto
+      'rut': "66.666.666-6", // RUT por defecto
+      'telefono': data.telefono,
+      'direccion_completa_envio': '', // Campos vacíos
+      'comuna_envio': '',
+      'agencia': '',
+      'depto_envio': '',
+      'region_envio': '',
+      'tipo_de_envio': '',
+      'rut_de_empresa': '',
+      'razon_social': '',
+      'comuna_facturacion': '',
+      'giro': '',
+      'telefono_facturacion': '',
+      'region_facturacion': '',
+      'estado_de_pago': "Pendiente",
+      'url_del_diseno': data.fileUrl || "chileimprime.cl",
+      'estado_del_proyecto': "Pendiente",
+      'anotaciones': "sin nota",
+      'tipo': "COTIZACIÓN"
+    };
+
     logger.info(`Datos preparados para la fila: ${JSON.stringify(rowData)}`);
-  
+
     return rowData;
   }
 
-  // Nueva función para actualizar la URL del archivo después de subirlo
-  async updateOrderWithFileUrl(rowIndex, fileUrl) {
+
+  // Modificación en updateOrderWithFileUrl
+  async updateOrderWithFileUrl(rowNumber, fileUrl) {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
-      await sheet.loadCells();
+      const rows = await sheet.getRows();
+      const targetRow = rows.find(row => row.rowNumber === rowNumber);
 
-      const row = await sheet.getRows();
-      const targetRow = row[rowIndex - 2]; // Ajuste por el índice base 0 y la fila de encabezado
+      if (!targetRow) {
+        logger.error(`No se encontró la fila con el número de fila ${rowNumber}`);
+        return;
+      }
 
-      targetRow['Archivo'] = fileUrl; // Ajusta el nombre de la columna según tu hoja
+      // Actualizar el campo 'url_del_diseno' con la URL proporcionada
+      targetRow['url_del_diseno'] = fileUrl;
       await targetRow.save();
 
-      logger.info(`Fila ${rowIndex} actualizada con la URL del archivo en Google Sheets.`);
+      logger.info(`Fila ${rowNumber} actualizada con la URL del archivo en Google Sheets.`);
     } catch (error) {
-      logger.error(`Error al actualizar la fila ${rowIndex} con la URL del archivo: ${error.message}`);
+      logger.error(`Error al actualizar la fila ${rowNumber} con la URL del archivo: ${error.message}`);
     }
   }
 
