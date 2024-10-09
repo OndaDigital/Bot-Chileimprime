@@ -308,7 +308,8 @@ class GoogleSheetService {
 
       logger.info(`Fila añadida exitosamente. Número de fila: ${newRow.rowNumber}`);
 
-      return { success: true, message: "Cotización guardada exitosamente", rowNumber: newRow.rowNumber, orderNumber: orderNumber };
+      // Retornar orderNumber para usarlo como identificador único
+      return { success: true, message: "Cotización guardada exitosamente", orderNumber: orderNumber };
     } catch (err) {
       logger.error("Error detallado al guardar la cotización en Google Sheets:", err.message);
       logger.error("Stack trace:", err.stack);
@@ -375,25 +376,31 @@ class GoogleSheetService {
 
 
   // Modificación en updateOrderWithFileUrl
-  async updateOrderWithFileUrl(rowNumber, fileUrl) {
+  async updateOrderWithFileUrl(orderNumber, fileUrl) {
     try {
       await this.doc.loadInfo();
       const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
       const rows = await sheet.getRows();
-      const targetRow = rows.find(row => row.rowNumber === rowNumber);
-
+  
+      // Agregar logs para verificar los nombres de las columnas y propiedades
+      logger.info(`Nombres de las columnas: ${sheet.headerValues}`);
+      logger.info(`Propiedades de la primera fila: ${Object.keys(rows[0])}`);
+  
+      // Buscar la fila donde 'pedido' coincide con orderNumber utilizando row.get()
+      const targetRow = rows.find(row => row.get('pedido') === orderNumber);
+  
       if (!targetRow) {
-        logger.error(`No se encontró la fila con el número de fila ${rowNumber}`);
+        logger.error(`No se encontró la fila con el número de pedido ${orderNumber}`);
         return;
       }
-
-      // Actualizar el campo 'url_del_diseno' con la URL proporcionada
-      targetRow['url_del_diseno'] = fileUrl;
+  
+      // Actualizar el campo 'url_del_diseno' con la URL proporcionada utilizando row.set()
+      targetRow.set('url_del_diseno', fileUrl);
       await targetRow.save();
-
-      logger.info(`Fila ${rowNumber} actualizada con la URL del archivo en Google Sheets.`);
+  
+      logger.info(`Fila con pedido ${orderNumber} actualizada con la URL del archivo en Google Sheets.`);
     } catch (error) {
-      logger.error(`Error al actualizar la fila ${rowNumber} con la URL del archivo: ${error.message}`);
+      logger.error(`Error al actualizar la fila con pedido ${orderNumber} con la URL del archivo: ${error.message}`);
     }
   }
 

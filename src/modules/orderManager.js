@@ -312,10 +312,11 @@ class OrderManager {
 
         // Subir archivo a Google Drive de forma asíncrona
         if (order.filePath) {
-          this.uploadFileToDrive(order.filePath, order.telefono, result.rowNumber);
+          // Pasar orderNumber en lugar de rowNumber
+          this.uploadFileToDrive(order.filePath, order.telefono, result.orderNumber);
         }
 
-        const orderNumber = result.orderNumber || result.rowNumber;
+        const orderNumber = result.orderNumber;
         return {
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
@@ -331,26 +332,28 @@ class OrderManager {
   }
 
 
- // Modificación en uploadFileToDrive
-  async uploadFileToDrive(filePath, userPhone, rowNumber) {
+
+  // Modificación en uploadFileToDrive
+  async uploadFileToDrive(filePath, userPhone, orderNumber) {
     try {
-      const fileName = `Pedido_${rowNumber}_${userPhone}_${Date.now()}`;
+      const fileName = `Pedido_${orderNumber}_${userPhone}_${Date.now()}`;
       const mimeType = 'application/octet-stream'; // Ajustar según el tipo de archivo
 
-      logger.info(`Iniciando subida de archivo para el pedido ${rowNumber}`);
+      logger.info(`Iniciando subida de archivo para el pedido ${orderNumber}`);
 
       const fileUrl = await googleDriveService.uploadFile(filePath, fileName, mimeType);
 
       logger.info(`Archivo subido correctamente. URL: ${fileUrl}`);
 
       // Actualizar la hoja de cálculo con la URL del archivo
-      await sheetService.updateOrderWithFileUrl(rowNumber, fileUrl);
+      await sheetService.updateOrderWithFileUrl(orderNumber, fileUrl);
 
-      logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${rowNumber}`);
+      logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${orderNumber}`);
     } catch (error) {
-      logger.error(`Error al subir archivo a Google Drive para el pedido ${rowNumber}: ${error.message}`);
+      logger.error(`Error al subir archivo a Google Drive para el pedido ${orderNumber}: ${error.message}`);
     }
   }
+
 
 
 

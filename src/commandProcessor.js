@@ -389,7 +389,7 @@ class CommandProcessor {
 
         // Modificación: Enviar resumen de la orden
         const orderSummary = orderManager.formatOrderSummary(currentOrder);
-        await flowDynamic(`🎉 ¡Gracias por tu pedido! Tu número de cotización es: *WA-${result.orderNumber}*`);
+        await flowDynamic(`🎉 ¡Gracias por tu pedido! Tu número de cotización es: *${result.orderNumber}*`);
         await flowDynamic(orderSummary);
         await flowDynamic(result.message);
 
