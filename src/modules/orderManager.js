@@ -311,16 +311,13 @@ class OrderManager {
         this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
 
-        // Subir archivo a Google Drive de forma asíncrona
+        const orderNumber = result.orderNumber;
+        
+        // Subir archivo y enviar correo electrónico de forma asincrona
         if (order.filePath) {
-          // Pasar orderNumber en lugar de rowNumber
-          this.uploadFileToDrive(order.filePath, userId, result.orderNumber);
+          this.uploadFileAndSendEmail(order.filePath, userId, orderNumber, finalOrder);
         }
 
-        // NUEVO: Enviar correo electrónico con los detalles de la cotización
-        emailService.sendEmail(finalOrder, result.orderNumber); // Modificado
-
-        const orderNumber = result.orderNumber;
         return {
           success: true,
           message: "Tu cotización ha sido registrada. Un representante se pondrá en contacto contigo pronto para confirmar los detalles y coordinar la entrega de los archivos finales.",
@@ -335,9 +332,25 @@ class OrderManager {
     }
   }
 
+  // Nuevo método para manejar la subida del archivo y el envío del correo
+  uploadFileAndSendEmail(filePath, userId, orderNumber, finalOrder) {
+    // No usamos await aquí para no bloquear
+    (async () => {
+      try {
+        const fileUrl = await this.uploadFileToDrive(filePath, userId, orderNumber);
+        finalOrder.fileUrl = fileUrl;
+        // Actualizar el pedido en Google Sheets con la URL del archivo
+        await sheetService.updateOrderWithFileUrl(orderNumber, fileUrl);
+        await emailService.sendEmail(finalOrder, orderNumber);
+        logger.info(`Archivo subido y correo enviado para el pedido ${orderNumber}`);
+      } catch (error) {
+        logger.error(`Error al subir el archivo y enviar el correo para el pedido ${orderNumber}: ${error.message}`);
+        // Manejar el error según sea necesario
+      }
+    })();
+  }
 
 
-  // Modificación en uploadFileToDrive
   async uploadFileToDrive(filePath, userPhone, orderNumber) {
     try {
       // Formatear la fecha de manera legible
@@ -355,8 +368,11 @@ class OrderManager {
       await sheetService.updateOrderWithFileUrl(orderNumber, fileUrl);
 
       logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${orderNumber}`);
+
+      return fileUrl; // Añadido: retornar la URL del archivo
     } catch (error) {
       logger.error(`Error al subir archivo a Google Drive para el pedido ${orderNumber}: ${error.message}`);
+      throw error; // Lanzar el error para manejarlo en el llamado
     }
   }
 
