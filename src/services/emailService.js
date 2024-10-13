@@ -19,7 +19,7 @@ class EmailService {
 
   async sendEmail(order, orderNumber) {
     try {
-      const emailSubject = `Cotización WA-${orderNumber} recibida`;
+      const emailSubject = `Cotización ${orderNumber} recibida`;
       const emailBody = this.constructEmailBody(order, orderNumber);
 
       const mailOptions = {
@@ -42,7 +42,7 @@ class EmailService {
 
   constructEmailBody(order, orderNumber) {
     let body = `Estimado equipo,\n\n`;
-    body += `Se ha recibido una nueva cotización con el número WA-${orderNumber}.\n\n`;
+    body += `Se ha recibido una nueva cotización con el número ${orderNumber}.\n\n`;
     body += `Detalles de la cotización:\n`;
     body += `- Fecha: ${order.fecha}\n`;
     body += `- Cliente: ${order.nombre}\n`;
