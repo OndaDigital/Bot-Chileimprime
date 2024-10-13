@@ -18,6 +18,7 @@
     "google-spreadsheet": "^4.1.4",
     "googleapis": "^144.0.0",
     "moment-timezone": "^0.5.45",
+    "nodemailer": "^6.9.15",
     "openai": "^4.63.0",
     "pdf-parse": "^1.1.1",
     "sharp": "^0.33.5",

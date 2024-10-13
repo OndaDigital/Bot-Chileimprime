@@ -6,6 +6,7 @@ import sheetService from '../services/sheetService.js';
 import userContextManager from './userContext.js';
 import { CustomError } from '../utils/errorHandler.js';
 import googleDriveService from '../services/googleDriveService.js';
+import emailService from '../services/emailService.js'; // Modificado
 
 class OrderManager {
   constructor() {
@@ -315,6 +316,9 @@ class OrderManager {
           // Pasar orderNumber en lugar de rowNumber
           this.uploadFileToDrive(order.filePath, userId, result.orderNumber);
         }
+
+        // NUEVO: Enviar correo electrónico con los detalles de la cotización
+        emailService.sendEmail(finalOrder, result.orderNumber); // Modificado
 
         const orderNumber = result.orderNumber;
         return {
