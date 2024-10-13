@@ -63,7 +63,7 @@ class FileValidationService {
     const image = sharp(buffer);
     const metadata = await image.metadata();
 
-    logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
+    //logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
 
     const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
     const area = this.calculateDesignArea(physicalWidth, physicalHeight);
