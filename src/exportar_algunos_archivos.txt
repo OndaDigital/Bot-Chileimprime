@@ -421,84 +421,6 @@ class CommandProcessor {
 export default new CommandProcessor();
 
 
-// Archivo: config\config.js
-
-// config/config.js
-
-import dotenv from 'dotenv';
-import { CustomError } from '../utils/errorHandler.js';
-
-dotenv.config();
-
-const requiredEnvVars = [
-  'PORT',
-  'GOOGLE_SHEET_ID',
-  'OPENAI_API_KEY',
-  'GOOGLE_SERVICE_ACCOUNT_EMAIL',
-  'GOOGLE_PRIVATE_KEY'
-];
-
-for (const envVar of requiredEnvVars) {
-  if (!process.env[envVar]) {
-    throw new CustomError('ConfigError', `Missing required environment variable for Google Drive: ${envVar}`);
-  }
-}
-
-// variables de entorno para Google Drive
-const requiredDriveEnvVars = [
-  'GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL',
-  'GOOGLE_DRIVE_PRIVATE_KEY',
-  'GOOGLE_DRIVE_FOLDER_ID',
-];
-
-for (const envVar of requiredDriveEnvVars) {
-  if (!process.env[envVar]) {
-    throw new CustomError('ConfigError', `Missing required environment variable for Google Drive: ${envVar}`);
-  }
-}
-
-//Variables gmail
-const requiredGmailEnvVars = [
-  'GMAIL_USER_EMAIL',
-  'GMAIL_APP_PASSWORD',
-];
-
-for (const envVar of requiredGmailEnvVars) {
-  if (!process.env[envVar]) {
-    throw new CustomError('ConfigError', `Missing required environment variable for Gmail API: ${envVar}`);
-  }
-}
-
-export default {
-  port: process.env.PORT,
-  googleSheetId: process.env.GOOGLE_SHEET_ID,
-  openaiApiKey: process.env.OPENAI_API_KEY,
-  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  googlePrivateKey: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-  blacklistDuration: parseInt(process.env.BLACKLIST_DURATION) || 10 * 60 * 1000,
-  humanBlacklistDuration: parseInt(process.env.HUMAN_BLACKLIST_DURATION) || 60 * 60 * 1000,
-  abuseBlacklistDuration: parseInt(process.env.ABUSE_BLACKLIST_DURATION) || 24 * 60 * 60 * 1000,
-  idleWarningTime: parseInt(process.env.IDLE_WARNING_TIME) || 5 * 60 * 1000,
-  idleTimeoutTime: parseInt(process.env.IDLE_TIMEOUT_TIME) || 10 * 60 * 1000,
-  maxAudioSize: parseInt(process.env.MAX_AUDIO_SIZE) || 5 * 1024 * 1024,
-  languageModel: process.env.LANGUAGE_MODEL || 'ft:gpt-4o-mini-2024-07-18:personal:modelo-chile-imprime:AEWZI9XK',
-  timezone: process.env.TIMEZONE || 'America/Santiago',
-  logLevel: process.env.LOG_LEVEL || 'info',
-  maxTokens: parseInt(process.env.MAX_TOKENS) || 2000,
-  temperature: parseFloat(process.env.TEMPERATURE) || 0.5,
-  messageQueueGapSeconds: parseInt(process.env.MESSAGE_QUEUE_GAP_SECONDS) || 3000,
-  promoMessageDelay: parseInt(process.env.PROMO_MESSAGE_DELAY) || 15000,
-  servicesUpdateInterval: parseInt(process.env.SERVICES_UPDATE_INTERVAL) || 60 * 60 * 1000,
-   // Credenciales para Google Drive
-   googleDriveServiceAccountEmail: process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL,
-   googleDrivePrivateKey: process.env.GOOGLE_DRIVE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-   googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
-   // Credenciales para Gmail
-   gmailAppPassword: process.env.GMAIL_APP_PASSWORD,
-   gmailUserEmail: process.env.GMAIL_USER_EMAIL,
-};
-
-
 // Archivo: modules\flowManager.js
 
 import { addKeyword, EVENTS } from '@builderbot/bot';
@@ -1543,16 +1465,12 @@ class OrderManager {
         this.orderConfirmed.add(userId);
         logger.info(`Cotización finalizada y guardada correctamente para usuario ${userId}`);
 
-        // Subir archivo a Google Drive de forma asíncrona
-        if (order.filePath) {
-          // Pasar orderNumber en lugar de rowNumber
-          this.uploadFileToDrive(order.filePath, userId, result.orderNumber);
-        }
-
         const orderNumber = result.orderNumber;
-
-        // NUEVO: Enviar correo electrónico con los detalles de la cotización
-        this.uploadFileAndSendEmail(order.filePath, userId, orderNumber, finalOrder);
+        
+        // Subir archivo y enviar correo electrónico de forma asincrona
+        if (order.filePath) {
+          this.uploadFileAndSendEmail(order.filePath, userId, orderNumber, finalOrder);
+        }
 
         return {
           success: true,
@@ -1587,7 +1505,6 @@ class OrderManager {
   }
 
 
-  // Modificación en uploadFileToDrive
   async uploadFileToDrive(filePath, userPhone, orderNumber) {
     try {
       // Formatear la fecha de manera legible
@@ -1605,8 +1522,11 @@ class OrderManager {
       await sheetService.updateOrderWithFileUrl(orderNumber, fileUrl);
 
       logger.info(`Hoja de cálculo actualizada con la URL del archivo para el pedido ${orderNumber}`);
+
+      return fileUrl; // Añadido: retornar la URL del archivo
     } catch (error) {
       logger.error(`Error al subir archivo a Google Drive para el pedido ${orderNumber}: ${error.message}`);
+      throw error; // Lanzar el error para manejarlo en el llamado
     }
   }
 
@@ -1644,83 +1564,264 @@ class OrderManager {
 export default new OrderManager();
 
 
-// Archivo: services\emailService.js
+// Archivo: modules\userContext.js
 
-// Archivo: services/emailService.js
-
-import nodemailer from 'nodemailer';
-import config from '../config/config.js';
 import logger from '../utils/logger.js';
+import sheetService from '../services/sheetService.js';
 
-class EmailService {
+class UserContextManager {
   constructor() {
-    this.transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: config.gmailUserEmail,
-        pass: config.gmailAppPassword, // Contraseña de aplicación
+    this.userContexts = new Map();
+  }
+
+  // Método existente para obtener el contexto del usuario
+  getUserContext(userId) {
+    if (!this.userContexts.has(userId)) {
+      this.userContexts.set(userId, {
+        context: "",
+        chatContext: [],
+        currentOrder: this.getEmptyOrder(),
+        services: sheetService.getServices(),
+        additionalInfo: sheetService.getAdditionalInfo(),
+        initialMessagesSent: false,
+        hasInteracted: false  // Nuevo estado para rastrear cualquier interacción
+      });
+      logger.info(`Nuevo contexto creado para usuario ${userId}`);
+    }
+    return this.userContexts.get(userId);
+  }
+
+  getEmptyOrder() {
+    return {
+      service: null,
+      category: null,
+      type: null,
+      measures: null,
+      finishes: {
+        sellado: false,
+        ojetillos: false,
+        bolsillo: false
       },
+      quantity: null,
+      filePath: null,
+      fileAnalysis: null,
+      fileAnalysisResponded: false,
+      fileAnalysisHandled: false,
+      fileValidation: null,
+      availableWidths: [],
+      availableFinishes: [],
+      price: 0,
+      areaServicio: null,
+    };
+  }
+
+  setInitialMessagesSent(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.initialMessagesSent = value;
+    userContext.hasInteracted = true;
+    logger.info(`Estado de mensajes iniciales y interacción actualizados para usuario ${userId}: ${value}`);
+  }
+
+  setHasInteracted(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.hasInteracted = value;
+    logger.info(`Estado de interacción actualizado para usuario ${userId}: ${value}`);
+  }
+
+  hasUserInteracted(userId) {
+    return this.getUserContext(userId).hasInteracted;
+  }
+
+  updateContext(userId, message, role) {
+    const userContext = this.getUserContext(userId);
+    userContext.context += `${role}: ${message}\n`;
+    userContext.chatContext.push({ role, content: message });
+    this.limitContextSize(userId);
+    logger.info(`Contexto actualizado para usuario ${userId}. Mensajes en contexto: ${userContext.chatContext.length}`);
+  }
+
+  limitContextSize(userId) {
+    const userContext = this.getUserContext(userId);
+    if (userContext.chatContext.length > 30) {
+      userContext.chatContext = userContext.chatContext.slice(-10);
+    }
+    const words = userContext.context.split(/\s+/);
+    if (words.length > 1500) {
+      userContext.context = words.slice(-1500).join(" ");
+    }
+    logger.info(`Contexto limitado para usuario ${userId}`);
+  }
+
+  setGlobalData(services, additionalInfo) {
+    this.services = services;
+    this.additionalInfo = additionalInfo;
+    logger.info('Datos globales actualizados en UserContextManager');
+    logger.info(`Menú global: ${JSON.stringify(this.services)}`);
+    logger.info(`Información adicional global: ${JSON.stringify(this.additionalInfo)}`);
+  }
+
+  updateCurrentOrder(userId, updates) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder = { ...userContext.currentOrder, ...updates };
+    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+    
+    if (updates.service) {
+      const serviceInfo = sheetService.getServiceInfo(updates.service);
+      if (serviceInfo) {
+        userContext.currentOrder.category = serviceInfo.category;
+        userContext.currentOrder.type = serviceInfo.type;
+        userContext.currentOrder.availableWidths = serviceInfo.availableWidths;
+        userContext.currentOrder.availableFinishes = {
+          sellado: serviceInfo.sellado,
+          ojetillos: serviceInfo.ojetillos,
+          bolsillo: serviceInfo.bolsillo
+        };
+        userContext.currentOrder.fileValidationCriteria = {
+          format: serviceInfo.format,
+          minDPI: serviceInfo.minDPI,
+        };
+        logger.info(`Servicio seleccionado para usuario ${userId}: ${JSON.stringify(serviceInfo)}`);
+      } else {
+        logger.warn(`Servicio no encontrado: ${updates.service}`);
+      }
+    }
+
+    if (updates.fileAnalysis) {
+      userContext.currentOrder.fileAnalysisResponded = false;
+    }
+
+    if (updates.fileValidation) {
+      userContext.currentOrder.fileValidation = updates.fileValidation;
+    }
+    
+    logger.info(`Orden actualizada para usuario ${userId}: ${JSON.stringify(userContext.currentOrder)}`);
+  }
+
+  updateFileAnalysisResponded(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisResponded = value;
+    logger.info(`FileAnalysisResponded actualizado para usuario ${userId}: ${value}`);
+  }
+
+  updateFileAnalysisHandled(userId, value) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.fileAnalysisHandled = value;
+    logger.info(`FileAnalysisHandled actualizado para usuario ${userId}: ${value}`);
+  }
+
+  hasFileAnalysisBeenResponded(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisResponded;
+  }
+
+  hasFileAnalysisBeenHandled(userId) {
+    const userContext = this.getUserContext(userId);
+    return userContext.currentOrder.fileAnalysisHandled;
+  }
+
+  getCurrentOrder(userId) {
+    const userContext = this.getUserContext(userId);
+    const currentOrder = userContext.currentOrder;
+    currentOrder.requiresMeasures = () => this.isServiceRequiringMeasures(currentOrder.category);
+    logger.info(`Obteniendo orden actual para usuario ${userId}: ${JSON.stringify(currentOrder)}`);
+    return currentOrder;
+  }
+
+  resetContext(userId, resetInitialMessages = false) {
+    const userContext = this.getUserContext(userId);
+    const initialMessagesSent = resetInitialMessages ? false : userContext.initialMessagesSent;
+    this.userContexts.set(userId, {
+      context: "",
+      chatContext: [],
+      currentOrder: this.getEmptyOrder(),
+      services: sheetService.getServices(),
+      additionalInfo: sheetService.getAdditionalInfo(),
+      initialMessagesSent: initialMessagesSent,
+      hasInteracted: false  // Reiniciar hasInteracted
     });
-
-    logger.info('Servicio de correo electrónico inicializado correctamente con Nodemailer');
+    logger.info(`Contexto reiniciado para usuario ${userId}, initialMessagesSent preserved: ${!resetInitialMessages}, hasInteracted reset`);
   }
 
-  async sendEmail(order, orderNumber) {
-    try {
-      const emailSubject = `Cotización WA-${orderNumber} recibida`;
-      const emailBody = this.constructEmailBody(order, orderNumber);
-
-      const mailOptions = {
-        from: config.gmailUserEmail,
-        to: config.gmailUserEmail, // Enviar a tu propia cuenta
-        subject: emailSubject,
-        text: emailBody,
-      };
-
-      logger.info(`Enviando correo electrónico para la cotización ${orderNumber}`);
-
-      await this.transporter.sendMail(mailOptions);
-
-      logger.info(`Correo electrónico enviado correctamente para la cotización ${orderNumber}`);
-    } catch (error) {
-      logger.error(`Error al enviar correo electrónico para la cotización ${orderNumber}: ${error.message}`);
-      // Manejo adicional de errores si es necesario
-    }
+  getGlobalServices() {
+    return sheetService.getServices();
   }
 
-  constructEmailBody(order, orderNumber) {
-    let body = `Estimado equipo,\n\n`;
-    body += `Se ha recibido una nueva cotización con el número WA-${orderNumber}.\n\n`;
-    body += `Detalles de la cotización:\n`;
-    body += `- Fecha: ${order.fecha}\n`;
-    body += `- Cliente: ${order.nombre}\n`;
-    body += `- Teléfono: ${order.telefono}\n`;
-    body += `- Servicio: ${order.servicio}\n`;
-    if (order.measures) {
-      body += `- Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
-    }
-    body += `- Cantidad: ${order.cantidad}\n`;
-    if (order.area) {
-      body += `- Área: ${order.area} m²\n`;
-    }
-    if (order.terminaciones && order.terminaciones.length > 0) {
-      body += `- Terminaciones: ${order.terminaciones.join(', ')}\n`;
-    }
-    body += `- Precio Total: $${order.total}\n`;
-    if (order.observaciones) {
-      body += `- Observaciones: ${order.observaciones}\n`;
-    }
-    if (order.fileUrl) {
-      body += `- Enlace al archivo en Google Drive: ${order.fileUrl}\n`;
-    }
-    body += `\nPor favor, procedan con el seguimiento correspondiente.\n\nSaludos,\nBot de Chileimprime`;
+  getGlobalAdditionalInfo() {
+    return sheetService.getAdditionalInfo();
+  }
 
-    return body;
+  getServiceInfo(serviceName) {
+    return sheetService.getServiceInfo(serviceName);
+  }
+
+  getAllServices() {
+    return sheetService.getAllServices();
+  }
+
+  findSimilarServices(serviceName) {
+    return sheetService.findSimilarServices(serviceName);
+  }
+
+  getServicesInCategory(category) {
+    return sheetService.getServicesInCategory(category);
+  }
+
+  getFileValidationCriteria() {
+    return sheetService.getFileValidationCriteria();
+  }
+
+  getAvailableFinishes(serviceInfo) {
+    const finishes = [];
+    if (serviceInfo.sellado) finishes.push("sellado");
+    if (serviceInfo.ojetillos) finishes.push("ojetillos");
+    if (serviceInfo.bolsillo) finishes.push("bolsillo");
+    return finishes;
+  }
+
+  // NUEVO: Función para obtener los campos faltantes en la orden actual
+  getIncompleteFields(userId) {
+    const order = this.getCurrentOrder(userId);
+    const missingFields = [];
+
+    // Verificar campos obligatorios
+    if (!order.service) missingFields.push('service');
+    if (!order.quantity) missingFields.push('quantity');
+    if (!order.filePath) missingFields.push('filePath');
+    if (!order.fileAnalysis) missingFields.push('fileAnalysis');
+    if (!order.fileAnalysisResponded) missingFields.push('fileAnalysisResponded');
+    if (!order.fileValidation) missingFields.push('fileValidation');
+
+    // Verificar si el servicio requiere medidas
+    if (this.isServiceRequiringMeasures(order.category)) {
+      if (!order.measures || !order.measures.width) missingFields.push('width');
+      if (!order.measures || !order.measures.height) missingFields.push('height');
+      if (!order.areaServicio) missingFields.push('areaServicio');
+    }
+
+    logger.info(`Campos faltantes para usuario ${userId}: ${missingFields.join(', ')}`);
+
+    return missingFields;
+  }
+
+  // MODIFICADO: isOrderComplete ahora utiliza getIncompleteFields
+  isOrderComplete(userId) {
+    const missingFields = this.getIncompleteFields(userId);
+    return missingFields.length === 0;
+  }
+
+
+    // Método para determinar si el servicio requiere medidas
+    isServiceRequiringMeasures(serviceCategory) {
+      return ['Telas PVC', 'Banderas', 'Adhesivos', 'Adhesivo Vehicular', 'Back Light'].includes(serviceCategory);
+    }
+  
+  
+  getChatContext(userId) {
+    return this.getUserContext(userId).chatContext;
   }
 }
 
-export default new EmailService();
-
+export default new UserContextManager();
 
 
 // Archivo: services\sheetService.js
@@ -2179,4 +2280,136 @@ class GoogleSheetService {
 }
 
 export default new GoogleSheetService();
+
+
+// Archivo: services\whatsappService.js
+
+// services/whatsappService.js
+
+import { createBot, createProvider, createFlow, addKeyword, MemoryDB } from '@builderbot/bot';
+import { BaileysProvider } from '@builderbot/provider-baileys';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+import { CustomError } from '../utils/errorHandler.js';
+import fs from 'fs/promises';
+import path from 'path';
+
+class WhatsAppService {
+  constructor() {
+    this.provider = null;
+    this.bot = null;
+  }
+
+  async initialize(flows) {
+    try {
+      const adapterDB = new MemoryDB();
+      const adapterFlow = createFlow(flows);
+      const adapterProvider = createProvider(BaileysProvider, {
+        groupsIgnore: true,
+      });
+
+      this.provider = adapterProvider;
+
+      const { bot, httpServer } = await createBot({
+        flow: adapterFlow,
+        provider: adapterProvider,
+        database: adapterDB,
+      }, {
+        queue: {
+          timeout: 60000,
+          concurrencyLimit: 100
+        }
+      });
+
+      this.bot = bot;
+
+      httpServer(config.port);
+      logger.info(`Bot iniciado en el puerto ${config.port}`);
+    } catch (error) {
+      logger.error('Error al inicializar WhatsApp Service:', error);
+      throw new CustomError('WhatsAppInitError', 'Error al inicializar el servicio de WhatsApp', error);
+    }
+  }
+
+  async sendMessage(to, message, options = {}) {
+    try {
+      await this.bot.sendMessage(to, message, options);
+      logger.info(`Mensaje enviado a ${to}`);
+    } catch (error) {
+      logger.error(`Error al enviar mensaje a ${to}:`, error);
+      throw new CustomError('MessageSendError', 'Error al enviar mensaje de WhatsApp', error);
+    }
+  }
+
+  async saveAudioFile(ctx) {
+    try {
+      const savedFile = await this.provider.saveFile(ctx);
+      if (typeof savedFile === 'string') {
+        return savedFile;
+      } else if (savedFile && savedFile.path) {
+        return savedFile.path;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo de audio');
+      }
+    } catch (error) {
+      logger.error('Error al guardar archivo de audio:', error);
+      throw new CustomError('AudioSaveError', 'Error al guardar archivo de audio', error);
+    }
+  }
+
+  async saveFile(ctx) {
+    try {
+      if (!this.provider) {
+        throw new Error('El proveedor de WhatsApp no está inicializado');
+      }
+      const savedFile = await this.provider.saveFile(ctx);
+      if (typeof savedFile === 'string') {
+        return savedFile;
+      } else if (savedFile && savedFile.path) {
+        return savedFile.path;
+      } else {
+        throw new Error('No se pudo obtener la ruta del archivo');
+      }
+    } catch (error) {
+      logger.error('Error al guardar archivo:', error);
+      throw new CustomError('FileSaveError', 'Error al guardar archivo', error);
+    }
+  }
+
+  async processVoiceNote(ctx, audioPath) {
+    try {
+      logger.info(`Procesando nota de voz para usuario ${ctx.from}`);
+      const transcription = await openaiService.transcribeAudio(audioPath);
+      await fs.unlink(audioPath);
+      logger.info(`Nota de voz procesada y archivo eliminado: ${audioPath}`);
+      return transcription;
+    } catch (error) {
+      logger.error(`Error procesando nota de voz: ${error.message}`);
+      throw new CustomError('VoiceNoteProcessError', 'Error al procesar nota de voz', error);
+    }
+  }
+
+  getPromoMessage() {
+    return `🤖 *¡Gracias por probar nuestro Bot de Demostración!* 🚀
+  
+  Desarrollado con ❤️ por *SuperPyme*
+  
+  🍽️ *Ver Menú y Pedidos:*
+  https://docs.google.com/spreadsheets/d/1ZFq1c0IWbR3prkuZdnbJ_Och-GhxI9iMh56yqYlmAjo/edit?usp=sharing
+  
+  🔒 _Nota: Los números están censurados para proteger la privacidad de nuestros usuarios de prueba._
+  
+  ✨ *¿Quieres un bot así para tu negocio?* ✨
+  
+  📱 Whatsapp: *+56 9 7147 1884*
+  📧 Escríbenos: *oficina@superpyme.cl*
+  🌐 Más información: *superpyme.cl*
+  
+  🚀 *¡Lleva tu negocio al siguiente nivel con SuperPyme!* 💼
+  
+  PD: Puedes volver a probar el bot en 10 minutos, si quieres probarlo de inmediato, escribe desde otro número.`;
+  }
+}
+
+export default new WhatsAppService();
 

@@ -347,7 +347,7 @@ class GoogleSheetService {
       'neto_subtotal': neto,
       'total_iva': data.total,
       'nombre': data.nombre,
-      'correo': "contacto@chileimprime.cl", // Correo por defecto
+      'correo': data.correo || 'No proporcionado', // Usar el correo del pedido
       'rut': "66.666.666-6", // RUT por defecto
       'telefono': data.telefono,
       'direccion_completa_envio': '', // Campos vacíos
@@ -449,6 +449,60 @@ class GoogleSheetService {
     const middleLength = phoneNumber.length - 5;
     return `${firstTwo}${'*'.repeat(middleLength)}${lastThree}`;
   }
+
+
+  // Reemplazar getEmailByPhoneNumber con searchOrdersByPhone
+  async searchOrdersByPhone(phoneNumber) {
+    try {
+      logger.info(`Buscando pedidos previos para el número ${phoneNumber}`);
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1]; // Hoja "Pedidos"
+      const rows = await sheet.getRows();
+
+      const orders = rows
+        .filter(row => row.get('telefono') === phoneNumber)
+        .map(row => ({
+          correo: row.get('correo'),
+          fecha: row.get('fecha_de_ingreso'),
+          pedido: row.get('pedido')
+        }))
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha)); // Ordenar por fecha descendente
+
+      logger.info(`Se encontraron ${orders.length} pedidos para el número ${phoneNumber}`);
+      return orders;
+    } catch (error) {
+      logger.error(`Error al buscar pedidos por teléfono: ${error.message}`);
+      throw new CustomError('OrderSearchError', 'Error al buscar pedidos previos', error);
+    }
+  }
+
+  // Nuevo método para obtener el último correo electrónico asociado al número de teléfono
+  async getLastEmailByPhoneNumber(phoneNumber) {
+    try {
+      const orders = await this.searchOrdersByPhone(phoneNumber);
+      if (orders.length === 0) {
+        logger.info(`No se encontraron pedidos asociados al número de teléfono ${phoneNumber}`);
+        return null;
+      }
+
+      const lastOrder = orders[0]; // El más reciente después de ordenar
+      const email = lastOrder.correo || null;
+
+      if (email) {
+        logger.info(`Correo electrónico encontrado para el número ${phoneNumber}: ${email}`);
+        return email;
+      } else {
+        logger.info(`No se encontró correo electrónico para el número ${phoneNumber}`);
+        return null;
+      }
+    } catch (error) {
+      logger.error(`Error al obtener el último correo por número de teléfono: ${error.message}`);
+      throw new CustomError('GetEmailError', 'Error al obtener el correo electrónico por número de teléfono', error);
+    }
+  }
+
+
+
 }
 
 export default new GoogleSheetService();

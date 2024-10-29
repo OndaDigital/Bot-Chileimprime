@@ -297,7 +297,8 @@ class OrderManager {
       precioTotalTerminaciones: calculatedPrices.precioTotalTerminaciones,
       total: calculatedPrices.total,
       observaciones: order.observaciones || 'Sin observaciones',
-      fileUrl: order.fileUrl
+      fileUrl: order.fileUrl,
+      correo: order.correo, // Incluir el correo electrónico en el pedido final
     };
   
     logger.info(`Orden final para usuario ${userId}: ${JSON.stringify(finalOrder)}`);

@@ -44,7 +44,16 @@ class UserContextManager {
       availableFinishes: [],
       price: 0,
       areaServicio: null,
+      correo: null, // Añadido para almacenar el correo electrónico del usuario
+      correoConfirmed: false, // Para indicar si el correo ha sido confirmado
     };
+  }
+
+  // Método para actualizar el correo electrónico del usuario
+  updateCorreo(userId, correo) {
+    const userContext = this.getUserContext(userId);
+    userContext.currentOrder.correo = correo;
+    logger.info(`Correo electrónico actualizado para usuario ${userId}: ${correo}`);
   }
 
   setInitialMessagesSent(userId, value) {

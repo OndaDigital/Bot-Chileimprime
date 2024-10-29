@@ -11,6 +11,7 @@ import blacklistMiddleware from '../core/blacklist-middleware.js';
 import MessageQueue from './messageQueue.js';
 import fileValidationService from '../services/fileValidationService.js';
 import commandProcessor from '../commandProcessor.js';
+import sheetService from '../services/sheetService.js';
 
 class FlowManager {
   constructor() {
@@ -23,7 +24,9 @@ class FlowManager {
       catchAllFlow: null,
       idleTimeoutFlow: null,
       promoFlow: null,
-      mediaFlow: null
+      mediaFlow: null,
+      emailConfirmationFlow: null, // Añadido para registrar el nuevo flujo
+
     };
     this.blacklist = new Map();
     this.idleTimers = new Map();
@@ -47,6 +50,8 @@ class FlowManager {
       this.flows.idleTimeoutFlow = this.createIdleTimeoutFlow();
       this.flows.promoFlow = this.createPromoFlow();
       this.flows.mediaFlow = this.createMediaFlow();
+      this.flows.emailConfirmationFlow = this.createEmailConfirmationFlow(); // Inicializar el nuevo flujo
+
 
       // Agregar middlewares
       Object.values(this.flows).forEach(flow => {
@@ -145,23 +150,103 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
   }
 
 
+  // Nuevo flujo para la confirmación del correo electrónico
+  createEmailConfirmationFlow() {
+    return addKeyword(EVENTS.WELCOME)
+      .addAction(async (ctx, { flowDynamic, endFlow, gotoFlow }) => {
+        const userId = ctx.from;
+        const userContext = userContextManager.getUserContext(userId);
+
+        try {
+          // Obtener el correo electrónico asociado al número de teléfono
+          const email = await sheetService.getLastEmailByPhoneNumber(userId);
+
+          if (email) {
+            // Si se encontró un correo, preguntar al usuario si desea confirmarlo o modificarlo
+            await flowDynamic(`👋 Bienvenido de nuevo, antes de continuar necesito que confirmes si tu correo es válido: *${email}*, o si deseas modificarlo.\n\nPor favor, responde con:\n1️⃣ Confirmar y continuar\n2️⃣ Modificar el correo`);
+            // Guardar el correo obtenido en el contexto para usarlo después
+            userContext.currentOrder.correo = email;
+          } else {
+            // Si no se encontró un correo, solicitarlo al usuario
+            await flowDynamic('👋 Bienvenido, por favor ingresa tu correo electrónico para continuar:');
+          }
+        } catch (error) {
+          logger.error(`Error en createEmailConfirmationFlow para usuario ${userId}: ${error.message}`);
+          await flowDynamic('❌ Ha ocurrido un error al procesar tu correo electrónico. Por favor, intenta nuevamente más tarde.');
+          return endFlow();
+        }
+      })
+      .addAnswer('', { capture: true }, async (ctx, { flowDynamic, gotoFlow }) => {
+        const userId = ctx.from;
+        const userContext = userContextManager.getUserContext(userId);
+        const answer = ctx.body.trim();
+
+        if (!userContext.currentOrder.correoConfirmed) {
+          if (userContext.currentOrder.correo) {
+            // Ya tenemos un correo, el usuario está respondiendo 1 o 2
+            if (answer === '1' || answer === '1️⃣') {
+              // Usuario confirma el correo
+              userContext.currentOrder.correoConfirmed = true;
+              logger.info(`Usuario ${userId} confirmó su correo electrónico`);
+              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
+              return gotoFlow(this.flows.principalFlow);
+            } else if (answer === '2' || answer === '2️⃣') {
+              // Usuario desea modificar el correo
+              userContext.currentOrder.correo = null; // Resetear el correo
+              await flowDynamic('Por favor, ingresa tu nuevo correo electrónico:');
+            } else {
+              // Respuesta no válida
+              await flowDynamic('Por favor, selecciona una opción válida (1 o 2).');
+            }
+          } else {
+            // El usuario está ingresando un nuevo correo
+            if (this.validateEmail(answer)) {
+              userContextManager.updateCorreo(userId, answer);
+              userContext.currentOrder.correoConfirmed = true;
+              logger.info(`Correo electrónico almacenado para usuario ${userId}: ${answer}`);
+              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
+              return gotoFlow(this.flows.principalFlow);
+            } else {
+              await flowDynamic('❌ El correo electrónico ingresado no es válido. Por favor, intenta nuevamente.');
+            }
+          }
+        }
+      });
+  }
+
+  // Método para validar el correo electrónico
+  validateEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+
+
+
   createPrincipalFlow() {
     return addKeyword(EVENTS.WELCOME)
-      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
+      .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
         const userId = ctx.from;
+        const userContext = userContextManager.getUserContext(userId);
 
         if (this.initialMessageLocks.get(userId)) {
           logger.info(`Ignorando mensaje de usuario ${userId} durante el envío de mensajes iniciales`);
           return;
         }
 
+        if (!userContext.currentOrder.correoConfirmed) {
+          // Redirigir al flujo de confirmación de correo
+          logger.info(`Redirigiendo a emailConfirmationFlow para usuario ${userId}`);
+          return gotoFlow(this.flows.emailConfirmationFlow);
+        }
+
         if (!userContextManager.hasUserInteracted(userId)) {
-          // Send initial messages without processing user input
+          // Enviar mensajes iniciales sin procesar la entrada del usuario
           await this.handleInitialMessagesOnce(userId, flowDynamic);
         } else {
-          // Process user input in subsequent interactions
+          // Procesar la entrada del usuario en interacciones posteriores
           this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
-            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
+            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow }, accumulatedMessage);
           });
         }
       });
