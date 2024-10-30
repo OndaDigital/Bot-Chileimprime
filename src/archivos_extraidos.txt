@@ -1,5 +1,5 @@
 
-// Archivo: app.js
+// app.js
 
 import "dotenv/config";
 import flowManager from './modules/flowManager.js';
@@ -99,7 +99,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 
-// Archivo: commandProcessor.js
+// commandProcessor.js
 
 import logger from './utils/logger.js';
 import userContextManager from './modules/userContext.js';
@@ -521,7 +521,175 @@ class CommandProcessor {
 export default new CommandProcessor();
 
 
-// Archivo: modules\flowManager.js
+// config\config.js
+
+// config/config.js
+
+import dotenv from 'dotenv';
+import { CustomError } from '../utils/errorHandler.js';
+
+dotenv.config();
+
+const requiredEnvVars = [
+  'PORT',
+  'GOOGLE_SHEET_ID',
+  'OPENAI_API_KEY',
+  'GOOGLE_SERVICE_ACCOUNT_EMAIL',
+  'GOOGLE_PRIVATE_KEY'
+];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    throw new CustomError('ConfigError', `Missing required environment variable for Google Drive: ${envVar}`);
+  }
+}
+
+// variables de entorno para Google Drive
+const requiredDriveEnvVars = [
+  'GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL',
+  'GOOGLE_DRIVE_PRIVATE_KEY',
+  'GOOGLE_DRIVE_FOLDER_ID',
+];
+
+for (const envVar of requiredDriveEnvVars) {
+  if (!process.env[envVar]) {
+    throw new CustomError('ConfigError', `Missing required environment variable for Google Drive: ${envVar}`);
+  }
+}
+
+//Variables gmail
+const requiredGmailEnvVars = [
+  'GMAIL_USER_EMAIL',
+  'GMAIL_APP_PASSWORD',
+];
+
+for (const envVar of requiredGmailEnvVars) {
+  if (!process.env[envVar]) {
+    throw new CustomError('ConfigError', `Missing required environment variable for Gmail API: ${envVar}`);
+  }
+}
+
+export default {
+  port: process.env.PORT,
+  googleSheetId: process.env.GOOGLE_SHEET_ID,
+  openaiApiKey: process.env.OPENAI_API_KEY,
+  googleServiceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+  googlePrivateKey: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+  blacklistDuration: parseInt(process.env.BLACKLIST_DURATION) || 10 * 60 * 1000,
+  humanBlacklistDuration: parseInt(process.env.HUMAN_BLACKLIST_DURATION) || 60 * 60 * 1000,
+  abuseBlacklistDuration: parseInt(process.env.ABUSE_BLACKLIST_DURATION) || 24 * 60 * 60 * 1000,
+  idleWarningTime: parseInt(process.env.IDLE_WARNING_TIME) || 5 * 60 * 1000,
+  idleTimeoutTime: parseInt(process.env.IDLE_TIMEOUT_TIME) || 10 * 60 * 1000,
+  maxAudioSize: parseInt(process.env.MAX_AUDIO_SIZE) || 5 * 1024 * 1024,
+  languageModel: process.env.LANGUAGE_MODEL || 'ft:gpt-4o-mini-2024-07-18:personal:modelo-chile-imprime:AEWZI9XK',
+  timezone: process.env.TIMEZONE || 'America/Santiago',
+  logLevel: process.env.LOG_LEVEL || 'info',
+  maxTokens: parseInt(process.env.MAX_TOKENS) || 2000,
+  temperature: parseFloat(process.env.TEMPERATURE) || 0.5,
+  messageQueueGapSeconds: parseInt(process.env.MESSAGE_QUEUE_GAP_SECONDS) || 3000,
+  promoMessageDelay: parseInt(process.env.PROMO_MESSAGE_DELAY) || 15000,
+  servicesUpdateInterval: parseInt(process.env.SERVICES_UPDATE_INTERVAL) || 60 * 60 * 1000,
+   // Credenciales para Google Drive
+   googleDriveServiceAccountEmail: process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL,
+   googleDrivePrivateKey: process.env.GOOGLE_DRIVE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+   googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID,
+   // Credenciales para Gmail
+   gmailAppPassword: process.env.GMAIL_APP_PASSWORD,
+   gmailUserEmail: process.env.GMAIL_USER_EMAIL,
+};
+
+
+// core\blacklist-middleware.js
+
+// core/blacklist-middleware.js
+
+import logger from '../utils/logger.js';
+
+const blacklistMiddleware = (flowManager) => async (ctx, { endFlow }) => {
+  const userId = ctx.from;
+
+  if (flowManager.isBlacklisted(userId)) {
+    logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
+    return endFlow();
+  }
+
+  return false; // Continuar con el flujo normal
+};
+
+export default blacklistMiddleware;
+
+
+// core\inactivity-middleware.js
+
+// core/inactivity-middleware.js
+
+import logger from '../utils/logger.js';
+import config from '../config/config.js';
+
+const inactivityMiddleware = (flowManager) => async (ctx, { flowDynamic, gotoFlow }) => {
+  const userId = ctx.from;
+
+  flowManager.clearIdleTimer(userId);
+  
+  const warningTimer = setTimeout(async () => {
+    await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
+  }, config.idleWarningTime);
+
+  const timeoutTimer = setTimeout(() => {
+    flowManager.resetConversation(userId);
+    gotoFlow(flowManager.getIdleTimeoutFlow());
+  }, config.idleTimeoutTime);
+
+  flowManager.setIdleTimers(userId, { warningTimer, timeoutTimer });
+
+  return false; // Continuar con el flujo normal
+};
+
+export default inactivityMiddleware;
+
+
+// core\log-middleware.js
+
+import logger from '../utils/logger.js';
+
+const logMiddleware = async (ctx) => {
+  const { from, body } = ctx;
+  logger.info(`Mensaje recibido de ${from}: ${body}`);
+  return false; // Continuar con el flujo normal
+};
+
+export default logMiddleware;
+
+
+// core\middleware.js
+
+// core/middleware.js
+
+import logger from '../utils/logger.js';
+
+const createMiddleware = (middlewares) => {
+  return async (ctx, { flowDynamic, endFlow }) => {
+    for (const middleware of middlewares) {
+      try {
+        const result = await middleware(ctx, { flowDynamic, endFlow });
+        if (result === true) {
+          return true; // Middleware ha manejado la solicitud, detener el flujo
+        }
+      } catch (error) {
+        logger.error(`Error en middleware: ${error.message}`);
+        await flowDynamic('Lo siento, ha ocurrido un error. Por favor, inténtalo de nuevo más tarde.');
+        return endFlow();
+      }
+    }
+    return false; // Continuar con el flujo normal
+  };
+};
+
+export default createMiddleware;
+
+
+
+// modules\flowManager.js
 
 import { addKeyword, EVENTS } from '@builderbot/bot';
 import logger from '../utils/logger.js';
@@ -675,25 +843,67 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
   }
 
 
-  // Nuevo flujo para la confirmación del correo electrónico
   createEmailConfirmationFlow() {
     return addKeyword(EVENTS.WELCOME)
       .addAction(async (ctx, { flowDynamic, endFlow, gotoFlow }) => {
         const userId = ctx.from;
         const userContext = userContextManager.getUserContext(userId);
-
+        
+        logger.info(`Iniciando flujo de confirmación de correo para usuario ${userId}`);
+        
         try {
-          // Obtener el correo electrónico asociado al número de teléfono
-          const email = await sheetService.getLastEmailByPhoneNumber(userId);
+          // Si estamos esperando un nuevo correo, procesarlo directamente
+          if (userContext.currentOrder.esperandoNuevoCorreo) {
+            logger.info(`Procesando nuevo correo para usuario ${userId}: ${ctx.body}`);
+            
+            if (this.validateEmail(ctx.body)) {
+              logger.info(`Nuevo correo válido ingresado por usuario ${userId}: ${ctx.body}`);
+              userContext.currentOrder.correo = ctx.body;
+              userContext.currentOrder.correoConfirmed = true;
+              userContext.currentOrder.esperandoNuevoCorreo = false;
+              userContext.currentOrder.messageProcessed = true; // Nueva bandera
+              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
+              return gotoFlow(this.flows.principalFlow);
+            } else {
+              logger.warn(`Correo inválido ingresado por usuario ${userId}: ${ctx.body}`);
+              userContext.currentOrder.messageProcessed = true; // Nueva bandera
+              await flowDynamic('❌ El correo electrónico ingresado no es válido. Por favor, intenta nuevamente:');
+              return;
+            }
+          }
 
-          if (email) {
-            // Si se encontró un correo, preguntar al usuario si desea confirmarlo o modificarlo
-            await flowDynamic(`👋 Bienvenido de nuevo, antes de continuar necesito que confirmes si tu correo es válido: *${email}*, o si deseas modificarlo.\n\nPor favor, responde con:\n1️⃣ Confirmar y continuar\n2️⃣ Modificar el correo`);
-            // Guardar el correo obtenido en el contexto para usarlo después
-            userContext.currentOrder.correo = email;
+          // Si el mensaje ya fue procesado, no continuar
+          if (userContext.currentOrder.messageProcessed) {
+            logger.info(`Mensaje ya procesado para usuario ${userId}, omitiendo procesamiento adicional`);
+            userContext.currentOrder.messageProcessed = false; // Reset para el siguiente mensaje
+            return;
+          }
+
+          const orders = await sheetService.searchOrdersByPhone(userId);
+          logger.info(`Buscando pedidos previos para el número ${userId}`);
+
+          if (orders && orders.length > 0) {
+            const email = await sheetService.getLastEmailByPhoneNumber(userId);
+            
+            if (email) {
+              logger.info(`Correo electrónico encontrado para el número ${userId}: ${email}`);
+              userContext.currentOrder.correo = email;
+              userContext.currentOrder.messageProcessed = true; // Nueva bandera
+              await flowDynamic(`👋 Bienvenido de nuevo, antes de continuar necesito que confirmes si tu correo es válido: *${email}*, o si deseas modificarlo.\n\nPor favor, responde con:\n1️⃣ Confirmar y continuar\n2️⃣ Modificar el correo`);
+              return;
+            } else {
+              logger.info(`No se encontró correo para el usuario ${userId}. Solicitando nuevo correo.`);
+              userContext.currentOrder.esperandoNuevoCorreo = true;
+              userContext.currentOrder.messageProcessed = true; // Nueva bandera
+              await flowDynamic('👋 Bienvenido, por favor ingresa tu correo electrónico para continuar:');
+              return;
+            }
           } else {
-            // Si no se encontró un correo, solicitarlo al usuario
+            logger.info(`No se encontraron pedidos previos para ${userId}. Solicitando nuevo correo.`);
+            userContext.currentOrder.esperandoNuevoCorreo = true;
+            userContext.currentOrder.messageProcessed = true; // Nueva bandera
             await flowDynamic('👋 Bienvenido, por favor ingresa tu correo electrónico para continuar:');
+            return;
           }
         } catch (error) {
           logger.error(`Error en createEmailConfirmationFlow para usuario ${userId}: ${error.message}`);
@@ -701,40 +911,41 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
           return endFlow();
         }
       })
-      .addAnswer('', { capture: true }, async (ctx, { flowDynamic, gotoFlow }) => {
+      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         const userId = ctx.from;
         const userContext = userContextManager.getUserContext(userId);
-        const answer = ctx.body.trim();
 
-        if (!userContext.currentOrder.correoConfirmed) {
-          if (userContext.currentOrder.correo) {
-            // Ya tenemos un correo, el usuario está respondiendo 1 o 2
-            if (answer === '1' || answer === '1️⃣') {
-              // Usuario confirma el correo
+        // Si el mensaje ya fue procesado por el primer addAction, no hacer nada
+        if (userContext.currentOrder.messageProcessed) {
+          logger.info(`Mensaje ya procesado en addAction anterior para usuario ${userId}, omitiendo segundo procesamiento`);
+          return;
+        }
+
+        const response = ctx.body.trim();
+        logger.info(`Procesando respuesta de usuario ${userId}: ${response}`);
+
+        try {
+          // Si ya tenemos un correo y estamos esperando confirmación
+          if (userContext.currentOrder.correo && !userContext.currentOrder.esperandoNuevoCorreo) {
+            if (response === '1' || response === '1️⃣') {
+              logger.info(`Usuario ${userId} confirmó su correo existente: ${userContext.currentOrder.correo}`);
               userContext.currentOrder.correoConfirmed = true;
-              logger.info(`Usuario ${userId} confirmó su correo electrónico`);
+              userContext.currentOrder.messageProcessed = true;
               await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
               return gotoFlow(this.flows.principalFlow);
-            } else if (answer === '2' || answer === '2️⃣') {
-              // Usuario desea modificar el correo
-              userContext.currentOrder.correo = null; // Resetear el correo
+            } else if (response === '2' || response === '2️⃣') {
+              logger.info(`Usuario ${userId} eligió modificar su correo`);
+              userContext.currentOrder.esperandoNuevoCorreo = true;
+              userContext.currentOrder.messageProcessed = true;
               await flowDynamic('Por favor, ingresa tu nuevo correo electrónico:');
-            } else {
-              // Respuesta no válida
-              await flowDynamic('Por favor, selecciona una opción válida (1 o 2).');
-            }
-          } else {
-            // El usuario está ingresando un nuevo correo
-            if (this.validateEmail(answer)) {
-              userContextManager.updateCorreo(userId, answer);
-              userContext.currentOrder.correoConfirmed = true;
-              logger.info(`Correo electrónico almacenado para usuario ${userId}: ${answer}`);
-              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
-              return gotoFlow(this.flows.principalFlow);
-            } else {
-              await flowDynamic('❌ El correo electrónico ingresado no es válido. Por favor, intenta nuevamente.');
+              return;
             }
           }
+        } catch (error) {
+          logger.error(`Error procesando respuesta para usuario ${userId}: ${error.message}`);
+          await flowDynamic('❌ Ha ocurrido un error. Por favor, intenta nuevamente.');
+          userContext.currentOrder.esperandoNuevoCorreo = false;
+          return gotoFlow(this.flows.principalFlow);
         }
       });
   }
@@ -1335,7 +1546,73 @@ No debes devolver ningún comando en este caso. Responde al usuario de manera qu
   export default new FlowManager();
 
 
-// Archivo: modules\orderManager.js
+// modules\messageQueue.js
+
+// modules/messageQueue.js
+
+import logger from '../utils/logger.js';
+
+class MessageQueue {
+  constructor(config) {
+    this.queue = new Map();
+    this.config = config;
+  }
+
+  enqueueMessage(userId, messageText, callback) {
+    logger.info(`Encolando mensaje para usuario ${userId}. Mensaje: ${messageText}`);
+    
+    if (!this.queue.has(userId)) {
+      this.queue.set(userId, { messages: [], timer: null });
+      logger.info(`Nueva cola creada para usuario ${userId}`);
+    }
+
+    const userQueue = this.queue.get(userId);
+    userQueue.messages.push(messageText);
+
+    logger.info(`Mensaje añadido a la cola del usuario ${userId}. Mensajes en cola: ${userQueue.messages.length}`);
+
+    clearTimeout(userQueue.timer);
+
+    userQueue.timer = setTimeout(() => {
+      logger.info(`Temporizador expirado para usuario ${userId}. Procesando cola...`);
+      const messages = userQueue.messages;
+      this.queue.delete(userId);
+      logger.info(`Cola procesada y eliminada para usuario ${userId}. Mensajes procesados: ${messages.length}`);
+      if (typeof callback === 'function') {
+        try {
+          callback(messages.join(" "));
+        } catch (error) {
+          logger.error(`Error en el callback para usuario ${userId}: ${error.message}`);
+        }
+      }
+    }, this.config.gapSeconds);
+  }
+
+  clearQueue(userId) {
+    if (this.queue.has(userId)) {
+      const userQueue = this.queue.get(userId);
+      clearTimeout(userQueue.timer);
+      this.queue.delete(userId);
+      logger.info(`Cola eliminada para usuario ${userId}`);
+    }
+  }
+
+  getQueueSize(userId) {
+    if (this.queue.has(userId)) {
+      return this.queue.get(userId).messages.length;
+    }
+    return 0;
+  }
+
+  isQueueEmpty(userId) {
+    return this.getQueueSize(userId) === 0;
+  }
+}
+
+export default MessageQueue;
+
+
+// modules\orderManager.js
 
 import logger from '../utils/logger.js';
 import { formatPrice, censorPhoneNumber } from '../utils/helpers.js';
@@ -1750,7 +2027,7 @@ class OrderManager {
 export default new OrderManager();
 
 
-// Archivo: modules\userContext.js
+// modules\userContext.js
 
 import logger from '../utils/logger.js';
 import sheetService from '../services/sheetService.js';
@@ -2019,7 +2296,699 @@ class UserContextManager {
 export default new UserContextManager();
 
 
-// Archivo: services\sheetService.js
+// services\emailService.js
+
+// Archivo: services/emailService.js
+
+import nodemailer from 'nodemailer';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+
+class EmailService {
+  constructor() {
+    this.transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: config.gmailUserEmail,
+        pass: config.gmailAppPassword, // Contraseña de aplicación
+      },
+    });
+
+    logger.info('Servicio de correo electrónico inicializado correctamente con Nodemailer');
+  }
+
+  async sendEmail(order, orderNumber) {
+    try {
+      const emailSubject = `Cotización ${orderNumber} recibida`;
+      const emailBody = this.constructEmailBody(order, orderNumber);
+
+      const mailOptions = {
+        from: config.gmailUserEmail,
+        to: config.gmailUserEmail, // Enviar a tu propia cuenta
+        subject: emailSubject,
+        text: emailBody,
+      };
+
+      logger.info(`Enviando correo electrónico para la cotización ${orderNumber}`);
+
+      await this.transporter.sendMail(mailOptions);
+
+      logger.info(`Correo electrónico enviado correctamente para la cotización ${orderNumber}`);
+    } catch (error) {
+      logger.error(`Error al enviar correo electrónico para la cotización ${orderNumber}: ${error.message}`);
+      // Manejo adicional de errores si es necesario
+    }
+  }
+
+  constructEmailBody(order, orderNumber) {
+    let body = `Estimado equipo,\n\n`;
+    body += `Se ha recibido una nueva cotización con el número ${orderNumber}.\n\n`;
+    body += `Detalles de la cotización:\n`;
+    body += `- Fecha: ${order.fecha}\n`;
+    body += `- Cliente: ${order.nombre}\n`;
+    body += `- Teléfono: ${order.telefono}\n`;
+    body += `- Servicio: ${order.servicio}\n`;
+    if (order.measures) {
+      body += `- Medidas: ${order.measures.width}m x ${order.measures.height}m\n`;
+    }
+    body += `- Cantidad: ${order.cantidad}\n`;
+    if (order.area) {
+      body += `- Área: ${order.area} m²\n`;
+    }
+    if (order.terminaciones && order.terminaciones.length > 0) {
+      body += `- Terminaciones: ${order.terminaciones.join(', ')}\n`;
+    }
+    body += `- Precio Total: $${order.total}\n`;
+    if (order.observaciones) {
+      body += `- Observaciones: ${order.observaciones}\n`;
+    }
+    if (order.fileUrl) {
+      body += `- Enlace al archivo en Google Drive: ${order.fileUrl}\n`;
+    }
+    body += `\nPor favor, procedan con el seguimiento correspondiente.\n\nSaludos,\nBot de Chileimprime`;
+
+    return body;
+  }
+}
+
+export default new EmailService();
+
+
+
+// services\fileValidationService.js
+
+// services/fileValidationService.js
+
+import fs from 'fs';
+import { promisify } from 'util';
+import path from 'path';
+import logger from '../utils/logger.js';
+import { CustomError } from '../utils/errorHandler.js';
+import sharp from 'sharp';
+import fileType from 'file-type';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
+
+const readFile = promisify(fs.readFile);
+
+class FileValidationService {
+  constructor() {
+    this.supportedFormats = ['jpg', 'jpeg', 'png', 'pdf', 'ai', 'psd', 'cdr'];
+  }
+
+  async analyzeFile(filePath) {
+    try {
+      if (!fs.existsSync(filePath)) {
+        throw new CustomError('FileNotFoundError', `El archivo no existe: ${filePath}`);
+      }
+
+      const fileStats = fs.statSync(filePath);
+      const fileSize = this.formatFileSize(fileStats.size);
+
+      const buffer = await readFile(filePath);
+      const fileTypeResult = await fileType.fromBuffer(buffer);
+      const fileExtension = fileTypeResult ? fileTypeResult.ext : path.extname(filePath).toLowerCase().slice(1);
+
+      if (!this.supportedFormats.includes(fileExtension)) {
+        return {
+          format: fileExtension,
+          supported: false,
+          reason: `Formato de archivo no soportado: ${fileExtension}`,
+          fileSize: fileSize
+        };
+      }
+
+      let fileInfo;
+      if (['jpg', 'jpeg', 'png'].includes(fileExtension)) {
+        fileInfo = await this.analyzeImage(buffer);
+      } else if (fileExtension === 'pdf') {
+        fileInfo = await this.analyzePDF(buffer);
+      } else {
+        fileInfo = { format: fileExtension };
+      }
+
+      fileInfo.mimeType = fileTypeResult ? fileTypeResult.mime : '';
+      fileInfo.supported = true;
+      fileInfo.fileSize = fileSize;
+      return fileInfo;
+    } catch (error) {
+      logger.error(`Error al analizar el archivo: ${error.message}`);
+      throw new CustomError('FileAnalysisError', 'Error al analizar el archivo', error);
+    }
+  }
+
+  async analyzeImage(buffer) {
+    const image = sharp(buffer);
+    const metadata = await image.metadata();
+
+    //logger.info(`Metadatos de la imagen: ${JSON.stringify(metadata)}`);
+
+    const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(metadata.width, metadata.height, metadata.density || 72);
+    const area = this.calculateDesignArea(physicalWidth, physicalHeight);
+
+    const colorSpace = metadata.space || 'desconocido';
+    const colorSpaceInfo = colorSpace.toLowerCase() !== 'cmyk' 
+      ? `${colorSpace} (Se recomienda encarecidamente usar CMYK para evitar diferencias de color entre lo que se ve en el monitor y lo que realmente se imprime)`
+      : colorSpace;
+
+    logger.info(`Análisis de imagen completado: ${physicalWidth}x${physicalHeight} m, ${area} m², ${colorSpaceInfo}`);
+
+    return {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      dpi: metadata.density || 72,
+      colorSpace: colorSpaceInfo,
+      physicalWidth,
+      physicalHeight,
+      area
+    };
+  }
+
+  async analyzePDF(buffer) {
+    try {
+      const data = await pdfParse(buffer);
+
+      // Asumir dimensiones estándar si no se pueden obtener
+      const width = 595; // A4 width in points
+      const height = 842; // A4 height in points
+      const dpi = 72; // Asumimos 72 DPI para PDFs
+
+      const { physicalWidth, physicalHeight } = this.calculatePhysicalDimensions(width, height, dpi);
+      const area = this.calculateDesignArea(physicalWidth, physicalHeight);
+
+      return {
+        format: 'pdf',
+        pages: data.numpages,
+        width,
+        height,
+        dpi,
+        physicalWidth,
+        physicalHeight,
+        area
+      };
+    } catch (error) {
+      logger.error(`Error al analizar PDF: ${error.message}`);
+      throw new CustomError('PDFAnalysisError', 'Error al analizar el archivo PDF', error);
+    }
+  }
+
+  calculatePhysicalDimensions(widthPixels, heightPixels, dpi) {
+    logger.info(`Calculando dimensiones físicas: ${widthPixels}x${heightPixels} píxeles, ${dpi} DPI`);
+    
+    // Convertir píxeles a pulgadas
+    const widthInches = widthPixels / dpi;
+    const heightInches = heightPixels / dpi;
+    
+    // Convertir pulgadas a metros (1 pulgada = 0.0254 metros)
+    const widthMeters = widthInches * 0.0254;
+    const heightMeters = heightInches * 0.0254;
+    
+    // Redondear a dos decimales
+    const physicalWidth = Number(widthMeters.toFixed(2));
+    const physicalHeight = Number(heightMeters.toFixed(2));
+    
+    logger.info(`Dimensiones físicas calculadas: ${physicalWidth}x${physicalHeight} metros`);
+    
+    return { physicalWidth, physicalHeight };
+  }
+
+  calculateDesignArea(widthM, heightM) {
+    const areaM2 = widthM * heightM;
+    const roundedArea = Number(areaM2.toFixed(2));
+    logger.info(`Área calculada: ${roundedArea} m²`);
+    return roundedArea;
+  }
+
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+}
+
+export default new FileValidationService();
+
+
+
+// services\googleDriveService.js
+
+// Archivo: services/googleDriveService.js
+
+import { google } from 'googleapis';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+import fs from 'fs';
+
+class GoogleDriveService {
+  constructor() {
+    this.driveClient = null;
+    this.initializeDriveClient();
+  }
+
+  initializeDriveClient() {
+    try {
+      const auth = new google.auth.JWT(
+        config.googleDriveServiceAccountEmail,
+        null,
+        config.googleDrivePrivateKey,
+        ['https://www.googleapis.com/auth/drive']
+      );
+
+      this.driveClient = google.drive({
+        version: 'v3',
+        auth: auth,
+      });
+
+      logger.info('Cliente de Google Drive inicializado correctamente con nuevas credenciales');
+    } catch (error) {
+      logger.error(`Error al inicializar el cliente de Google Drive: ${error.message}`);
+    }
+  }
+
+  async uploadFile(filePath, fileName, mimeType) {
+    try {
+      const fileMetadata = {
+        name: fileName,
+        parents: [config.googleDriveFolderId], // ID de la carpeta en Google Drive donde se guardarán los archivos
+      };
+
+      const media = {
+        mimeType: mimeType,
+        body: fs.createReadStream(filePath),
+      };
+
+      logger.info(`Iniciando subida de archivo a Google Drive: ${fileName}`);
+
+      const response = await this.driveClient.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id, webViewLink',
+      });
+
+      logger.info(`Archivo subido a Google Drive. ID: ${response.data.id}`);
+
+      // Hacer el archivo accesible (opcional)
+      await this.driveClient.permissions.create({
+        fileId: response.data.id,
+        requestBody: {
+          role: 'reader',
+          type: 'anyone',
+        },
+      });
+
+      return response.data.webViewLink;
+    } catch (error) {
+      logger.error(`Error al subir archivo a Google Drive: ${error.message}`);
+      throw error;
+    }
+  }
+}
+
+export default new GoogleDriveService();
+
+
+
+// services\openaiService.js
+
+// services/openaiService.js
+
+import OpenAI from "openai";
+import fs from 'fs';
+import { promises as fsPromises } from 'fs';
+import config from '../config/config.js';
+import logger from '../utils/logger.js';
+import { CustomError } from '../utils/errorHandler.js';
+import userContextManager from '../modules/userContext.js';
+import { formatPrice } from '../utils/helpers.js';
+
+class OpenAIService {
+  constructor() {
+    this.openai = new OpenAI({ apiKey: config.openaiApiKey });
+  }
+
+  async getChatCompletion(systemPrompt, context, instruction = '') {
+    try {
+      const messages = [
+        { role: "system", content: systemPrompt },
+        ...context
+      ];
+
+      if (instruction) {
+        messages.push({ role: "system", content: instruction });
+      }
+
+      const response = await this.openai.chat.completions.create({
+        model: config.languageModel,
+        messages: messages,
+        max_tokens: config.maxTokens,
+        temperature: config.temperature,
+      });
+
+      return response.choices[0].message.content.trim();
+    } catch (error) {
+      logger.error("Error al obtener respuesta de OpenAI:", error);
+      throw new CustomError('OpenAIError', 'Error al obtener respuesta de OpenAI', error);
+    }
+  }
+
+  getSystemPrompt(services, currentOrder, additionalInfo, chatContext) {
+    const contextStr = chatContext.map(msg => `${msg.role}: ${msg.content}`).join('\n');
+    const allServices = this.getAllServicesInfo(services);
+    const criteria = userContextManager.getFileValidationCriteria();
+    console.log("****historial****");
+    console.log(contextStr);
+    console.log("****fin historial****");
+    //console.log(JSON.stringify(allServices, null, 2));
+
+      // NUEVO: Incluir información sobre campos faltantes
+      const missingFieldsMessage = chatContext.find(msg => msg.role === 'system' && msg.content.startsWith('Campos faltantes:'));
+      let missingFieldsInfo = '';
+      if (missingFieldsMessage) {
+        missingFieldsInfo = missingFieldsMessage.content;
+      }
+
+    let fileValidationInfo = "";
+    if (currentOrder.fileAnalysis) {
+      fileValidationInfo = `
+      Información detallada del análisis del archivo:
+      📄 Formato: ${currentOrder.fileAnalysis.format}
+      📏 Dimensiones en píxeles: ${currentOrder.fileAnalysis.width}x${currentOrder.fileAnalysis.height}
+      📐 Dimensiones físicas: ${currentOrder.fileAnalysis.physicalWidth.toFixed(2)}x${currentOrder.fileAnalysis.physicalHeight.toFixed(2)} m
+      📊 Área del diseño: ${currentOrder.fileAnalysis.area.toFixed(2)} m²
+      🔍 Resolución: ${currentOrder.fileAnalysis.dpi} DPI
+      🎨 Espacio de color: ${currentOrder.fileAnalysis.colorSpace}
+      📦 Tamaño del archivo: ${currentOrder.fileAnalysis.fileSize || 'No disponible'}
+      `;
+    }
+
+    return `Eres un asistente experto en servicios de imprenta llamada Chileimprime. Tu objetivo es guiar al cliente a través del proceso de cotización para un único servicio de impresión. Sigue estas instrucciones detalladas:
+
+    1. Análisis Continuo del Estado del Pedido:
+       - Examina constantemente el contenido de currentOrder: <currentOrder>${JSON.stringify(currentOrder)}<currentOrder>
+       - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
+       - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
+
+  2. Inicio y Selección de Servicio:
+       - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
+         {"command": "LIST_ALL_SERVICES"}
+       - Si no hay un servicio seleccionado, pregunta al cliente qué servicio necesita.
+       - Utiliza procesamiento de lenguaje natural para detectar si el cliente menciona un servicio específico.
+       - IMPORTANTE: Cuando el cliente mencione un servicio o término relacionado, NO asumas inmediatamente que ha seleccionado un servicio específico. En su lugar, sigue estos pasos:
+         a) Busca coincidencias parciales y servicios relacionados.
+         b) Si encuentras múltiples opciones posibles, preséntaselas al cliente y pide clarificación.
+         c) Solo usa el comando {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"} cuando el cliente haya confirmado explícitamente su elección.
+       - Si el servicio mencionado no es válido, sugiere servicios similares o muestra las categorías disponibles.
+
+    3. Manejo de Términos Coloquiales y Generales:
+       - Reconoce términos coloquiales comunes de Chile en la impresión como "pendones" que hacen referencia a Telas PVC, o "lienzos" que se hace referencia a Tela de Banderas, etc.
+       - Cuando se use un término general, presenta TODAS las opciones relevantes.
+       - Luego de aclarar el servicio coloquial y general. debes confirmar el servicio exacto del cliente, para el comando {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"} al comienzo del chatt justo antes de tu respuesta.
+
+    4. Confirmación de Selección (ATENCIÓN AQUÍ)
+      - Antes de seleccionar definitivamente un servicio, SIEMPRE pide confirmación al cliente.
+      - El nombre que envies en el comando de confirmación debe ser exacto al que se encuentra en <servicios_disponibles>.
+      - **IMPORTANTE:** Cuando el cliente confirme que desea el servicio, debes:
+        - Enviar el comando JSON antes de cualquier otro texto:
+
+          {"command": "SELECT_SERVICE", "service": "Nombre exacto del servicio"}
+
+        - Luego, proporcionar una respuesta amable confirmando la selección y solicitando la información necesaria para continuar.
+      - Ejemplos:
+        ---
+        **Ejemplo 1:**
+        
+        Cliente: "Sí"
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "PVC Alta Definición"}
+
+        "✅ Perfecto, he seleccionado el servicio *PVC Alta Definición*.
+        
+        📋 Ahora, necesito que me proporciones algunas especificaciones para continuar con tu cotización."
+
+        ---
+        **Ejemplo 2:**
+        
+        Cliente: "Me gustaría el 1 el *Vinilo Adhesivo Transparente*."
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "Vinilo Adhesivo Transparente"}
+
+        "✅ Perfecto, he seleccionado el servicio *Vinilo Adhesivo Transparente*.
+        
+        📋 Ahora, por favor, indícame las especificaciones necesarias para continuar con tu cotización."
+
+
+        **Ejemplo 3:**
+        
+        Cliente: "Sí, quiero el servicio de *Back Light Banner*."
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "Back Light Banner"}
+
+        "✅ He seleccionado el servicio *Back Light Banner*.
+        
+        📋 Para avanzar con tu cotización, por favor proporciona las especificaciones requeridas."
+
+        **Ejemplo 4:**
+        
+        Cliente: "El 1"
+        Asistente:
+
+        {"command": "SELECT_SERVICE", "service": "PVC 13 Oz mt2 - Promoción solo Local"}
+
+        "✅ He seleccionado el servicio *PVC 13 Oz mt2 - Promoción solo Local*.
+        
+        📋 Para avanzar con tu cotización, por favor proporciona las especificaciones requeridas."
+
+
+    5. Manejo de Nombres Parciales o Similares:
+       - Si el cliente proporciona un nombre parcial o similar a un servicio, busca y presenta las opciones más cercanas a <servicios_disponibles>.
+       - Ejemplo: Si el cliente dice "Quiero un pendon", responde: 📌 Tenemos varios servicios relacionados con pendones. Aquí están las opciones:
+
+          1️⃣ PVC 10 Oz mt2 - Promoción solo Local
+          2️⃣ PVC Alta Definición
+          3️⃣ PVC 11 Oz mt2
+          4️⃣ PVC 13 Oz mt2
+          5. Otras opciones que encuentes similares a PVCs segun la lista de servicios en <servicios_disponibles>. Recuerda que siempre debes entregar los nombres exactos.
+
+          👉 ¿Cuál de estos te interesa más?
+
+    6. Flexibilidad en la Interpretación:
+       - Sé flexible al interpretar las solicitudes de los clientes. Si no estás seguro, pregunta por clarificación.
+       - Ejemplo: "Entiendo que estás interesado en [término usado por el cliente]. Para asegurarme de recomendarte el mejor servicio, ¿podrías decirme más sobre lo que planeas imprimir o el uso que le darás?"
+
+    7. Manejo de Categorías y Tipos de Servicios (ATENCIÓN AQUÍ)
+       - Una vez seleccionado el servicio, verifica su categoría y tipo en currentOrder.
+       - Para categorías "Telas PVC", "Banderas", "Adhesivos", "Adhesivo Vehicular", "Back Light":
+         a) Solicita un ancho de la lista en funcion al contenido de currentOrder.availableWidths antes de dar los anchos disponibles.
+          Si availableWidths está presente, el ancho debe ser una de las opciones permitidas en availableWidths. 
+          El alto puede ser igual o mayor a 1, pero el ancho debe estar limitado a las opciones especificadas en availableWidths del currentOrder.
+         b) El alto debe ser igual o mayor a 1 metro.
+         c) Pregunta por la cantidad a imprimir..
+         d) Ofrece terminaciones si están disponibles (revisa currentOrder.availableFinishes).
+       - Para categorías "Otros", "Imprenta", "Péndon Roller", "Palomas", "Figuras", "Extras":
+         a) Solicita solo la cantidad.
+         b) No trabajes con medidas personalizadas.
+         c) Ofrece terminaciones si el servicio lo permite (revisa currentOrder.availableFinishes).
+
+    8. Especificación de Medidas y Terminaciones:
+       - Si el servicio requiere medidas (categorías: Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
+         a) Presenta al cliente los anchos disponibles específicos para este servicio:
+            Anchos disponibles: ${JSON.stringify(currentOrder.availableWidths)}
+         b) Guía al cliente para que elija uno de estos anchos válidos.
+         c) Pide al cliente que especifique un alto mayor o igual a 1 metro.
+         d) Solicita la cantidad deseada.
+       - Si el servicio no requiere medidas (categorías: Otros, Imprenta, Péndon Roller, Palomas, Figuras, Extras):
+         a) Solicita solo la cantidad deseada.
+       - Para todos los servicios, ofrece las terminaciones disponibles según:
+         Terminaciones disponibles: ${JSON.stringify(currentOrder.availableFinishes)}
+       - Explica claramente qué terminaciones están disponibles y pide al cliente que elija.
+       - IMPORTANTE: SIEMPRE que el cliente proporcione información válida, responde con los comandos JSON apropiados:
+         Para servicios con medidas:
+         {"command": "SET_MEASURES", "width": X, "height": Y}
+         {"command": "SET_QUANTITY", "quantity": Z}
+         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+         Para servicios sin medidas:
+         {"command": "SET_QUANTITY", "quantity": Z}
+         {"command": "SET_FINISHES", "sellado": boolean, "ojetillos": boolean, "bolsillo": boolean}
+ 
+    9. Validación de Archivos:
+       - Cuando el cliente haya proporcionado toda la información necesaria (servicio, medidas si aplica, cantidad y terminaciones),
+         y si hay un archivo en currentOrder.fileAnalysis, debes solicitar la validación del archivo.
+       - Para solicitar la validación, solo solicitale al cliente que envie el diseño en formato documento.
+       - Después de enviar este comando, espera la respuesta del sistema con el resultado de la validación.
+       - Una vez recibido el resultado, informa al cliente sobre la validez del archivo y proporciona recomendaciones si es necesario.
+       - Los criterios de validación son los siguientes:
+        <criterios_validacion> ${criteria} </criterios_validacion>
+        Informacion de validacion: <file_validation_info> ${fileValidationInfo} </file_validation_info> (si <file_validation_info> esta vacio es porque no se ha enviado un archivo)
+
+    10. Comunicación Clara:
+      - Usa un tono amigable pero profesional con emojis y respuestas bien formateadas para whatsapp.
+      - Estructura siempre tus respuestas en párrafos cortos y utiliza saltos de línea para mejorar la legibilidad.
+      - Destaca la información importante en negritas. Las negritas en Whatsapp son con solo un asterisco por lado.
+      - Emplea siempre que puedas emojis para dar un tono más amigable y cercano.
+      - Explica los conceptos técnicos de forma sencilla y entendible, ya que los clientes tienen problemas para entender si su diseño es apto o no, se confunden con los DPI y la resolucion, etc.
+      - Asegúrate de que tus mensajes sean fáciles de entender, claros y no demasiado extensos, pero que contengan toda la información necesaria. De necesitar contener mas informacion ocupa saltos de lineas.
+
+    11. Validación Continua:
+       - Verifica constantemente que la información proporcionada por el cliente sea coherente con el servicio seleccionado.
+       - Si detectas alguna incongruencia, solicita aclaración al cliente y utiliza los comandos apropiados para corregir la información.
+       - Verifica constantemente el <currentOrder> en funcion del avance del chat que tienes en <historial_de_la_conversacion> ya que el currentOrder es vital para verificar si debes confirmar el pedido.
+
+    12. Comunicación Clara de Errores:
+       - Si ocurre algún error durante el proceso, explica al cliente de manera amable y clara lo que ha sucedido.
+       - Ofrece alternativas o sugerencias para resolver el problema cuando sea posible.
+   
+    13. Generación de Comandos JSON (ATENCIÓN AQUÍ)
+       - CRUCIAL: SIEMPRE que detectes una acción que requiera actualizar el currentOrder, genera el comando JSON correspondiente.
+       - IMPORTANTE: Los comandos JSON DEBEN ser generados ANTES de cualquier respuesta natural al cliente.
+       - Asegúrate de que los comandos JSON estén correctamente formateados y contengan toda la información necesaria.
+       - Después de generar un comando JSON, proporciona una respuesta natural al cliente que refleje la acción realizada.
+
+    14. Procesamiento de Instrucciones del Sistema:
+       - Cuando recibas una instrucción del sistema (por ejemplo, después de que se haya actualizado el currentOrder),
+         asegúrate de incorporar esa información en tu siguiente respuesta al cliente.
+       - Refleja los cambios en el currentOrder en tu comunicación con el cliente de manera natural y fluida.
+    
+    15. **Manejo de Órdenes Incompletas**:
+
+    - Si recibes información del sistema indicando que hay campos faltantes en la orden (por ejemplo, "Campos faltantes: width, height, fileValidation, fileAnalysis, etc"), debes:
+      - Identificar los campos faltantes mencionados.
+      - Solicitar amablemente al usuario la información faltante, proporcionando orientación clara sobre cómo proporcionarla.
+      - Utilizar los comandos JSON apropiados cuando el usuario proporcione la información.
+      - No avances en el flujo hasta que todos los campos estén completos.
+
+    16. Confirmación del Pedido:
+       - IMPORTANTE: Ten cuidado con el comando {"command": "CONFIRM_ORDER"} solo se debe enviar cuando se cumplan TODAS las siguientes condiciones:
+         a) El servicio está seleccionado y es válido.
+         b) Para servicios que requieren medidas (Telas PVC, Banderas, Adhesivos, Adhesivo Vehicular, Back Light):
+            - Las medidas (ancho y alto) están especificadas y son válidas.
+            - La cantidad está especificada.
+            - Las terminaciones están seleccionadas (si aplica).
+         c) Para otros servicios:
+            - La cantidad está especificada.
+         d) El archivo de diseño ha sido enviado y validado correctamente.
+       - Si alguna de estas condiciones no se cumple, NO generes el comando {"command": "CONFIRM_ORDER"}.
+       - En su lugar, informa al cliente sobre qué información o acción falta para completar el pedido.
+
+    17. **Formato de la Lista de Servicios**:
+      - Cuando envíes la lista completa de servicios al cliente, debes presentarla en el siguiente formato:
+        - Incluir un emoji antes del nombre de cada categoría.
+        - Mostrar el nombre de la categoría en negritas.
+        - Listar cada servicio bajo su categoría, incluyendo el precio formateado con puntos para los miles (por ejemplo, $4.000).
+        - **Ejemplo**:
+          Aquí tienes la lista completa de servicios disponibles:
+
+          🧵 *Telas PVC*:
+          - PVC 10 Oz mt2 - Promoción solo Local: *$Precio*
+          - PVC Alta Definición: *$Precio*
+          - PVC 11 Oz mt2: *$Precio*
+          - PVC 13 Oz mt2 - Promoción solo Local: *$Precio*
+          - PVC 13 Oz mt2: *$Precio*
+          - PVC Blackout: *$Precio*
+
+          🚩 *Banderas*:
+          - Tela de bandera Translúcido género: *$Precio*
+          - Tela de bandera Textil: *$Precio*
+          - Tela de bandera Sintética: *$Precio*
+
+          Y así con las demás categorías.
+
+    18. **Manejo de Insistencia del Cliente para Aceptar Archivos No Válidos**:
+    - Si el archivo ha sido subido (\`currentOrder.filePath\` existe) y el análisis del archivo ha sido respondido (\`currentOrder.fileAnalysisResponded\` es \`true\`), y el cliente insiste en continuar con el archivo no válido por razones como urgencia o necesidad inmediata:
+      - Verifica que el cliente entiende que el archivo no cumple con los criterios y que desea proceder bajo su responsabilidad.
+      - Asegúrate de que el cliente acepta que Chileimprime no se hace responsable por posibles problemas en la impresión debido al archivo.
+      - **Importante**: Si el cliente confirma lo anterior, envía el siguiente comando JSON **antes** de tu respuesta
+        {"command": "RESULT_ANALYSIS", "result": true}
+        
+      - Luego, responde al cliente confirmando que procederás con el archivo bajo su responsabilidad, enfatizando que Chileimprime no se hace responsable por la calidad del resultado.
+      - Usa un tono amable y profesional, manteniendo la claridad en la comunicación.
+
+     IMPORTANTE:
+    - SIEMPRE utiliza los comandos JSON especificados para comunicar selecciones y validaciones al sistema.
+    - Actúa como un experto humano en impresión, no como una IA.
+    - Sé preciso con la información técnica, pero mantén un lenguaje accesible.
+    - Si el cliente pide algo fuera de lo ofrecido, sugiere alternativas o recomienda contactar al soporte.
+    - No calcules precios. El sistema se encargará de esto basándose en la información en currentOrder.
+    - Maneja solo un servicio por conversación.
+    - Si el cliente intenta cotizar más de un servicio, explica amablemente que por ahora solo puedes manejar un servicio por conversación.
+    - Si el sistema indica que un servicio es inválido, explica al cliente que no se encontró el servicio y ofrece alternativas o categorías disponibles.
+    - SIEMPRE busca clarificación y confirmación antes de seleccionar un servicio.
+    - Presenta múltiples opciones cuando sea apropiado.
+    - Verificar siempre la propiedad availableWidths en currentOrder. Si availableWidths está presente, 
+      asegúrate de que el ancho esté dentro de las opciones permitidas. El alto puede ser igual o mayor a 1, pero el ancho debe ser uno de los valores especificados en availableWidths del currentOrder.
+    - Sé paciente y flexible en la interpretación de las solicitudes de los clientes.
+    - Si no estás seguro, pregunta por más detalles antes de hacer una recomendación.
+
+    Servicios disponibles:
+    <servicios_disponibles>${JSON.stringify(allServices, null, 2)}</servicios_disponibles>
+
+    Información adicional:
+    <informacion_adicional>${JSON.stringify(additionalInfo, null, 2)}</informacion_adicional>
+
+    ${missingFieldsInfo ? `Campos faltantes:
+
+    ${missingFieldsInfo}` : ''}
+
+    Historial  de la conversación:
+    <historial_de_la_conversacion>${contextStr}</historial_de_la_conversacion>
+
+    Responde al siguiente mensaje del cliente:`;
+  }
+
+  getAllServicesInfo(services) {
+    const allServices = [];
+    for (const category in services) {
+      services[category].forEach(service => {
+        allServices.push({
+          name: service.name,
+          category: service.category,
+          price: formatPrice(service.precio), // Añadimos el precio formateado
+          availableWidths: service.availableWidths,
+          availableFinishes: [
+            service.sellado ? "sellado" : null,
+            service.ojetillos ? "ojetillos" : null,
+            service.bolsillo ? "bolsillo" : null
+          ].filter(Boolean)
+        });
+      });
+    }
+    //logger.info(`Servicios con precios: ${JSON.stringify(allServices, null, 2)}`);
+    return allServices;
+  }
+
+  async transcribeAudio(audioFilePath) {
+    try {
+      const stats = await fsPromises.stat(audioFilePath);
+      if (stats.size > config.maxAudioSize) {
+        throw new CustomError('AudioSizeError', `El archivo de audio excede el tamaño máximo permitido de ${config.maxAudioSize / (1024 * 1024)} MB`);
+      }
+
+      const response = await this.openai.audio.transcriptions.create({
+        file: fs.createReadStream(audioFilePath),
+        model: "whisper-1",
+      });
+      logger.info(`Audio transcrito exitosamente: ${audioFilePath}`);
+      return response.text;
+    } catch (error) {
+      if (error instanceof CustomError) {
+        throw error;
+      }
+      logger.error(`Error al transcribir audio: ${error.message}`);
+      throw new CustomError('TranscriptionError', 'Error al transcribir el audio', error);
+    }
+  }
+}
+
+export default new OpenAIService();
+
+
+// services\sheetService.js
 
 import { JWT } from "google-auth-library";
 import { GoogleSpreadsheet } from "google-spreadsheet";
@@ -2500,29 +3469,91 @@ class GoogleSheetService {
   }
 
   // Nuevo método para obtener el último correo electrónico asociado al número de teléfono
-  async getLastEmailByPhoneNumber(phoneNumber) {
+  async searchOrdersByPhone(phoneNumber) {
     try {
-      const orders = await this.searchOrdersByPhone(phoneNumber);
-      if (orders.length === 0) {
-        logger.info(`No se encontraron pedidos asociados al número de teléfono ${phoneNumber}`);
-        return null;
-      }
+        logger.info(`[SearchOrdersByPhone] Iniciando búsqueda de pedidos para número ${phoneNumber}`);
+        await this.doc.loadInfo();
+        const sheet = this.doc.sheetsByIndex[1];
+        const rows = await sheet.getRows();
 
-      const lastOrder = orders[0]; // El más reciente después de ordenar
-      const email = lastOrder.correo || null;
+        // Crear un array para almacenar todos los pedidos
+        const allOrders = [];
 
-      if (email) {
-        logger.info(`Correo electrónico encontrado para el número ${phoneNumber}: ${email}`);
-        return email;
-      } else {
-        logger.info(`No se encontró correo electrónico para el número ${phoneNumber}`);
-        return null;
-      }
+        // Procesar las filas y convertir fechas
+        rows.forEach(row => {
+            if (row.get('telefono') === phoneNumber) {
+                const email = row.get('correo');
+                const fechaStr = row.get('fecha_de_ingreso');
+                
+                // Usar moment para parsear la fecha
+                const fecha = moment(fechaStr, 'DD-MM-YYYY HH:mm:ss');
+                
+                if (fecha.isValid()) {
+                    allOrders.push({
+                        correo: email,
+                        fecha: fecha,
+                        fechaOriginal: fechaStr,
+                        pedido: row.get('pedido')
+                    });
+                    
+                    logger.debug(`[SearchOrdersByPhone] Procesando pedido - Email: ${email}, Fecha: ${fechaStr}`);
+                } else {
+                    logger.warn(`[SearchOrdersByPhone] Fecha inválida encontrada: ${fechaStr}`);
+                }
+            }
+        });
+
+        // Ordenar por fecha de forma descendente (más reciente primero)
+        const sortedOrders = allOrders.sort((a, b) => {
+            return b.fecha.valueOf() - a.fecha.valueOf();
+        });
+
+        // Log detallado del ordenamiento
+        logger.debug('[SearchOrdersByPhone] Pedidos ordenados:');
+        sortedOrders.forEach(order => {
+            logger.debug(`- Fecha: ${order.fechaOriginal}, Email: ${order.correo}`);
+        });
+
+        logger.info(`[SearchOrdersByPhone] Encontrados ${sortedOrders.length} pedidos para ${phoneNumber}`);
+        
+        if (sortedOrders.length > 0) {
+            logger.info(`[SearchOrdersByPhone] Correo más reciente: ${sortedOrders[0].correo} (Fecha: ${sortedOrders[0].fechaOriginal})`);
+        }
+
+        return sortedOrders;
     } catch (error) {
-      logger.error(`Error al obtener el último correo por número de teléfono: ${error.message}`);
-      throw new CustomError('GetEmailError', 'Error al obtener el correo electrónico por número de teléfono', error);
+        logger.error(`[SearchOrdersByPhone] Error al buscar pedidos: ${error.message}`);
+        throw new CustomError('OrderSearchError', 'Error al buscar pedidos previos', error);
     }
-  }
+}
+
+async getLastEmailByPhoneNumber(phoneNumber) {
+    try {
+        logger.info(`[GetLastEmail] Buscando último correo para número ${phoneNumber}`);
+        const orders = await this.searchOrdersByPhone(phoneNumber);
+        
+        if (orders.length === 0) {
+            logger.info(`[GetLastEmail] No se encontraron pedidos para ${phoneNumber}`);
+            return null;
+        }
+
+        // El primer orden será el más reciente debido al ordenamiento
+        const lastOrder = orders[0];
+        const email = lastOrder.correo;
+        
+        logger.info(`[GetLastEmail] Correo más reciente encontrado para ${phoneNumber}: ${email} (Fecha: ${lastOrder.fechaOriginal})`);
+        
+        // Log de verificación
+        if (orders.length > 1) {
+            logger.debug(`[GetLastEmail] Verificación - Segundo correo más reciente: ${orders[1].correo} (Fecha: ${orders[1].fechaOriginal})`);
+        }
+
+        return email;
+    } catch (error) {
+        logger.error(`[GetLastEmail] Error al obtener último correo: ${error.message}`);
+        throw new CustomError('GetEmailError', 'Error al obtener correo', error);
+    }
+}
 
 
 
@@ -2531,7 +3562,7 @@ class GoogleSheetService {
 export default new GoogleSheetService();
 
 
-// Archivo: services\whatsappService.js
+// services\whatsappService.js
 
 // services/whatsappService.js
 
@@ -2661,4 +3692,198 @@ class WhatsAppService {
 }
 
 export default new WhatsAppService();
+
+
+// utils\commandUtils.js
+
+// utils/commandUtils.js
+
+import logger from './logger.js';
+
+const knownCommands = {
+  'LIST_ALL_SERVICES': ['list all services', 'listallservices'],
+  'SELECT_SERVICE': ['select service', 'selectservice'],
+  'SET_MEASURES': ['set measures', 'setmeasures'],
+  'SET_QUANTITY': ['set quantity', 'setquantity'],
+  'SET_FINISHES': ['set finishes', 'setfinishes'],
+  'CONFIRM_ORDER': ['confirm order', 'confirmorder'],
+  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis']
+};
+
+export function normalizeCommand(command) {
+  return command.toLowerCase().replace(/\s+/g, '_');
+}
+
+export function findClosestCommand(command) {
+  const normalizedCommand = normalizeCommand(command);
+  
+  // Primero, buscar una coincidencia exacta
+  for (const [knownCommand, variations] of Object.entries(knownCommands)) {
+    if (normalizedCommand === knownCommand.toLowerCase() || variations.includes(normalizedCommand)) {
+      return knownCommand;
+    }
+  }
+  
+  // Si no hay coincidencia exacta, usar la distancia de Levenshtein
+  let closestCommand = null;
+  let minDistance = Infinity;
+  
+  for (const knownCommand of Object.keys(knownCommands)) {
+    const distance = levenshteinDistance(normalizedCommand, knownCommand.toLowerCase());
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestCommand = knownCommand;
+    }
+  }
+  
+  // Solo devolver el comando más cercano si la distancia es menor que un umbral
+  return minDistance <= 3 ? closestCommand : null;
+}
+
+function levenshteinDistance(a, b) {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+export function sanitizeJsonString(jsonString) {
+  // Asegurar que las propiedades del JSON estén entre comillas dobles
+  return jsonString.replace(/(\w+):/g, '"$1":');
+}
+
+
+// utils\errorHandler.js
+
+import logger from './logger.js';
+
+export class CustomError extends Error {
+  constructor(name, message, originalError = null) {
+    super(message);
+    this.name = name;
+    this.originalError = originalError;
+  }
+}
+
+export const errorHandler = async (error, ctx, { flowDynamic, endFlow }) => {
+  logger.error(`Error: ${error.name} - ${error.message}`);
+  if (error.originalError) {
+    logger.error(`Error original: ${error.originalError.message}`);
+    logger.error(`Stack trace: ${error.originalError.stack}`);
+  }
+
+  let userMessage = 'Lo siento, ha ocurrido un error inesperado. Por favor, inténtalo de nuevo más tarde.';
+
+  switch (error.name) {
+    case 'OpenAIError':
+      userMessage = 'Estamos experimentando problemas con nuestro servicio de IA. Por favor, inténtalo de nuevo en unos minutos.';
+      break;
+    case 'SheetServiceError':
+      userMessage = 'Hay un problema temporal con nuestro sistema de pedidos. Por favor, inténtalo de nuevo más tarde.';
+      break;
+    case 'WhatsAppError':
+      userMessage = 'Estamos teniendo dificultades para procesar tu mensaje. Por favor, inténtalo de nuevo.';
+      break;
+    case 'MiddlewareError':
+      userMessage = 'Ha ocurrido un error al procesar tu solicitud. Por favor, inténtalo de nuevo.';
+      break;
+  }
+
+  await flowDynamic(userMessage);
+  return endFlow();
+};
+
+
+// utils\helpers.js
+
+// utils/helpers.js
+
+export function formatPrice(price) {
+  const formattedPrice = price.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return formattedPrice;
+}
+  
+  export function censorPhoneNumber(phoneNumber) {
+    if (phoneNumber.length <= 5) {
+      return phoneNumber;
+    }
+    const firstTwo = phoneNumber.slice(0, 2);
+    const lastThree = phoneNumber.slice(-3);
+    const middleLength = phoneNumber.length - 5;
+    const censoredMiddle = '*'.repeat(middleLength);
+    return `${firstTwo}${censoredMiddle}${lastThree}`;
+  }
+
+
+  // Nueva función para enviar mensajes divididos
+export async function sendSplitMessages(flowDynamic, aiResponse) {
+  // Filtrar el comando JSON inicial
+  const filteredResponse = aiResponse.replace(/^\s*\{.*?\}\s*/, '').trim();
+
+  // Dividir la respuesta en secciones basadas en los encabezados "### "
+  const sections = filteredResponse.split(/(?=### )/).map(s => s.trim()).filter(s => s);
+
+  for (const section of sections) {
+    await flowDynamic(section);
+    // Espera de 3 segundos antes de enviar el siguiente mensaje
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+}
+
+
+// utils\logger.js
+
+import winston from 'winston';
+import config from '../config/config.js';
+import moment from 'moment-timezone';
+
+const { combine, timestamp, printf } = winston.format;
+
+const myFormat = printf(({ level, message, timestamp }) => {
+  const formattedTimestamp = moment(timestamp).tz('America/Santiago').format('DD-MM-YY - HH:mm:ss a');
+  return `${formattedTimestamp} : [${level.toUpperCase()}] ${message}`;
+});
+
+const logger = winston.createLogger({
+  level: config.logLevel || 'info',
+  format: combine(
+    timestamp(),
+    myFormat
+  ),
+  defaultMeta: { service: 'chatbot-service' },
+  transports: [
+    new winston.transports.File({ filename: 'error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'combined.log' }),
+  ],
+});
+
+if (process.env.NODE_ENV !== 'production') {
+  logger.add(new winston.transports.Console({
+    format: myFormat,
+  }));
+}
+
+export default logger;
+
 

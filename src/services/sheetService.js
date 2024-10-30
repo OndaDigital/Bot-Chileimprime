@@ -477,29 +477,91 @@ class GoogleSheetService {
   }
 
   // Nuevo método para obtener el último correo electrónico asociado al número de teléfono
-  async getLastEmailByPhoneNumber(phoneNumber) {
+  async searchOrdersByPhone(phoneNumber) {
     try {
-      const orders = await this.searchOrdersByPhone(phoneNumber);
-      if (orders.length === 0) {
-        logger.info(`No se encontraron pedidos asociados al número de teléfono ${phoneNumber}`);
-        return null;
-      }
+        logger.info(`[SearchOrdersByPhone] Iniciando búsqueda de pedidos para número ${phoneNumber}`);
+        await this.doc.loadInfo();
+        const sheet = this.doc.sheetsByIndex[1];
+        const rows = await sheet.getRows();
 
-      const lastOrder = orders[0]; // El más reciente después de ordenar
-      const email = lastOrder.correo || null;
+        // Crear un array para almacenar todos los pedidos
+        const allOrders = [];
 
-      if (email) {
-        logger.info(`Correo electrónico encontrado para el número ${phoneNumber}: ${email}`);
-        return email;
-      } else {
-        logger.info(`No se encontró correo electrónico para el número ${phoneNumber}`);
-        return null;
-      }
+        // Procesar las filas y convertir fechas
+        rows.forEach(row => {
+            if (row.get('telefono') === phoneNumber) {
+                const email = row.get('correo');
+                const fechaStr = row.get('fecha_de_ingreso');
+                
+                // Usar moment para parsear la fecha
+                const fecha = moment(fechaStr, 'DD-MM-YYYY HH:mm:ss');
+                
+                if (fecha.isValid()) {
+                    allOrders.push({
+                        correo: email,
+                        fecha: fecha,
+                        fechaOriginal: fechaStr,
+                        pedido: row.get('pedido')
+                    });
+                    
+                    logger.debug(`[SearchOrdersByPhone] Procesando pedido - Email: ${email}, Fecha: ${fechaStr}`);
+                } else {
+                    logger.warn(`[SearchOrdersByPhone] Fecha inválida encontrada: ${fechaStr}`);
+                }
+            }
+        });
+
+        // Ordenar por fecha de forma descendente (más reciente primero)
+        const sortedOrders = allOrders.sort((a, b) => {
+            return b.fecha.valueOf() - a.fecha.valueOf();
+        });
+
+        // Log detallado del ordenamiento
+        logger.debug('[SearchOrdersByPhone] Pedidos ordenados:');
+        sortedOrders.forEach(order => {
+            logger.debug(`- Fecha: ${order.fechaOriginal}, Email: ${order.correo}`);
+        });
+
+        logger.info(`[SearchOrdersByPhone] Encontrados ${sortedOrders.length} pedidos para ${phoneNumber}`);
+        
+        if (sortedOrders.length > 0) {
+            logger.info(`[SearchOrdersByPhone] Correo más reciente: ${sortedOrders[0].correo} (Fecha: ${sortedOrders[0].fechaOriginal})`);
+        }
+
+        return sortedOrders;
     } catch (error) {
-      logger.error(`Error al obtener el último correo por número de teléfono: ${error.message}`);
-      throw new CustomError('GetEmailError', 'Error al obtener el correo electrónico por número de teléfono', error);
+        logger.error(`[SearchOrdersByPhone] Error al buscar pedidos: ${error.message}`);
+        throw new CustomError('OrderSearchError', 'Error al buscar pedidos previos', error);
     }
-  }
+}
+
+async getLastEmailByPhoneNumber(phoneNumber) {
+    try {
+        logger.info(`[GetLastEmail] Buscando último correo para número ${phoneNumber}`);
+        const orders = await this.searchOrdersByPhone(phoneNumber);
+        
+        if (orders.length === 0) {
+            logger.info(`[GetLastEmail] No se encontraron pedidos para ${phoneNumber}`);
+            return null;
+        }
+
+        // El primer orden será el más reciente debido al ordenamiento
+        const lastOrder = orders[0];
+        const email = lastOrder.correo;
+        
+        logger.info(`[GetLastEmail] Correo más reciente encontrado para ${phoneNumber}: ${email} (Fecha: ${lastOrder.fechaOriginal})`);
+        
+        // Log de verificación
+        if (orders.length > 1) {
+            logger.debug(`[GetLastEmail] Verificación - Segundo correo más reciente: ${orders[1].correo} (Fecha: ${orders[1].fechaOriginal})`);
+        }
+
+        return email;
+    } catch (error) {
+        logger.error(`[GetLastEmail] Error al obtener último correo: ${error.message}`);
+        throw new CustomError('GetEmailError', 'Error al obtener correo', error);
+    }
+}
 
 
 
