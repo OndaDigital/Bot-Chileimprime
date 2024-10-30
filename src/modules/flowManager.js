@@ -95,10 +95,9 @@ class FlowManager {
           try {
             // Crear una cola de mensajes
             const messageQueue = [
-              { type: 'image', content: 'https://chileimprime.cl/wp-content/uploads/2024/10/Camapanas-politicas-chileimprime-el-m2-mas-economico.jpg' },
-              { type: 'services', content: await commandProcessor.handleListAllServices(userId) },
-              { type: 'text', content: `
-👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
+              { type: 'image', content: 'https://chileimprime.cl/wp-content/uploads/2024/10/Catalogo-marzo.jpg' },
+              //{ type: 'services', content: await commandProcessor.handleListAllServices(userId) },
+              { type: 'text', content: `👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
 - 🔍 Ver el estado de tus pedidos anteriores
@@ -117,7 +116,7 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
             for (const message of messageQueue) {
               switch (message.type) {
                 case 'image':
-                  await flowDynamic([{ body: 'Promo campañas políticas', media: message.content }]);
+                  await flowDynamic([{ body: 'Catalogo marzo 2024', media: message.content }]);
                   break;
                 case 'services':
                   if (message.content && message.content.data) {
