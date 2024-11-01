@@ -41,6 +41,8 @@ class CommandProcessor {
             return this.handleAnalysisResult(userId, command.result);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
+        case "LIST_LAST_ORDERS":
+          return this.handleListLastOrders(userId, flowDynamic);
         default:
           logger.warn(`Comando desconocido recibido: ${command.command}`);
           return { currentOrderUpdated: false };
@@ -448,6 +450,72 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
       }
     }
   }
+
+
+
+  async handleListLastOrders(userId, flowDynamic) {
+    try {
+        logger.info(`Solicitando últimos 10 pedidos para usuario ${userId}`);
+        
+        const orders = await sheetService.searchOrdersHistory(userId);
+        
+        if (!orders || orders.length === 0) {
+            await flowDynamic("No se encontraron pedidos previos para tu número. ¿Te gustaría realizar tu primer pedido? 😊");
+            logger.info(`No se encontraron pedidos para usuario ${userId}`);
+            return { currentOrderUpdated: false };
+        }
+
+        // Crear mensaje formateado para WhatsApp
+        let message = "*📋 Tus últimos pedidos:*\n\n";
+        
+        orders.forEach((order, index) => {
+            message += `*${index + 1}.* Pedido: *${order.pedido}*\n`;
+            message += `   📅 Fecha: ${order.fechaOriginal}\n`;
+            if (order.servicio) {
+                message += `   🖨️ Servicio: ${order.servicio}\n`;
+            }
+            if (order.estado) {
+                message += `   📊 Estado: ${order.estado}\n`;
+            }
+            if (order.total) {
+                try {
+                    // Convertir el total a número y manejar diferentes formatos
+                    let totalNumber;
+                    if (typeof order.total === 'string') {
+                        // Remover el símbolo de peso y cualquier punto de miles si existe
+                        totalNumber = parseFloat(order.total.replace(/[$\.]/g, '').replace(',', '.'));
+                    } else {
+                        totalNumber = parseFloat(order.total);
+                    }
+
+                    if (!isNaN(totalNumber)) {
+                        message += `   💰 Total: $${formatPrice(totalNumber)}\n`;
+                    }
+                    
+                    logger.debug(`Total procesado para pedido ${order.pedido}: ${totalNumber}`);
+                } catch (error) {
+                    logger.warn(`Error al formatear precio para pedido ${order.pedido}: ${error.message}`);
+                    // Si hay error en el formateo, mostrar el total sin formato
+                    message += `   💰 Total: ${order.total}\n`;
+                }
+            }
+            message += "\n";
+        });
+
+        message += "_Para consultar detalles específicos de un pedido o realizar un nuevo pedido, estoy aquí para ayudarte. 😊_";
+
+        await flowDynamic(message);
+        logger.info(`Lista de últimos pedidos enviada a usuario ${userId}`);
+        
+        return { currentOrderUpdated: false };
+    } catch (error) {
+        logger.error(`Error al obtener últimos pedidos para usuario ${userId}: ${error.message}`);
+        logger.error(`Stack trace: ${error.stack}`); // Agregado para mejor debugging
+        await flowDynamic("Lo siento, hubo un error al obtener tus pedidos anteriores. Por favor, intenta nuevamente más tarde. 😔");
+        return { currentOrderUpdated: false, error: error.message };
+    }
+}
+
 
 
   

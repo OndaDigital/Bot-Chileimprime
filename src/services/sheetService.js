@@ -476,7 +476,6 @@ class GoogleSheetService {
     }
   }
 
-  // Nuevo método para obtener el último correo electrónico asociado al número de teléfono
   async searchOrdersByPhone(phoneNumber) {
     try {
         logger.info(`[SearchOrdersByPhone] Iniciando búsqueda de pedidos para número ${phoneNumber}`);
@@ -516,12 +515,6 @@ class GoogleSheetService {
             return b.fecha.valueOf() - a.fecha.valueOf();
         });
 
-        // Log detallado del ordenamiento
-        logger.debug('[SearchOrdersByPhone] Pedidos ordenados:');
-        sortedOrders.forEach(order => {
-            logger.debug(`- Fecha: ${order.fechaOriginal}, Email: ${order.correo}`);
-        });
-
         logger.info(`[SearchOrdersByPhone] Encontrados ${sortedOrders.length} pedidos para ${phoneNumber}`);
         
         if (sortedOrders.length > 0) {
@@ -534,6 +527,80 @@ class GoogleSheetService {
         throw new CustomError('OrderSearchError', 'Error al buscar pedidos previos', error);
     }
 }
+
+// Nuevo método específico para el historial de pedidos
+async searchOrdersHistory(phoneNumber) {
+  try {
+      logger.info(`[SearchOrdersHistory] Iniciando búsqueda de historial para número ${phoneNumber}`);
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1];
+      const rows = await sheet.getRows();
+
+      const allOrders = [];
+
+      rows.forEach(row => {
+          if (row.get('telefono') === phoneNumber) {
+              try {
+                  const fechaStr = row.get('fecha_de_ingreso');
+                  const pedido = row.get('pedido');
+                  const servicio = row.get('nombre_del_servicio');
+                  const estado = row.get('estado_del_proyecto');
+                  let total = row.get('total_iva');
+
+                  // Procesar el total para asegurar que sea un número válido
+                  if (total) {
+                      if (typeof total === 'string') {
+                          // Remover el símbolo de peso y puntos de miles si existen
+                          total = total.replace(/[$\.]/g, '').replace(',', '.');
+                      }
+                      total = parseFloat(total);
+                      if (isNaN(total)) {
+                          logger.warn(`[SearchOrdersHistory] Total inválido encontrado para pedido ${pedido}: ${row.get('total_iva')}`);
+                          total = null;
+                      }
+                  }
+                  
+                  const fecha = moment(fechaStr, 'DD-MM-YYYY HH:mm:ss');
+                  
+                  if (fecha.isValid()) {
+                      allOrders.push({
+                          pedido,
+                          fechaOriginal: fechaStr,
+                          servicio,
+                          estado,
+                          total,
+                          fecha: fecha
+                      });
+                      
+                      logger.debug(`[SearchOrdersHistory] Procesando pedido - ID: ${pedido}, Servicio: ${servicio}, Estado: ${estado}, Total: ${total}`);
+                  } else {
+                      logger.warn(`[SearchOrdersHistory] Fecha inválida encontrada: ${fechaStr}`);
+                  }
+              } catch (error) {
+                  logger.error(`[SearchOrdersHistory] Error procesando fila: ${error.message}`);
+                 
+              }
+          }
+      });
+
+      const sortedOrders = allOrders.sort((a, b) => b.fecha.valueOf() - a.fecha.valueOf());
+      
+      // Limitar a los últimos 10 pedidos
+      const lastTenOrders = sortedOrders.slice(0, 10);
+
+      logger.info(`[SearchOrdersHistory] Encontrados ${lastTenOrders.length} pedidos recientes para ${phoneNumber}`);
+      
+      if (lastTenOrders.length > 0) {
+          logger.info(`[SearchOrdersHistory] Pedido más reciente: ${lastTenOrders[0].pedido} (Fecha: ${lastTenOrders[0].fechaOriginal})`);
+      }
+
+      return lastTenOrders;
+  } catch (error) {
+      logger.error(`[SearchOrdersHistory] Error al buscar historial de pedidos: ${error.message}`);
+      throw new CustomError('OrderHistoryError', 'Error al buscar historial de pedidos', error);
+  }
+}
+
 
 async getLastEmailByPhoneNumber(phoneNumber) {
     try {

@@ -9,7 +9,8 @@ const knownCommands = {
   'SET_QUANTITY': ['set quantity', 'setquantity'],
   'SET_FINISHES': ['set finishes', 'setfinishes'],
   'CONFIRM_ORDER': ['confirm order', 'confirmorder'],
-  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis']
+  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis'],
+  'LIST_LAST_ORDERS': ['list last orders', 'listlastorders', 'last orders', 'lastorders'],
 };
 
 export function normalizeCommand(command) {

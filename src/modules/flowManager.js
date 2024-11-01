@@ -100,7 +100,7 @@ class FlowManager {
               { type: 'text', content: `👉 Selecciona uno de los servicios enviados para iniciar tu cotización.
 
 También puedes realizar las siguientes acciones:
-- 🔍 Ver el estado de tus pedidos anteriores
+- 🔍 Ver tus últimos 10 pedidos.
 - 🕒 Consultar horarios de atención
 - 🎉 Conocer nuestras promociones actuales
 - 🖨️ Resolver dudas sobre procesos de impresión

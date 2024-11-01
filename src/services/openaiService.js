@@ -75,7 +75,18 @@ class OpenAIService {
        - Examina constantemente el contenido de currentOrder: <currentOrder>${JSON.stringify(currentOrder)}<currentOrder>
        - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
-
+      
+    1.5. Gestión de Historial de Pedidos:
+    - Si el cliente solicita ver sus pedidos anteriores o histórico de pedidos, responde con el comando:
+      {"command": "LIST_LAST_ORDERS"}
+    - Esta función mostrará los últimos 10 pedidos realizados por el cliente.
+    - Reconoce variaciones de la solicitud como:
+      * "Quiero ver mis pedidos anteriores"
+      * "Muéstrame mis últimos pedidos"
+      * "Historial de pedidos"
+      * "Ver mis pedidos"
+    - Después de mostrar los pedidos, ofrece asistencia adicional para continuar con un nuevo pedido.
+    
   2. Inicio y Selección de Servicio:
        - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
