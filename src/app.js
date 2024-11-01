@@ -59,7 +59,7 @@ const main = async () => {
     // Configurar actualización periódica de los servicios y la información adicional
     setInterval(async () => {
       try {
-        await sheetService.reinitialize();
+        //await sheetService.reinitialize(); //Funcion eliminada, ahora el dockerfile se encarga de reiniciarse.
         const updatedServices = await sheetService.getServices();
         const updatedAdditionalInfo = await sheetService.getAdditionalInfo();
         if (updatedServices && updatedAdditionalInfo) {
