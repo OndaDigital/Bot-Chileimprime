@@ -6,20 +6,38 @@ import config from '../config/config.js';
 const inactivityMiddleware = (flowManager) => async (ctx, { flowDynamic, gotoFlow }) => {
   const userId = ctx.from;
 
+  // Verificar blacklist
+  if (flowManager.isBlacklisted(userId)) {
+    logger.info(`Usuario ${userId} en blacklist - omitiendo timers de inactividad`);
+    return false;
+  }
+
   flowManager.clearIdleTimer(userId);
   
-  const warningTimer = setTimeout(async () => {
-    await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
-  }, config.idleWarningTime);
+  // Función auxiliar para verificar blacklist antes de ejecutar una acción
+  const executeIfNotBlacklisted = async (action) => {
+    if (!flowManager.isBlacklisted(userId)) {
+      await action();
+    }
+  };
 
-  const timeoutTimer = setTimeout(() => {
-    flowManager.resetConversation(userId);
-    gotoFlow(flowManager.getIdleTimeoutFlow());
-  }, config.idleTimeoutTime);
+  const warningTimer = setTimeout(
+    () => executeIfNotBlacklisted(async () => {
+      await flowDynamic('*⏰ ¿Sigues ahí? Si necesitas más tiempo, por favor responde cualquier mensaje.*');
+    }), 
+    config.idleWarningTime
+  );
+
+  const timeoutTimer = setTimeout(
+    () => executeIfNotBlacklisted(() => {
+      flowManager.resetConversation(userId);
+      gotoFlow(flowManager.getIdleTimeoutFlow());
+    }), 
+    config.idleTimeoutTime
+  );
 
   flowManager.setIdleTimers(userId, { warningTimer, timeoutTimer });
-
-  return false; // Continuar con el flujo normal
+  return false;
 };
 
 export default inactivityMiddleware;

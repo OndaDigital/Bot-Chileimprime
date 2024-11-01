@@ -267,28 +267,25 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
 
   createPrincipalFlow() {
     return addKeyword(EVENTS.WELCOME)
-      .addAction(async (ctx, { flowDynamic, gotoFlow }) => {
+      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {  // Añadir endFlow aquí
         const userId = ctx.from;
         const userContext = userContextManager.getUserContext(userId);
-
+  
         if (this.initialMessageLocks.get(userId)) {
           logger.info(`Ignorando mensaje de usuario ${userId} durante el envío de mensajes iniciales`);
           return;
         }
-
+  
         if (!userContext.currentOrder.correoConfirmed) {
-          // Redirigir al flujo de confirmación de correo
           logger.info(`Redirigiendo a emailConfirmationFlow para usuario ${userId}`);
           return gotoFlow(this.flows.emailConfirmationFlow);
         }
-
+  
         if (!userContextManager.hasUserInteracted(userId)) {
-          // Enviar mensajes iniciales sin procesar la entrada del usuario
           await this.handleInitialMessagesOnce(userId, flowDynamic);
         } else {
-          // Procesar la entrada del usuario en interacciones posteriores
           this.enqueueMessage(userId, ctx.body, async (accumulatedMessage) => {
-            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow }, accumulatedMessage);
+            await this.handleChatbotResponse(ctx, { flowDynamic, gotoFlow, endFlow }, accumulatedMessage);
           });
         }
       });
@@ -445,6 +442,15 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       if (this.isBlacklisted(userId)) {
         logger.info(`Usuario ${userId} en lista negra. Mensaje ignorado.`);
         return endFlow();
+      }
+
+      // Verificar palabras clave para atención humana
+      const normalizedMessage = message.toLowerCase().trim();
+      if (normalizedMessage === 'agente' || normalizedMessage === 'humano') {
+        const result = await this.handleHumanAssistanceRequest(userId, flowDynamic);
+        if (result.shouldEnd) {
+          return endFlow();
+        }
       }
   
       if (orderManager.isOrderConfirmed(userId)) {
@@ -842,7 +848,61 @@ No debes devolver ningún comando en este caso. Responde al usuario de manera qu
         logger.error(`Error al reevaluar comando para usuario ${userId}: ${error.message}`);
         return null;
     }
-}
+  }
+
+
+
+   // Nueva función auxiliar para manejar atención humana
+   async handleHumanAssistanceRequest(userId, flowDynamic) {
+    logger.info(`Procesando solicitud de atención humana para usuario ${userId}`);
+    
+    try {
+      const additionalInfo = userContextManager.getGlobalAdditionalInfo();
+      const responseMessage = this.createHumanAssistanceMessage(additionalInfo.horarios);
+      
+      // Agregar a blacklist y limpiar timers
+      this.addToBlacklist(userId, config.humanBlacklistDuration);
+      this.clearIdleTimer(userId);
+      
+      await flowDynamic(responseMessage);
+      logger.info(`Usuario ${userId} redirigido exitosamente a atención humana`);
+      
+      return {
+        success: true,
+        shouldEnd: true
+      };
+    } catch (error) {
+      logger.error(`Error al procesar solicitud de atención humana para ${userId}: ${error.message}`);
+      await flowDynamic('Lo siento, ha ocurrido un error. Un agente se pondrá en contacto contigo pronto.');
+      return {
+        success: false,
+        shouldEnd: true,
+        error: error
+      };
+    }
+  }
+
+  // Nueva función auxiliar para crear el mensaje de atención humana
+  createHumanAssistanceMessage(horarios = {}) {
+    const defaultHorarios = {
+      'Lunes a viernes': '9:00 - 18:00 hrs',
+      'Sábados': '9:00 - 14:00 hrs'
+    };
+
+    const horariosActuales = {
+      ...defaultHorarios,
+      ...horarios
+    };
+
+    return `👋 Entiendo que prefieres hablar con un agente humano.
+Un representante de nuestro equipo se pondrá en contacto contigo lo antes posible.
+
+⏰ Horario de atención:
+Lunes a Viernes: ${horariosActuales['Lunes a viernes']}
+Sábados: ${horariosActuales['Sábados']}
+
+🙏 Gracias por tu paciencia.`;
+    }
 
 
 

@@ -62,7 +62,7 @@ const main = async () => {
     // Configurar actualización periódica de los servicios y la información adicional
     setInterval(async () => {
       try {
-        await sheetService.reinitialize();
+        //await sheetService.reinitialize(); //Funcion eliminada, ahora el dockerfile se encarga de reiniciarse.
         const updatedServices = await sheetService.getServices();
         const updatedAdditionalInfo = await sheetService.getAdditionalInfo();
         if (updatedServices && updatedAdditionalInfo) {
@@ -144,6 +144,8 @@ class CommandProcessor {
             return this.handleAnalysisResult(userId, command.result);
         case "CONFIRM_ORDER":
           return this.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
+        case "LIST_LAST_ORDERS":
+          return this.handleListLastOrders(userId, flowDynamic);
         default:
           logger.warn(`Comando desconocido recibido: ${command.command}`);
           return { currentOrderUpdated: false };
@@ -551,6 +553,72 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
       }
     }
   }
+
+
+
+  async handleListLastOrders(userId, flowDynamic) {
+    try {
+        logger.info(`Solicitando últimos 10 pedidos para usuario ${userId}`);
+        
+        const orders = await sheetService.searchOrdersHistory(userId);
+        
+        if (!orders || orders.length === 0) {
+            await flowDynamic("No se encontraron pedidos previos para tu número. ¿Te gustaría realizar tu primer pedido? 😊");
+            logger.info(`No se encontraron pedidos para usuario ${userId}`);
+            return { currentOrderUpdated: false };
+        }
+
+        // Crear mensaje formateado para WhatsApp
+        let message = "*📋 Tus últimos pedidos:*\n\n";
+        
+        orders.forEach((order, index) => {
+            message += `*${index + 1}.* Pedido: *${order.pedido}*\n`;
+            message += `   📅 Fecha: ${order.fechaOriginal}\n`;
+            if (order.servicio) {
+                message += `   🖨️ Servicio: ${order.servicio}\n`;
+            }
+            if (order.estado) {
+                message += `   📊 Estado: ${order.estado}\n`;
+            }
+            if (order.total) {
+                try {
+                    // Convertir el total a número y manejar diferentes formatos
+                    let totalNumber;
+                    if (typeof order.total === 'string') {
+                        // Remover el símbolo de peso y cualquier punto de miles si existe
+                        totalNumber = parseFloat(order.total.replace(/[$\.]/g, '').replace(',', '.'));
+                    } else {
+                        totalNumber = parseFloat(order.total);
+                    }
+
+                    if (!isNaN(totalNumber)) {
+                        message += `   💰 Total: $${formatPrice(totalNumber)}\n`;
+                    }
+                    
+                    logger.debug(`Total procesado para pedido ${order.pedido}: ${totalNumber}`);
+                } catch (error) {
+                    logger.warn(`Error al formatear precio para pedido ${order.pedido}: ${error.message}`);
+                    // Si hay error en el formateo, mostrar el total sin formato
+                    message += `   💰 Total: ${order.total}\n`;
+                }
+            }
+            message += "\n";
+        });
+
+        message += "_Para consultar detalles específicos de un pedido o realizar un nuevo pedido, estoy aquí para ayudarte. 😊_";
+
+        await flowDynamic(message);
+        logger.info(`Lista de últimos pedidos enviada a usuario ${userId}`);
+        
+        return { currentOrderUpdated: false };
+    } catch (error) {
+        logger.error(`Error al obtener últimos pedidos para usuario ${userId}: ${error.message}`);
+        logger.error(`Stack trace: ${error.stack}`); // Agregado para mejor debugging
+        await flowDynamic("Lo siento, hubo un error al obtener tus pedidos anteriores. Por favor, intenta nuevamente más tarde. 😔");
+        return { currentOrderUpdated: false, error: error.message };
+    }
+}
+
 
 
   
@@ -3022,7 +3090,18 @@ class OpenAIService {
        - Examina constantemente el contenido de currentOrder: <currentOrder>${JSON.stringify(currentOrder)}<currentOrder>
        - Elementos posibles en currentOrder: {service, category, type, measures, finishes, quantity, filePath, fileAnalysis}
        - Adapta tu respuesta basándote en la información disponible y lo que falta por completar.
-
+      
+    1.5. Gestión de Historial de Pedidos:
+    - Si el cliente solicita ver sus pedidos anteriores o histórico de pedidos, responde con el comando:
+      {"command": "LIST_LAST_ORDERS"}
+    - Esta función mostrará los últimos 10 pedidos realizados por el cliente.
+    - Reconoce variaciones de la solicitud como:
+      * "Quiero ver mis pedidos anteriores"
+      * "Muéstrame mis últimos pedidos"
+      * "Historial de pedidos"
+      * "Ver mis pedidos"
+    - Después de mostrar los pedidos, ofrece asistencia adicional para continuar con un nuevo pedido.
+    
   2. Inicio y Selección de Servicio:
        - Si el cliente solicita la lista completa de servicios o el menú, responde solo con el comando JSON:
          {"command": "LIST_ALL_SERVICES"}
@@ -3838,12 +3917,6 @@ class GoogleSheetService {
             return b.fecha.valueOf() - a.fecha.valueOf();
         });
 
-        // Log detallado del ordenamiento
-        logger.debug('[SearchOrdersByPhone] Pedidos ordenados:');
-        sortedOrders.forEach(order => {
-            logger.debug(`- Fecha: ${order.fechaOriginal}, Email: ${order.correo}`);
-        });
-
         logger.info(`[SearchOrdersByPhone] Encontrados ${sortedOrders.length} pedidos para ${phoneNumber}`);
         
         if (sortedOrders.length > 0) {
@@ -3856,6 +3929,80 @@ class GoogleSheetService {
         throw new CustomError('OrderSearchError', 'Error al buscar pedidos previos', error);
     }
 }
+
+// Nuevo método específico para el historial de pedidos
+async searchOrdersHistory(phoneNumber) {
+  try {
+      logger.info(`[SearchOrdersHistory] Iniciando búsqueda de historial para número ${phoneNumber}`);
+      await this.doc.loadInfo();
+      const sheet = this.doc.sheetsByIndex[1];
+      const rows = await sheet.getRows();
+
+      const allOrders = [];
+
+      rows.forEach(row => {
+          if (row.get('telefono') === phoneNumber) {
+              try {
+                  const fechaStr = row.get('fecha_de_ingreso');
+                  const pedido = row.get('pedido');
+                  const servicio = row.get('nombre_del_servicio');
+                  const estado = row.get('estado_del_proyecto');
+                  let total = row.get('total_iva');
+
+                  // Procesar el total para asegurar que sea un número válido
+                  if (total) {
+                      if (typeof total === 'string') {
+                          // Remover el símbolo de peso y puntos de miles si existen
+                          total = total.replace(/[$\.]/g, '').replace(',', '.');
+                      }
+                      total = parseFloat(total);
+                      if (isNaN(total)) {
+                          logger.warn(`[SearchOrdersHistory] Total inválido encontrado para pedido ${pedido}: ${row.get('total_iva')}`);
+                          total = null;
+                      }
+                  }
+                  
+                  const fecha = moment(fechaStr, 'DD-MM-YYYY HH:mm:ss');
+                  
+                  if (fecha.isValid()) {
+                      allOrders.push({
+                          pedido,
+                          fechaOriginal: fechaStr,
+                          servicio,
+                          estado,
+                          total,
+                          fecha: fecha
+                      });
+                      
+                      logger.debug(`[SearchOrdersHistory] Procesando pedido - ID: ${pedido}, Servicio: ${servicio}, Estado: ${estado}, Total: ${total}`);
+                  } else {
+                      logger.warn(`[SearchOrdersHistory] Fecha inválida encontrada: ${fechaStr}`);
+                  }
+              } catch (error) {
+                  logger.error(`[SearchOrdersHistory] Error procesando fila: ${error.message}`);
+                 
+              }
+          }
+      });
+
+      const sortedOrders = allOrders.sort((a, b) => b.fecha.valueOf() - a.fecha.valueOf());
+      
+      // Limitar a los últimos 10 pedidos
+      const lastTenOrders = sortedOrders.slice(0, 10);
+
+      logger.info(`[SearchOrdersHistory] Encontrados ${lastTenOrders.length} pedidos recientes para ${phoneNumber}`);
+      
+      if (lastTenOrders.length > 0) {
+          logger.info(`[SearchOrdersHistory] Pedido más reciente: ${lastTenOrders[0].pedido} (Fecha: ${lastTenOrders[0].fechaOriginal})`);
+      }
+
+      return lastTenOrders;
+  } catch (error) {
+      logger.error(`[SearchOrdersHistory] Error al buscar historial de pedidos: ${error.message}`);
+      throw new CustomError('OrderHistoryError', 'Error al buscar historial de pedidos', error);
+  }
+}
+
 
 async getLastEmailByPhoneNumber(phoneNumber) {
     try {
@@ -4037,7 +4184,8 @@ const knownCommands = {
   'SET_QUANTITY': ['set quantity', 'setquantity'],
   'SET_FINISHES': ['set finishes', 'setfinishes'],
   'CONFIRM_ORDER': ['confirm order', 'confirmorder'],
-  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis']
+  'RESULT_ANALYSIS': ['result analysis', 'resultanalysis'],
+  'LIST_LAST_ORDERS': ['list last orders', 'listlastorders', 'last orders', 'lastorders'],
 };
 
 export function normalizeCommand(command) {
