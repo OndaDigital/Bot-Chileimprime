@@ -806,54 +806,72 @@ No debes devolver ningún comando en este caso. Responde al usuario de manera qu
     logger.info(`Procesando solicitud de atención humana para usuario ${userId}`);
     
     try {
-      const additionalInfo = userContextManager.getGlobalAdditionalInfo();
-      const responseMessage = this.createHumanAssistanceMessage(additionalInfo.horarios);
-      
-      // Agregar a blacklist y limpiar timers
-      this.addToBlacklist(userId, config.humanBlacklistDuration);
-      this.clearIdleTimer(userId);
-      
-      await flowDynamic(responseMessage);
-      logger.info(`Usuario ${userId} redirigido exitosamente a atención humana`);
-      
-      return {
-        success: true,
-        shouldEnd: true
-      };
+        const additionalInfo = userContextManager.getGlobalAdditionalInfo();
+        
+        // Verificar si hay información adicional disponible
+        if (!additionalInfo) {
+            logger.warn(`No se encontró información adicional para usuario ${userId}`);
+            throw new Error('No se pudo obtener la información adicional');
+        }
+
+        logger.debug(`Información adicional obtenida: ${JSON.stringify(additionalInfo)}`);
+        
+        // Crear el mensaje usando los horarios dinámicos
+        const responseMessage = this.createHumanAssistanceMessage(additionalInfo.horarios);
+        
+        // Agregar a blacklist y limpiar timers
+        this.addToBlacklist(userId, config.humanBlacklistDuration);
+        this.clearIdleTimer(userId);
+        
+        await flowDynamic(responseMessage);
+        logger.info(`Usuario ${userId} redirigido exitosamente a atención humana`);
+        
+        return {
+            success: true,
+            shouldEnd: true
+        };
     } catch (error) {
-      logger.error(`Error al procesar solicitud de atención humana para ${userId}: ${error.message}`);
-      await flowDynamic('Lo siento, ha ocurrido un error. Un agente se pondrá en contacto contigo pronto.');
-      return {
-        success: false,
-        shouldEnd: true,
-        error: error
-      };
+        logger.error(`Error al procesar solicitud de atención humana para ${userId}: ${error.message}`);
+        await flowDynamic('Lo siento, ha ocurrido un error. Un agente se pondrá en contacto contigo pronto.');
+        return {
+            success: false,
+            shouldEnd: true,
+            error: error
+        };
     }
   }
 
   // Nueva función auxiliar para crear el mensaje de atención humana
   createHumanAssistanceMessage(horarios = {}) {
+    logger.info('Creando mensaje de atención humana');
+    
     const defaultHorarios = {
-      'Lunes a viernes': '9:00 - 18:00 hrs',
-      'Sábados': '9:00 - 14:00 hrs'
+        'Lunes a viernes': '09:30 - 20:00',
+        'Sábados': '09:30 - 16:00',
+        'Domingos': 'Cerrado'
     };
 
-    const horariosActuales = {
-      ...defaultHorarios,
-      ...horarios
-    };
+    // Extraer solo los horarios, eliminando el nombre del día duplicado
+    const horariosLimpios = Object.entries(horarios || defaultHorarios).reduce((acc, [dia, valor]) => {
+        // Limpiar específicamente para "Sábados" y otros días
+        const horarioLimpio = valor
+            .replace(/Sábados|Sádados/g, '')  // Eliminar variaciones de "Sábados"
+            .replace(dia, '')                  // Eliminar el nombre del día
+            .trim();                           // Eliminar espacios extra
+        acc[dia] = horarioLimpio;
+        return acc;
+    }, {});
 
     return `👋 Entiendo que prefieres hablar con un agente humano.
 Un representante de nuestro equipo se pondrá en contacto contigo lo antes posible.
 
 ⏰ Horario de atención:
-Lunes a Viernes: ${horariosActuales['Lunes a viernes']}
-Sábados: ${horariosActuales['Sábados']}
+${Object.entries(horariosLimpios)
+    .map(([dia, horario]) => `*${dia}:* ${horario}`)
+    .join('\n')}
 
 🙏 Gracias por tu paciencia.`;
-    }
-
-
+}
 
 
   }
