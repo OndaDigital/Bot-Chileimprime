@@ -46,14 +46,18 @@ class UserContextManager {
       areaServicio: null,
       correo: null, // Añadido para almacenar el correo electrónico del usuario
       correoConfirmed: false, // Para indicar si el correo ha sido confirmado
+      esperandoConfirmacionCorreo: false, // **Añadido**
+      messageProcessed: false, // **Añadido si no estaba ya**
     };
   }
 
-  // Método para actualizar el correo electrónico del usuario
+  // **Modificación: Actualizar método updateCorreo**
   updateCorreo(userId, correo) {
     const userContext = this.getUserContext(userId);
     userContext.currentOrder.correo = correo;
-    logger.info(`Correo electrónico actualizado para usuario ${userId}: ${correo}`);
+    userContext.currentOrder.correoConfirmed = true;
+    userContext.currentOrder.esperandoConfirmacionCorreo = false; // Reset this flag
+    logger.info(`Correo electrónico actualizado y confirmado para usuario ${userId}: ${correo}`);
   }
 
   setInitialMessagesSent(userId, value) {

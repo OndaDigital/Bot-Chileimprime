@@ -394,7 +394,7 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
     try {
       logger.info(`Iniciando proceso de confirmación de orden para usuario ${userId}`);
 
-      // Modificación: Verificar si la orden ya está confirmada
+      // Verificar si la orden ya está confirmada
       if (orderManager.isOrderConfirmed(userId)) {
         logger.warn(`La orden para el usuario ${userId} ya ha sido confirmada. Evitando doble confirmación.`);
         await flowDynamic("✅ Tu pedido ya ha sido confirmado previamente. Si necesitas asistencia adicional, por favor contacta con un representante.");
@@ -402,6 +402,19 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
       }
 
       const currentOrder = userContextManager.getCurrentOrder(userId);
+
+      // **Check if we're waiting for email confirmation**
+      if (currentOrder.esperandoConfirmacionCorreo) {
+        logger.info(`Esperando confirmación de correo para usuario ${userId}. Redirigiendo al flujo de confirmación de correo.`);
+        return { currentOrderUpdated: false, nextFlow: 'emailConfirmationFlow' };
+      }
+
+      // **Check if email has been confirmed**
+      if (!currentOrder.correoConfirmed) {
+        logger.info(`Correo electrónico no confirmado para usuario ${userId}. Iniciando flujo de confirmación de correo.`);
+        currentOrder.esperandoConfirmacionCorreo = true;
+        return { currentOrderUpdated: false, nextFlow: 'emailConfirmationFlow' };
+      }
       
       if (!userContextManager.isOrderComplete(userId)) {
         const missingFields = userContextManager.getIncompleteFields(userId);
@@ -409,25 +422,34 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
         logger.warn(errorMessage);
         throw new CustomError('IncompleteOrderError', errorMessage);
       }
-  
+
       // Añadir información del contexto
       currentOrder.userName = ctx.pushName || 'Cliente';
       currentOrder.userPhone = ctx.from;
-  
+
+      // **Modificación: Verificar si el correo ha sido confirmado**
+      if (!currentOrder.correoConfirmed) {
+        logger.info(`El correo electrónico no ha sido confirmado para el usuario ${userId}. Iniciando flujo de confirmación de correo.`);
+        // Establecer bandera indicando que estamos esperando confirmación de correo
+        currentOrder.esperandoConfirmacionCorreo = true;
+        // Retornar indicando que se debe ir al flujo de confirmación de correo
+        return { currentOrderUpdated: false, nextFlow: 'emailConfirmationFlow' };
+      }
+
       // Calcular precios y actualizar la orden
       const calculatedPrices = orderManager.calculatePrice(currentOrder);
       currentOrder.precioTerminaciones = calculatedPrices.precioTerminaciones;
       currentOrder.precioTotalTerminaciones = calculatedPrices.precioTotalTerminaciones;
       currentOrder.total = calculatedPrices.total;
-  
+
       logger.info(`Precios calculados para la orden: ${JSON.stringify(calculatedPrices)}`);
-  
+
       const result = await orderManager.finalizeOrder(userId, currentOrder);
       
       if (result.success) {
         logger.info(`Pedido confirmado para usuario ${userId}. Número de pedido: ${result.orderNumber}`);
 
-        // Modificación: Enviar resumen de la orden
+        // Enviar resumen de la orden
         const orderSummary = orderManager.formatOrderSummary(currentOrder);
         await flowDynamic(`🎉 ¡Gracias por tu pedido! Tu número de cotización es: *${result.orderNumber}*`);
         await flowDynamic(orderSummary);

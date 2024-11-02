@@ -157,101 +157,39 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
         
         logger.info(`Iniciando flujo de confirmación de correo para usuario ${userId}`);
         
-        try {
-          // Si estamos esperando un nuevo correo, procesarlo directamente
-          if (userContext.currentOrder.esperandoNuevoCorreo) {
-            logger.info(`Procesando nuevo correo para usuario ${userId}: ${ctx.body}`);
-            
-            if (this.validateEmail(ctx.body)) {
-              logger.info(`Nuevo correo válido ingresado por usuario ${userId}: ${ctx.body}`);
-              userContext.currentOrder.correo = ctx.body;
-              userContext.currentOrder.correoConfirmed = true;
-              userContext.currentOrder.esperandoNuevoCorreo = false;
-              userContext.currentOrder.messageProcessed = true; // Nueva bandera
-              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
-              return gotoFlow(this.flows.principalFlow);
+        // **Check if we're waiting for a new email input**
+        if (userContext.currentOrder.esperandoNuevoCorreo) {
+          logger.info(`Esperando nuevo correo de usuario ${userId}: ${ctx.body}`);
+          
+          // **Validate the email**
+          if (this.validateEmail(ctx.body.trim())) {
+            logger.info(`Nuevo correo válido ingresado por usuario ${userId}: ${ctx.body.trim()}`);
+            userContextManager.updateCorreo(userId, ctx.body.trim());
+            userContext.currentOrder.correoConfirmed = true;
+            userContext.currentOrder.esperandoNuevoCorreo = false;
+            userContext.currentOrder.messageProcessed = true;
+            await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
+
+            // **Call handleConfirmOrder again to finalize the order**
+            const result = await commandProcessor.handleConfirmOrder(userId, ctx, { flowDynamic, gotoFlow, endFlow });
+            if (result.nextFlow) {
+              return gotoFlow(this.getFlowByName(result.nextFlow));
             } else {
-              logger.warn(`Correo inválido ingresado por usuario ${userId}: ${ctx.body}`);
-              userContext.currentOrder.messageProcessed = true; // Nueva bandera
-              await flowDynamic('❌ El correo electrónico ingresado no es válido. Por favor, intenta nuevamente:');
               return;
             }
-          }
 
-          // Si el mensaje ya fue procesado, no continuar
-          if (userContext.currentOrder.messageProcessed) {
-            logger.info(`Mensaje ya procesado para usuario ${userId}, omitiendo procesamiento adicional`);
-            userContext.currentOrder.messageProcessed = false; // Reset para el siguiente mensaje
-            return;
-          }
-
-          const orders = await sheetService.searchOrdersByPhone(userId);
-          logger.info(`Buscando pedidos previos para el número ${userId}`);
-
-          if (orders && orders.length > 0) {
-            const email = await sheetService.getLastEmailByPhoneNumber(userId);
-            
-            if (email) {
-              logger.info(`Correo electrónico encontrado para el número ${userId}: ${email}`);
-              userContext.currentOrder.correo = email;
-              userContext.currentOrder.messageProcessed = true; // Nueva bandera
-              await flowDynamic(`👋 Bienvenido de nuevo, antes de continuar necesito que confirmes si tu correo es válido: *${email}*, o si deseas modificarlo.\n\nPor favor, responde con:\n1️⃣ Confirmar y continuar\n2️⃣ Modificar el correo`);
-              return;
-            } else {
-              logger.info(`No se encontró correo para el usuario ${userId}. Solicitando nuevo correo.`);
-              userContext.currentOrder.esperandoNuevoCorreo = true;
-              userContext.currentOrder.messageProcessed = true; // Nueva bandera
-              await flowDynamic('👋 Bienvenido, por favor ingresa tu correo electrónico para continuar:');
-              return;
-            }
           } else {
-            logger.info(`No se encontraron pedidos previos para ${userId}. Solicitando nuevo correo.`);
-            userContext.currentOrder.esperandoNuevoCorreo = true;
-            userContext.currentOrder.messageProcessed = true; // Nueva bandera
-            await flowDynamic('👋 Bienvenido, por favor ingresa tu correo electrónico para continuar:');
+            logger.warn(`Correo inválido ingresado por usuario ${userId}: ${ctx.body}`);
+            userContext.currentOrder.messageProcessed = true;
+            await flowDynamic('❌ El correo electrónico ingresado no es válido. Por favor, intenta nuevamente:');
             return;
           }
-        } catch (error) {
-          logger.error(`Error en createEmailConfirmationFlow para usuario ${userId}: ${error.message}`);
-          await flowDynamic('❌ Ha ocurrido un error al procesar tu correo electrónico. Por favor, intenta nuevamente más tarde.');
-          return endFlow();
-        }
-      })
-      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
-        const userId = ctx.from;
-        const userContext = userContextManager.getUserContext(userId);
-
-        // Si el mensaje ya fue procesado por el primer addAction, no hacer nada
-        if (userContext.currentOrder.messageProcessed) {
-          logger.info(`Mensaje ya procesado en addAction anterior para usuario ${userId}, omitiendo segundo procesamiento`);
+        } else {
+          // **If not waiting for a new email, prompt the user**
+          logger.info(`Solicitando correo electrónico al usuario ${userId}`);
+          userContext.currentOrder.esperandoNuevoCorreo = true;
+          await flowDynamic('Por favor, ingresa tu correo electrónico para continuar:');
           return;
-        }
-
-        const response = ctx.body.trim();
-        logger.info(`Procesando respuesta de usuario ${userId}: ${response}`);
-
-        try {
-          // Si ya tenemos un correo y estamos esperando confirmación
-          if (userContext.currentOrder.correo && !userContext.currentOrder.esperandoNuevoCorreo) {
-            if (response === '1' || response === '1️⃣') {
-              logger.info(`Usuario ${userId} confirmó su correo existente: ${userContext.currentOrder.correo}`);
-              userContext.currentOrder.correoConfirmed = true;
-              userContext.currentOrder.messageProcessed = true;
-              await flowDynamic('✅ ¡Gracias! Continuaremos con el proceso.');
-              return gotoFlow(this.flows.principalFlow);
-            } else if (response === '2' || response === '2️⃣') {
-              logger.info(`Usuario ${userId} eligió modificar su correo`);
-              userContext.currentOrder.esperandoNuevoCorreo = true;
-              userContext.currentOrder.messageProcessed = true;
-              await flowDynamic('Por favor, ingresa tu nuevo correo electrónico:');
-              return;
-            }
-          }
-        } catch (error) {
-          logger.error(`Error procesando respuesta para usuario ${userId}: ${error.message}`);
-          await flowDynamic('❌ Ha ocurrido un error. Por favor, intenta nuevamente.');
-          userContext.currentOrder.esperandoNuevoCorreo = false;
-          return gotoFlow(this.flows.principalFlow);
         }
       });
   }
@@ -265,9 +203,10 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
 
 
 
+  // **Modificación: Remover redirección al flujo de correo al inicio**
   createPrincipalFlow() {
     return addKeyword(EVENTS.WELCOME)
-      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {  // Añadir endFlow aquí
+      .addAction(async (ctx, { flowDynamic, gotoFlow, endFlow }) => {
         const userId = ctx.from;
         const userContext = userContextManager.getUserContext(userId);
   
@@ -276,11 +215,8 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
           return;
         }
   
-        if (!userContext.currentOrder.correoConfirmed) {
-          logger.info(`Redirigiendo a emailConfirmationFlow para usuario ${userId}`);
-          return gotoFlow(this.flows.emailConfirmationFlow);
-        }
-  
+        // Removido: No redirigir al flujo de confirmación de correo al inicio
+
         if (!userContextManager.hasUserInteracted(userId)) {
           await this.handleInitialMessagesOnce(userId, flowDynamic);
         } else {
@@ -463,6 +399,11 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
       try {
         const userContext = userContextManager.getUserContext(userId);
         const chatContext = userContextManager.getChatContext(userId);
+
+        if (userContext.currentOrder.esperandoNuevoCorreo) {
+          logger.info(`Usuario ${userId} está en el flujo de confirmación de correo. Redirigiendo a createEmailConfirmationFlow.`);
+          return gotoFlow(this.getFlowByName('emailConfirmationFlow'));
+        }
   
         let aiResponse = await openaiService.getChatCompletion(
           openaiService.getSystemPrompt(userContext.services, userContext.currentOrder, userContext.additionalInfo, chatContext),
@@ -497,6 +438,13 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
                 await flowDynamic(result.data);
                 responseHandled = true;
               }
+
+              if (result.nextFlow) {
+                logger.info(`Redirigiendo al flujo ${result.nextFlow} para usuario ${userId}`);
+                return gotoFlow(this.getFlowByName(result.nextFlow));
+              }
+
+
             }
           }
   
