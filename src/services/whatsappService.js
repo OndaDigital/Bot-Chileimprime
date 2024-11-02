@@ -104,25 +104,12 @@ class WhatsAppService {
   }
 
   getPromoMessage() {
-    return `🤖 *¡Gracias por probar nuestro Bot de Demostración!* 🚀
+    return `🤖 *¡Gracias por probar nuestro Bot!* 🚀
   
-  Desarrollado con ❤️ por *SuperPyme*
-  
-  🍽️ *Ver Menú y Pedidos:*
-  https://docs.google.com/spreadsheets/d/1ZFq1c0IWbR3prkuZdnbJ_Och-GhxI9iMh56yqYlmAjo/edit?usp=sharing
-  
-  🔒 _Nota: Los números están censurados para proteger la privacidad de nuestros usuarios de prueba._
-  
-  ✨ *¿Quieres un bot así para tu negocio?* ✨
-  
-  📱 Whatsapp: *+56 9 7147 1884*
-  📧 Escríbenos: *oficina@superpyme.cl*
-  🌐 Más información: *superpyme.cl*
-  
-  🚀 *¡Lleva tu negocio al siguiente nivel con SuperPyme!* 💼
-  
-  PD: Puedes volver a probar el bot en 10 minutos, si quieres probarlo de inmediato, escribe desde otro número.`;
+  Desarrollado con ❤️ por *SuperPyme*`;
+
   }
+  
 }
 
 export default new WhatsAppService();
