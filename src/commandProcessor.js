@@ -455,7 +455,8 @@ async handleFileValidationInstruction(ctx, flowDynamic) {
         await flowDynamic(orderSummary);
         await flowDynamic(result.message);
 
-        return { currentOrderUpdated: true, nextFlow: 'promoFlow' };
+        //return { currentOrderUpdated: true, nextFlow: 'promoFlow' }; //Legacy, ya no enviamos la promo
+        return { currentOrderUpdated: true };
       } else {
         throw new Error("Error al confirmar el pedido");
       }
