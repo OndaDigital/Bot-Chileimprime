@@ -124,10 +124,11 @@ Para reiniciar el bot en cualquier momento, simplemente escribe *bot.*` }
                   }
                   break;
                 case 'text':
+                  await new Promise(resolve => setTimeout(resolve, 1000)); // Espera 1 segundo antes de enviar este mensaje
                   await flowDynamic(message.content);
                   break;
               }
-              await new Promise(resolve => setTimeout(resolve, 3000)); // Espera 3 segundos entre mensajes
+              
             }
 
             userContextManager.setInitialMessagesSent(userId, true);
